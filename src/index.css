@@ -161,6 +161,8 @@ button, a, input, select, textarea {
 }
 /* Bangla: Bengali-first font stack and a little more line height so conjuncts don't clip. */
 html[lang="bn"] body { font-family: 'Noto Sans Bengali', 'Inter', system-ui, sans-serif; }
+/* Letter-spacing splits Bangla conjuncts and vowel signs apart; uppercase does nothing for Bangla. */
+html[lang="bn"] body * { letter-spacing: normal !important; }
 html[lang="bn"] body :where(p, span, label, td, th, li, button, h1, h2, h3, h4) { line-height: 1.55; }
 /* Dialog footer buttons (Modal footers) */
 .btn-primary-modal {

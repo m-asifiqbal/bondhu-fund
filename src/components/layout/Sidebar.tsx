@@ -316,7 +316,7 @@ export const Sidebar: React.FC = () => {
             <UserAvatar user={currentUser} className="w-8 h-8 rounded-lg" />
             {!isCollapsed && (
               <span className="flex flex-col text-left min-w-0">
-                <span className="text-xs font-bold text-slate-900 dark:text-white truncate">{currentUser?.full_name || 'â€”'}</span>
+                <span className="text-xs font-bold text-slate-900 dark:text-white truncate">{currentUser?.full_name || '—'}</span>
                 <span className="text-[10px] text-slate-400 dark:text-slate-500 truncate">{tv(currentUser?.role)}</span>
               </span>
             )}

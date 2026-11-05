@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   Wallet, Landmark, HandCoins, AlertTriangle, Building2, Receipt, TrendingUp, TrendingDown, Minus,
   Download, Printer, RefreshCw, Users, CalendarDays, PieChart as PieIcon, Activity, BellRing,
-  ArrowDownLeft, ArrowUpRight, UserPlus, FileWarning, ShieldCheck, Sparkles, DatabaseBackup, Plus,
+  ArrowDownLeft, ArrowUpRight, UserPlus, FileWarning, ShieldCheck, Sparkles, DatabaseBackup, Plus, Timer,
 } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 import { MonthPicker } from '../components/common/MonthPicker';
@@ -43,6 +43,8 @@ const L = {
   hMonth: ['Month', 'মাস'], hRate: ['Rate', 'হার'], hStatus: ['Status', 'অবস্থা'], hIn: ['In', 'আয়'], hSector: ['Sector', 'খাত'], hGain: ['Gain', 'লাভ'],
   hCategory: ['Category', 'খাত'], hAmount: ['Amount', 'পরিমাণ'], hEntries: ['Entries', 'এন্ট্রি'], hDate: ['Date', 'তারিখ'], hPayments: ['Payments', 'পেমেন্ট'],
   hMethod: ['Method', 'মাধ্যম'], hMember: ['Member', 'সদস্য'], hTotal: ['Total', 'মোট'], paidFor: ['paid for', 'পরিশোধ করেছেন —'], joined: ['joined', 'যোগ দিয়েছেন'],
+  lateFees: ['Late fees collected', 'আদায়কৃত বিলম্ব ফি'], lateMonth: ['This month', 'এ মাসে'], lateYear: ['This year', 'এ বছরে'],
+  latePayments: ['late payments', 'টি বিলম্বিত পেমেন্ট'], lateAll: ['All time', 'সর্বমোট'], lateToDate: ['to date', 'পর্যন্ত'], lateLast: ['last month', 'গত মাসে'],
   members_n: ['members', 'জন সদস্য'], gain: ['gain', 'লাভ'], loss: ['loss', 'ক্ষতি'], noData: ['No data for this period yet.', 'এই সময়ের কোনো তথ্য নেই।'],
 };
 type Key = keyof typeof L;
@@ -335,7 +337,7 @@ export const OverviewView: React.FC = () => {
       </div>
 
       {/* KPI tiles */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-6 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
         <Kpi icon={<Wallet size={16} />} label={tr('netWorth')} value={money(k.netWorth)} delta={pct(k.fundBalance, k.prevFundBalance)} deltaLabel={tr('vsLast')} digits={digits} />
         <Kpi icon={<Landmark size={16} />} label={tr('cash')} value={money(k.cashInHand)} delta={pct(k.cashInHand, k.prevCashInHand)} deltaLabel={tr('vsLast')} digits={digits} />
         <Kpi icon={<HandCoins size={16} />} label={tr('collected')} value={money(k.monthCollected)}
@@ -348,6 +350,27 @@ export const OverviewView: React.FC = () => {
           onClick={() => setActiveTab('investments')} />
         <Kpi icon={<Receipt size={16} />} label={tr('expenses')} value={money(k.monthExpenses)} delta={pct(k.monthExpenses, k.prevMonthExpenses)} deltaLabel={tr('vsLast')} invertDelta digits={digits}
           onClick={() => setActiveTab('expenses')} />
+        {/* Late fees: this month + year to date */}
+        <button onClick={() => goCollections('All')} className="card-base p-4 text-left flex flex-col gap-3 min-w-0 sm:col-span-2 hover:shadow-md hover:-translate-y-0.5 cursor-pointer">
+          <div className="flex items-center justify-between gap-2">
+            <span className="text-[11px] font-bold text-slate-500 dark:text-slate-400 truncate">{tr('lateFees')}</span>
+            <span className="w-7 h-7 shrink-0 rounded-lg bg-amber-50 dark:bg-amber-950/50 text-amber-600 dark:text-amber-400 flex items-center justify-center"><Timer size={16} /></span>
+          </div>
+          <div className="grid grid-cols-2 gap-4">
+            <div className="min-w-0">
+              <div className="text-[10px] font-bold uppercase tracking-wide text-slate-400">{tr('lateMonth')} · {fmtMonth(data.month, language as any, true)}</div>
+              <div className="text-xl font-black text-slate-900 dark:text-white tracking-tight tabular-nums truncate">{money(k.monthLateFees)}</div>
+              <div className="text-[11px] text-slate-500 dark:text-slate-400 truncate">{digits(k.monthLateCount)} {tr('latePayments')}
+                · {tr('lateLast')} {money(k.prevMonthLateFees)}
+              </div>
+            </div>
+            <div className="min-w-0 border-l border-slate-200 dark:border-[#22353f] pl-4">
+              <div className="text-[10px] font-bold uppercase tracking-wide text-slate-400">{tr('lateYear')} · {digits(data.month.slice(0, 4))} ({tr('lateToDate')})</div>
+              <div className="text-xl font-black text-slate-900 dark:text-white tracking-tight tabular-nums truncate">{money(k.yearLateFees)}</div>
+              <div className="text-[11px] text-slate-500 dark:text-slate-400 truncate">{digits(k.yearLateCount)} {tr('latePayments')} · {tr('lateAll')} {money(k.lifetimeLateFees)}</div>
+            </div>
+          </div>
+        </button>
       </div>
 
       {/* Collections */}

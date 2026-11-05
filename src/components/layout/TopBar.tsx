@@ -149,10 +149,12 @@ export const TopBar: React.FC = () => {
           type="button"
           onClick={toggleLanguage}
           className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl text-xs font-black ${iconBtn}`}
-          title={t('shell.toggle_language', 'Switch language (English / à¦¬à¦¾à¦‚à¦²à¦¾)')}
+          title={t('shell.toggle_language', 'Switch language (English / বাংলা)')}
         >
           <Globe size={14} className="text-[#0f4a3c] dark:text-emerald-400" />
-          <span className="text-[11px] uppercase tracking-wider font-extrabold">{language === 'en' ? 'à¦¬à¦¾à¦‚à¦²à¦¾' : 'ENG'}</span>
+          {language === 'en'
+            ? <span lang="bn" className="text-[12px] font-bold leading-none" style={{ fontFamily: "'Noto Sans Bengali', sans-serif" }}>বাংলা</span>
+            : <span className="text-[11px] uppercase tracking-wider font-extrabold">ENG</span>}
         </button>
 
         {/* Refresh */}
@@ -333,7 +335,7 @@ export const TopBar: React.FC = () => {
           <button
             type="button"
             onClick={() => setShowProfileMenu(v => !v)}
-            title={currentUser ? `${currentUser.full_name} Â· ${tv(currentUser.role)}` : t('nav.profile', 'My profile')}
+            title={currentUser ? `${currentUser.full_name} · ${tv(currentUser.role)}` : t('nav.profile', 'My profile')}
             aria-label={t('shell.profile_menu', 'Account menu')}
             aria-haspopup="menu"
             aria-expanded={showProfileMenu}

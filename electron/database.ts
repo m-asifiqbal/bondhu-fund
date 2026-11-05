@@ -1475,6 +1475,12 @@ function getOverviewData(month?: string) {
   const invested = Number(inv.inv) || 0, value = Number(inv.val) || 0;
   const monthExpenses = num('SELECT SUM(amount) FROM expenses WHERE substr(expense_date,1,7) = ?', [mk]);
   const prevMonthExpenses = num('SELECT SUM(amount) FROM expenses WHERE substr(expense_date,1,7) = ?', [addMonths(mk, -1)]);
+  // late fees by the month the payment is for (month, previous month, year-to-date, all time)
+  const lateQ = (where: string, params: any[]) => get(`SELECT COALESCE(SUM(late_fee),0) AS v, COUNT(*) AS n FROM collections WHERE late_fee > 0 AND ${where}`, params) || {};
+  const lfMonth = lateQ('payment_month = ?', [mk]);
+  const lfPrev = lateQ('payment_month = ?', [addMonths(mk, -1)]);
+  const lfYear = lateQ('payment_month >= ? AND payment_month <= ?', [`${mk.slice(0, 4)}-01`, mk]);
+  const lfAll = lateQ('1 = 1', []);
 
   // 12-month trend
   const trend = [];
@@ -1529,7 +1535,9 @@ function getOverviewData(month?: string) {
       lifetimeCollected: pos.opening + pos.collected, totalExpenses: pos.expenses, realizedGain: pos.realized,
       monthCollected: ms.collected, prevMonthCollected: prevMs.collected, monthReceived: ms.received,
       monthExpected: ms.expected, collectionRate: ms.rate, prevCollectionRate: prevMs.rate,
-      monthLateFees: ms.lateFees, monthExpenses, prevMonthExpenses, outstanding: ms.outstanding,
+      monthLateFees: Number(lfMonth.v) || 0, monthLateCount: Number(lfMonth.n) || 0, prevMonthLateFees: Number(lfPrev.v) || 0,
+      yearLateFees: Number(lfYear.v) || 0, yearLateCount: Number(lfYear.n) || 0, lifetimeLateFees: Number(lfAll.v) || 0,
+      monthExpenses, prevMonthExpenses, outstanding: ms.outstanding,
       paid: ms.paid, pending: ms.pending, overdue: ms.overdue, dueMembers: ms.total,
       activeMembers: num(`SELECT COUNT(*) FROM members WHERE status='Active'`),
       totalMembers: num('SELECT COUNT(*) FROM members'),

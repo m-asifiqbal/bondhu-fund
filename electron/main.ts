@@ -152,7 +152,38 @@ function createWindow() {
     const own = url.split('#')[0] === mainWindow?.webContents.getURL().split('#')[0];
     if (!own) e.preventDefault();
   });
+  mainWindow.webContents.on('context-menu', (_e, params) => { void showContextMenu(params); });
   mainWindow.on('closed', () => { mainWindow = null; });
+}
+
+/** Right-click menu: Cut / Copy / Paste / Select all in fields, Copy on selected text. Labels follow the app language. */
+async function showContextMenu(params: Electron.ContextMenuParams) {
+  const wc = mainWindow?.webContents;
+  if (!wc) return;
+  const { isEditable, selectionText, editFlags } = params;
+  const hasSelection = selectionText.trim().length > 0;
+  if (!isEditable && !hasSelection) return; // nothing useful to offer on plain UI
+  let bn = false;
+  try { bn = (await wc.executeJavaScript('document.documentElement.lang', true)) === 'bn'; } catch { /* default English */ }
+  const L = (en: string, b: string) => (bn ? b : en);
+  const items: Electron.MenuItemConstructorOptions[] = isEditable
+    ? [
+        { label: L('Undo', 'পূর্বাবস্থা'), role: 'undo', enabled: editFlags.canUndo, accelerator: 'Ctrl+Z' },
+        { label: L('Redo', 'পুনরায় করুন'), role: 'redo', enabled: editFlags.canRedo, accelerator: 'Ctrl+Y' },
+        { type: 'separator' },
+        { label: L('Cut', 'কাটুন'), role: 'cut', enabled: editFlags.canCut, accelerator: 'Ctrl+X' },
+        { label: L('Copy', 'কপি'), role: 'copy', enabled: editFlags.canCopy, accelerator: 'Ctrl+C' },
+        { label: L('Paste', 'পেস্ট'), role: 'paste', enabled: editFlags.canPaste, accelerator: 'Ctrl+V' },
+        { label: L('Delete', 'মুছুন'), role: 'delete', enabled: editFlags.canDelete },
+        { type: 'separator' },
+        { label: L('Select all', 'সব নির্বাচন'), role: 'selectAll', enabled: editFlags.canSelectAll, accelerator: 'Ctrl+A' },
+      ]
+    : [
+        { label: L('Copy', 'কপি'), role: 'copy', accelerator: 'Ctrl+C' },
+        { type: 'separator' },
+        { label: L('Select all', 'সব নির্বাচন'), role: 'selectAll', accelerator: 'Ctrl+A' },
+      ];
+  if (mainWindow) Menu.buildFromTemplate(items).popup({ window: mainWindow });
 }
 
 app.on('window-all-closed', () => app.quit());

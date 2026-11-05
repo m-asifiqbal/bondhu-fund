@@ -220,7 +220,7 @@ export interface OverviewData {
     netWorth: number; prevNetWorth: number; fundBalance: number; prevFundBalance: number;
     cashInHand: number; prevCashInHand: number; lifetimeCollected: number; totalExpenses: number; realizedGain: number;
     monthCollected: number; prevMonthCollected: number; monthReceived: number; monthExpected: number;
-    collectionRate: number; prevCollectionRate: number; monthLateFees: number; monthExpenses: number; prevMonthExpenses: number;
+    collectionRate: number; prevCollectionRate: number; monthLateFees: number; monthLateCount: number; prevMonthLateFees: number; yearLateFees: number; yearLateCount: number; lifetimeLateFees: number; monthExpenses: number; prevMonthExpenses: number;
     outstanding: number; paid: number; pending: number; overdue: number; dueMembers: number;
     activeMembers: number; totalMembers: number; newMembersThisMonth: number;
     invested: number; portfolioValue: number; unrealizedGain: number; investmentCount: number;
