@@ -15,6 +15,11 @@
   }
 }
 
+/* The app shell fills the window exactly; only <main> scrolls. Nothing may stretch the page itself. */
+@media screen {
+  html, body, #root { height: 100%; overflow: hidden; }
+}
+
 /* Custom UI Component Classes */
 @layer components {
   /* High contrast card that will NEVER melt down */

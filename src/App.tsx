@@ -129,7 +129,7 @@ const MainLayout: React.FC = () => {
         <TopBar />
 
         {/* Viewport Scrollable Content */}
-        <main className="flex-1 overflow-y-auto bg-slate-100/80 dark:bg-[#0b1317] transition-colors">
+        <main className="relative flex-1 min-h-0 overflow-y-auto overscroll-contain bg-slate-100/80 dark:bg-[#0b1317] transition-colors">
           <ViewErrorBoundary resetKey={activeTab} t={t}>
             <React.Suspense fallback={<div className="p-8 flex items-center gap-2 text-xs text-slate-500"><RotateCw size={14} className="animate-spin" />{t('common.loading', 'Loading…')}</div>}>
               {renderActiveView()}
