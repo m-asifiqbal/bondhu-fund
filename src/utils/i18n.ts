@@ -145,3 +145,14 @@ export const useTranslation = (lang: AppLanguage) => {
   };
 };
 
+
+// ---------------------------------------------------------------------------
+// Per-area dictionaries (src/locales/*) are merged in; later keys override earlier ones.
+// ---------------------------------------------------------------------------
+import commonDict from '../locales/common';
+import shellDict from '../locales/shell';
+import membersDict from '../locales/members';
+import financeDict from '../locales/finance';
+import reportsDict from '../locales/reports';
+import adminDict from '../locales/admin';
+Object.assign(translations, commonDict, shellDict, membersDict, financeDict, reportsDict, adminDict);

@@ -9,7 +9,7 @@
 import type {
   Member, CollectionRecord, Investment, Expense, AppUser, MasterCategory, BackupRecord,
   OverviewMetrics, AppSettings, AppNotification, OverviewData, MemberStats, CollectionStats,
-  LedgerRow, AuditEntry, SnapshotFile, AppInfo, MemberStatement,
+  LedgerRow, AuditEntry, SnapshotFile, AppInfo, MemberStatement, UserProfile,
 } from '../types';
 
 type Result<T> = { ok: true; data: T } | { ok: false; error: string };
@@ -52,7 +52,7 @@ export async function persistDatabase(): Promise<void> { /* main process saves a
 // Settings -------------------------------------------------------------------
 export const getAppSettings = () => call<AppSettings>('getAppSettings');
 export const saveAppSettings = (s: Partial<AppSettings>) => call<void>('saveAppSettings', s);
-export const setActor = (name: string) => call<void>('setActor', name);
+export const setActor = (name: string, id?: number) => call<void>('setActor', name, id);
 
 // Members --------------------------------------------------------------------
 export const getNextMemberCode = (extra?: Set<string> | string[]) => call<string>('getNextMemberCode', extra ? [...extra] : undefined);
@@ -94,6 +94,7 @@ export const deleteExpense = (id: number) => call<void>('deleteExpense', id);
 
 // Users & master data ----------------------------------------------------------
 export const getUsers = () => call<AppUser[]>('getUsers');
+export const getUserProfile = (id: number) => call<UserProfile>('getUserProfile', id);
 export const addUser = (u: Partial<AppUser>) => call<number>('addUser', u);
 export const updateUser = (id: number, u: Partial<AppUser>) => call<void>('updateUser', id, u);
 export const deleteUser = (id: number) => call<void>('deleteUser', id);

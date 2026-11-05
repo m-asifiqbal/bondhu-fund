@@ -1,8 +1,8 @@
-﻿import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
+import React, { createContext, useContext, useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { Copy, Check, AlertCircle, CheckCircle2, Info, X } from 'lucide-react';
-import { AppUser, AppNotification, NavTab } from '../types';
+import { AppUser, AppNotification, NavTab, AppSettings, MasterCategory } from '../types';
 export type { NavTab };
-import { getUsers, getDynamicNotifications, setActor, getAppSettings, saveAppSettings } from '../services/db';
+import { getUsers, getDynamicNotifications, setActor, getAppSettings, saveAppSettings, getMasterData } from '../services/db';
 import { formatDate as formatDateUtil, formatMonth as formatMonthUtil, monthKeyToName, currentMonthKey } from '../utils/date';
 import { AppLanguage, translations, formatCurrency as formatCurrencyUtil, toBanglaDigits as toBanglaDigitsUtil } from '../utils/i18n';
 
@@ -47,18 +47,36 @@ interface AppContextType {
   formatDate: (iso?: string | null) => string;
   /** '2024-06' or 'June 2024' -> 'Jun 2024' (language aware) */
   formatMonth: (month?: string | null) => string;
+  /** Translate a DATA value for display: master data names (name_bn), statuses, roles, etc. */
+  tv: (value?: string | null) => string;
+  /** Pick the Bangla variant of a record name when language is bn (e.g. member.name_bn). */
+  bnName: (en?: string | null, bn?: string | null) => string;
+  /** Cached settings (incl. org_logo); refreshed on triggerRefresh(). */
+  settings: AppSettings | null;
+  /** Organization name in the current language. */
+  orgName: string;
+  /** Cached active+inactive master data. */
+  masterData: MasterCategory[];
+  /** Open the profile page for a user (own profile when id omitted). */
+  openProfile: (userId?: number) => void;
+  profileUserId: number | null;
 }
 
 const AppContext = createContext<AppContextType | undefined>(undefined);
+
+/** Fixed data values that appear in records (statuses, roles, types) → translation keys. */
+const VALUE_KEYS: Record<string, string> = {
+  Paid: 'status.paid', Pending: 'status.pending', Overdue: 'status.overdue', Active: 'status.active', Inactive: 'status.inactive',
+  Verified: 'status.verified', 'Needs receipt': 'status.needs_receipt', Growing: 'status.growing', Review: 'status.review', Sold: 'status.sold',
+  Admin: 'role.admin', Treasurer: 'role.treasurer', Auditor: 'role.auditor', Manager: 'role.manager', Member: 'role.member',
+  Manual: 'backup.manual', Automatic: 'backup.automatic', 'Pre-Restore': 'backup.pre_restore', Restored: 'backup.restored',
+  collection: 'ledger.collection', expense: 'ledger.expense', investment: 'ledger.investment', sale: 'ledger.sale',
+};
 
 export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [activeTab, setActiveTab] = useState<NavTab>('overview');
   const [selectedMonth, setSelectedMonth] = useState(() => monthKeyToName(currentMonthKey()));
   const [currentUser, setCurrentUserState] = useState<AppUser | null>(null);
-  const setCurrentUser = (u: AppUser) => {
-    setCurrentUserState(u);
-    saveAppSettings({ active_user_id: u.id }).catch(() => undefined);
-  };
   const [users, setUsers] = useState<AppUser[]>([]);
   const [refreshKey, setRefreshKey] = useState(0);
   const [toasts, setToasts] = useState<ToastInfo[]>([]);
@@ -71,174 +89,150 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [memberFilterStatus, setMemberFilterStatus] = useState<string>('All');
   const [selectedMemberIdForPayment, setSelectedMemberIdForPayment] = useState<number | null>(null);
   const [copiedToastId, setCopiedToastId] = useState<number | null>(null);
+  const [settings, setSettings] = useState<AppSettings | null>(null);
+  const [masterData, setMasterData] = useState<MasterCategory[]>([]);
+  const [profileUserId, setProfileUserId] = useState<number | null>(null);
 
-  // Night Mode state & persistence
   const [isDarkMode, setIsDarkMode] = useState<boolean>(() => {
-    return localStorage.getItem('bondhu_dark_mode') === 'true';
+    try { return localStorage.getItem('bondhu_dark_mode') === 'true'; } catch { return false; }
   });
-
-  // Language state & persistence (Bangla support)
   const [language, setLanguageState] = useState<AppLanguage>(() => {
-    return (localStorage.getItem('bondhu_language') as AppLanguage) || 'en';
+    try { return (localStorage.getItem('bondhu_language') as AppLanguage) || 'en'; } catch { return 'en'; }
   });
 
-  const setLanguage = (lang: AppLanguage) => {
+  const setLanguage = useCallback((lang: AppLanguage) => {
     setLanguageState(lang);
-    localStorage.setItem('bondhu_language', lang);
-  };
+    try { localStorage.setItem('bondhu_language', lang); } catch { /* ignore */ }
+  }, []);
+  const toggleLanguage = useCallback(() => setLanguage(language === 'en' ? 'bn' : 'en'), [language, setLanguage]);
 
-  const toggleLanguage = () => {
-    setLanguage(language === 'en' ? 'bn' : 'en');
-  };
+  // Bangla font/line-height tweaks hook off this attribute (see index.css).
+  useEffect(() => { document.documentElement.lang = language; }, [language]);
 
   const t = useCallback((key: string, fallback?: string): string => {
-    if (translations[key]) {
-      return translations[key][language] || translations[key].en;
-    }
+    const tr = translations[key];
+    if (tr) return tr[language] || tr.en;
     return fallback || key;
   }, [language]);
 
-  const formatCurrency = useCallback((amount: number): string => {
-    return formatCurrencyUtil(amount, language);
-  }, [language]);
-
-  const toBanglaDigits = useCallback((val: string | number): string => {
-    return toBanglaDigitsUtil(val);
-  }, []);
-
-  useEffect(() => {
-    if (isDarkMode) {
-      document.documentElement.classList.add('dark');
-    } else {
-      document.documentElement.classList.remove('dark');
-    }
-    localStorage.setItem('bondhu_dark_mode', String(isDarkMode));
-  }, [isDarkMode]);
-
-  const toggleDarkMode = () => setIsDarkMode(prev => !prev);
-
-  const triggerRefresh = () => setRefreshKey(k => k + 1);
-
-  const showToast = (message: string, type: 'success' | 'error' | 'info' = 'success') => {
-    const id = Date.now();
-    setToasts(prev => [...prev, { id, message, type }]);
-    // Keep error visible longer (12 seconds) so user has time to read and copy
-    const duration = type === 'error' ? 12000 : 4000;
-    setTimeout(() => {
-      setToasts(prev => prev.filter(t => t.id !== id));
-    }, duration);
-  };
-
-  const handleCopyToast = (id: number, text: string) => {
-    if (navigator.clipboard && navigator.clipboard.writeText) {
-      navigator.clipboard.writeText(text);
-    } else {
-      const textarea = document.createElement('textarea');
-      textarea.value = text;
-      document.body.appendChild(textarea);
-      textarea.select();
-      document.execCommand('copy');
-      document.body.removeChild(textarea);
-    }
-    setCopiedToastId(id);
-    setTimeout(() => setCopiedToastId(null), 2500);
-  };
-
-  const dismissToast = (id: number) => {
-    setToasts(prev => prev.filter(t => t.id !== id));
-  };
-
+  const formatCurrency = useCallback((amount: number) => formatCurrencyUtil(amount, language), [language]);
+  const toBanglaDigits = useCallback((val: string | number) => toBanglaDigitsUtil(val), []);
   const formatDate = useCallback((iso?: string | null) => formatDateUtil(iso, language), [language]);
   const formatMonth = useCallback((month?: string | null) => formatMonthUtil(month, language), [language]);
 
+  const masterBn = useMemo(() => {
+    const m = new Map<string, string>();
+    for (const x of masterData) if (x.name_bn) m.set(x.name, x.name_bn);
+    return m;
+  }, [masterData]);
+
+  const tv = useCallback((value?: string | null): string => {
+    if (value === null || value === undefined || value === '') return '';
+    if (language !== 'bn') return value;
+    const mb = masterBn.get(value);
+    if (mb) return mb;
+    const key = VALUE_KEYS[value];
+    return key ? t(key, value) : value;
+  }, [language, masterBn, t]);
+
+  const bnName = useCallback((en?: string | null, bn?: string | null) => (language === 'bn' && bn ? bn : en || ''), [language]);
+
   useEffect(() => {
+    document.documentElement.classList.toggle('dark', isDarkMode);
+    try { localStorage.setItem('bondhu_dark_mode', String(isDarkMode)); } catch { /* ignore */ }
+  }, [isDarkMode]);
+
+  const toggleDarkMode = useCallback(() => setIsDarkMode(prev => !prev), []);
+  const triggerRefresh = useCallback(() => setRefreshKey(k => k + 1), []);
+
+  const toastSeq = useRef(0);
+  const showToast = useCallback((message: string, type: 'success' | 'error' | 'info' = 'success') => {
+    const id = Date.now() * 100 + (toastSeq.current++ % 100);
+    setToasts(prev => [...prev.slice(-4), { id, message, type }]);
+    setTimeout(() => setToasts(prev => prev.filter(x => x.id !== id)), type === 'error' ? 12000 : 4000);
+  }, []);
+
+  const handleCopyToast = (id: number, text: string) => {
+    navigator.clipboard?.writeText(text).catch(() => undefined);
+    setCopiedToastId(id);
+    setTimeout(() => setCopiedToastId(null), 2500);
+  };
+  const dismissToast = (id: number) => setToasts(prev => prev.filter(x => x.id !== id));
+
+  const setCurrentUser = useCallback((u: AppUser) => {
+    setCurrentUserState(u);
+    saveAppSettings({ active_user_id: u.id }).catch(() => undefined);
+  }, []);
+
+  const openProfile = useCallback((userId?: number) => {
+    setProfileUserId(userId ?? null);
+    setActiveTab('profile' as NavTab);
+  }, []);
+
+  // One round-trip on start and on every refresh: users, settings, master data, notifications.
+  useEffect(() => {
+    let cancelled = false;
     (async () => {
       try {
-        const [list, settings] = await Promise.all([getUsers(), getAppSettings()]);
+        const [list, s, md] = await Promise.all([getUsers(), getAppSettings(), getMasterData()]);
+        if (cancelled) return;
         setUsers(list);
+        setSettings(s);
+        setMasterData(md);
         const active = list.filter(u => u.status === 'Active');
-        const pick = (currentUser && list.find(u => u.id === currentUser.id))
-          || list.find(u => u.id === settings.active_user_id)
-          || active[0] || list[0] || null;
-        if (pick) setCurrentUserState(pick);
+        setCurrentUserState(prev =>
+          (prev && list.find(u => u.id === prev.id)) || list.find(u => u.id === s.active_user_id) || active[0] || list[0] || null);
       } catch (e: any) {
-        showToast(`Could not load users: ${e.message}`, 'error');
+        showToast(`Could not load app data: ${e.message}`, 'error');
       }
-      getDynamicNotifications().then(setNotifications).catch(() => setNotifications([]));
+      getDynamicNotifications().then(n => { if (!cancelled) setNotifications(n); }).catch(() => setNotifications([]));
     })();
-  }, [refreshKey]);
+    return () => { cancelled = true; };
+  }, [refreshKey, showToast]);
 
   // Every change written to the database is attributed to the active profile (audit log).
   useEffect(() => {
-    if (currentUser) setActor(`${currentUser.full_name} (${currentUser.role})`).catch(() => undefined);
-  }, [currentUser?.id]);
+    if (currentUser) setActor(`${currentUser.full_name} (${currentUser.role})`, currentUser.id).catch(() => undefined);
+  }, [currentUser?.id, currentUser?.full_name, currentUser?.role]);
 
   // Surface unexpected async errors instead of failing silently.
   useEffect(() => {
-    const onRejection = (e: PromiseRejectionEvent) => {
-      const msg = e.reason?.message || String(e.reason);
-      showToast(msg, 'error');
-    };
+    const onRejection = (e: PromiseRejectionEvent) => showToast(e.reason?.message || String(e.reason), 'error');
     window.addEventListener('unhandledrejection', onRejection);
     return () => window.removeEventListener('unhandledrejection', onRejection);
-  }, []);
+  }, [showToast]);
 
   const persistRead = (s: Set<string>) => {
     try { localStorage.setItem('bondhu_read_notifs', JSON.stringify([...s].slice(-200))); } catch { /* ignore */ }
     return s;
   };
+  const markNotificationRead = useCallback((id: string) => setReadNotifIds(prev => persistRead(new Set(prev).add(id))), []);
+  const markAllNotificationsRead = useCallback(
+    () => setReadNotifIds(prev => persistRead(new Set([...prev, ...notifications.map(n => n.id)]))), [notifications]);
 
-  const markNotificationRead = (id: string) => {
-    setReadNotifIds(prev => persistRead(new Set(prev).add(id)));
-  };
+  const notificationsWithRead = useMemo(() => notifications.map(n => ({ ...n, isRead: readNotifIds.has(n.id) })), [notifications, readNotifIds]);
+  const unreadNotificationCount = useMemo(() => notifications.filter(n => !readNotifIds.has(n.id)).length, [notifications, readNotifIds]);
+  const orgName = (language === 'bn' && settings?.organization_name_bn) || settings?.organization_name || 'Bondhu Fund';
 
-  const markAllNotificationsRead = () => {
-    setReadNotifIds(prev => persistRead(new Set([...prev, ...notifications.map(n => n.id)])));
-  };
-
-  const unreadNotificationCount = notifications.filter(n => !readNotifIds.has(n.id)).length;
+  // Memoized so consumers only re-render when something they could use actually changed (toasts excluded).
+  const value = useMemo<AppContextType>(() => ({
+    activeTab, setActiveTab, selectedMonth, setSelectedMonth, currentUser, setCurrentUser, users, refreshKey, triggerRefresh,
+    showToast, openRecordModal, setOpenRecordModal, entryCenterInitialTab, setEntryCenterInitialTab,
+    notifications: notificationsWithRead, unreadNotificationCount, markNotificationRead, markAllNotificationsRead,
+    memberFilterStatus, setMemberFilterStatus, selectedMemberIdForPayment, setSelectedMemberIdForPayment,
+    isDarkMode, toggleDarkMode, language, setLanguage, toggleLanguage, t, formatCurrency, toBanglaDigits, formatDate, formatMonth,
+    tv, bnName, settings, orgName, masterData, openProfile, profileUserId,
+  }), [activeTab, selectedMonth, currentUser, setCurrentUser, users, refreshKey, triggerRefresh, showToast, openRecordModal,
+    entryCenterInitialTab, notificationsWithRead, unreadNotificationCount, markNotificationRead, markAllNotificationsRead,
+    memberFilterStatus, selectedMemberIdForPayment, isDarkMode, toggleDarkMode, language, setLanguage, toggleLanguage, t,
+    formatCurrency, toBanglaDigits, formatDate, formatMonth, tv, bnName, settings, orgName, masterData, openProfile, profileUserId]);
 
   return (
-    <AppContext.Provider
-      value={{
-        activeTab,
-        setActiveTab,
-        selectedMonth,
-        setSelectedMonth,
-        currentUser,
-        setCurrentUser,
-        users,
-        refreshKey,
-        triggerRefresh,
-        showToast,
-        openRecordModal,
-        setOpenRecordModal,
-        entryCenterInitialTab,
-        setEntryCenterInitialTab,
-        notifications: notifications.map(n => ({ ...n, isRead: readNotifIds.has(n.id) })),
-        unreadNotificationCount,
-        markNotificationRead,
-        markAllNotificationsRead,
-        memberFilterStatus,
-        setMemberFilterStatus,
-        selectedMemberIdForPayment,
-        setSelectedMemberIdForPayment,
-        isDarkMode,
-        toggleDarkMode,
-        language,
-        setLanguage,
-        toggleLanguage,
-        t,
-        formatCurrency,
-        toBanglaDigits,
-        formatDate,
-        formatMonth,
-      }}
-    >
+    <AppContext.Provider value={value}>
       {children}
 
       {/* Global Toast & Error Shower Container with Copy Support */}
-      <div className="fixed bottom-5 right-5 z-50 flex flex-col gap-2 max-w-md pointer-events-none">
+      <div className="fixed bottom-5 right-5 z-[1100] flex flex-col gap-2 max-w-md pointer-events-none">
         {toasts.map(toast => {
           const isError = toast.type === 'error';
           const isCopied = copiedToastId === toast.id;

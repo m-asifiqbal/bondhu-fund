@@ -15,7 +15,7 @@ import * as path from 'path';
 import initSqlJs from 'sql.js';
 import type { Database, SqlJsStatic } from 'sql.js';
 
-export const SCHEMA_VERSION = 1;
+export const SCHEMA_VERSION = 2;
 
 let SQL: SqlJsStatic;
 let db: Database;
@@ -69,9 +69,37 @@ function mutated() {
   saveTimer = setTimeout(flush, 250);
 }
 
+let actorId: number | null = null;
+
 function audit(action: string, entity: string, entityId: number | null, details = '') {
-  run(`INSERT INTO audit_log (user_name, action, entity, entity_id, details) VALUES (?,?,?,?,?)`,
-    [actor, action, entity, entityId, details]);
+  run(`INSERT INTO audit_log (user_name, user_id, action, entity, entity_id, details) VALUES (?,?,?,?,?,?)`,
+    [actor, actorId, action, entity, entityId, details]);
+}
+
+/** Adds a column if it is missing (idempotent migrations that work on fresh, v1 and prototype DBs). */
+function addColumn(table: string, column: string, def: string) {
+  if (!all(`PRAGMA table_info(${table})`).some(c => c.name === column)) run(`ALTER TABLE ${table} ADD COLUMN ${column} ${def}`);
+}
+
+/** Schema v2: profiles, sign-in ready columns (unused until sign-in is enabled), Bangla names, audit user id. */
+function ensureV2Columns() {
+  for (const [c, d] of [
+    ['phone', 'TEXT'], ['designation', 'TEXT'], ['address', 'TEXT'], ['bio', 'TEXT'], ['avatar', 'TEXT'],
+    ['password_hash', 'TEXT'], ['password_salt', 'TEXT'], ['must_change_password', 'INTEGER NOT NULL DEFAULT 0'],
+    ['failed_logins', 'INTEGER NOT NULL DEFAULT 0'], ['last_login_at', 'TEXT'], ['updated_at', 'TEXT'],
+  ]) addColumn('users', c, d);
+  addColumn('members', 'name_bn', 'TEXT');
+  addColumn('master_data', 'name_bn', 'TEXT');
+  for (const [, n, , bn] of DEFAULT_MASTER) run('UPDATE master_data SET name_bn = ? WHERE name = ? AND name_bn IS NULL', [bn, n]);
+  addColumn('audit_log', 'user_id', 'INTEGER');
+  run('CREATE INDEX IF NOT EXISTS idx_audit_user ON audit_log(user_id, id)');
+}
+
+/** Image data URLs (avatar/logo) are stored inline; keep them small. */
+function checkImage(v: any, label: string) {
+  if (v === undefined || v === null || v === '') return;
+  if (typeof v !== 'string' || !/^data:image\/(png|jpe?g|webp|svg\+xml);base64,/.test(v)) fail(`${label} must be a PNG, JPG, WEBP or SVG image.`);
+  if (v.length > 800_000) fail(`${label} is too large. Please use an image under 500 KB.`);
 }
 
 function fail(msg: string): never {
@@ -205,32 +233,34 @@ const DEFAULT_SETTINGS: Record<string, string> = {
   active_user_id: '1',
   auto_backup_enabled: '1',
   auto_backup_keep: '14',
+  organization_name_bn: '',
+  org_logo: '',
 };
 
-const DEFAULT_MASTER: Array<[string, string, string]> = [
-  ['expense_category', 'Meetup & Events', 'Annual and monthly gatherings'],
-  ['expense_category', 'Office & Supplies', 'Stationery, printing'],
-  ['expense_category', 'Legal & Documentation', 'Deeds, mutation, lawyer fees'],
-  ['expense_category', 'Bank Charges', 'Transfer and account fees'],
-  ['expense_category', 'Maintenance', 'Property upkeep'],
-  ['expense_category', 'Emergency Support', 'Member welfare support'],
-  ['investment_sector', 'Land', 'Land purchase'],
-  ['investment_sector', 'Flat', 'Residential or commercial flat'],
-  ['investment_sector', 'Plot', 'Residential plot'],
-  ['investment_sector', 'Fixed Deposit', 'Bank FDR / savings certificate'],
-  ['investment_sector', 'Business Assets', 'Machinery, vehicles, shared assets'],
-  ['payment_method', 'Cash', ''],
-  ['payment_method', 'Bank transfer', ''],
-  ['payment_method', 'bKash', ''],
-  ['payment_method', 'Nagad', ''],
-  ['payment_method', 'Rocket', ''],
-  ['payment_method', 'Cheque', ''],
+const DEFAULT_MASTER: Array<[string, string, string, string]> = [
+  ['expense_category', 'Meetup & Events', 'Annual and monthly gatherings', 'সভা ও অনুষ্ঠান'],
+  ['expense_category', 'Office & Supplies', 'Stationery, printing', 'অফিস ও সরঞ্জাম'],
+  ['expense_category', 'Legal & Documentation', 'Deeds, mutation, lawyer fees', 'আইনি ও দলিলপত্র'],
+  ['expense_category', 'Bank Charges', 'Transfer and account fees', 'ব্যাংক চার্জ'],
+  ['expense_category', 'Maintenance', 'Property upkeep', 'রক্ষণাবেক্ষণ'],
+  ['expense_category', 'Emergency Support', 'Member welfare support', 'জরুরি সহায়তা'],
+  ['investment_sector', 'Land', 'Land purchase', 'জমি'],
+  ['investment_sector', 'Flat', 'Residential or commercial flat', 'ফ্ল্যাট'],
+  ['investment_sector', 'Plot', 'Residential plot', 'প্লট'],
+  ['investment_sector', 'Fixed Deposit', 'Bank FDR / savings certificate', 'স্থায়ী আমানত (এফডিআর)'],
+  ['investment_sector', 'Business Assets', 'Machinery, vehicles, shared assets', 'ব্যবসায়িক সম্পদ'],
+  ['payment_method', 'Cash', '', 'নগদ'],
+  ['payment_method', 'Bank transfer', '', 'ব্যাংক ট্রান্সফার'],
+  ['payment_method', 'bKash', '', 'বিকাশ'],
+  ['payment_method', 'Nagad', '', 'নগদ (মোবাইল)'],
+  ['payment_method', 'Rocket', '', 'রকেট'],
+  ['payment_method', 'Cheque', '', 'চেক'],
 ];
 
 function ensureDefaults() {
   for (const [k, v] of Object.entries(DEFAULT_SETTINGS)) run('INSERT OR IGNORE INTO app_settings (key, value) VALUES (?,?)', [k, v]);
   if (num('SELECT COUNT(*) FROM master_data') === 0) {
-    for (const [t, n, d] of DEFAULT_MASTER) run('INSERT OR IGNORE INTO master_data (type, name, description) VALUES (?,?,?)', [t, n, d]);
+    for (const [t, n, d, bn] of DEFAULT_MASTER) run('INSERT OR IGNORE INTO master_data (type, name, description, name_bn) VALUES (?,?,?,?)', [t, n, d, bn]);
   }
   if (num('SELECT COUNT(*) FROM users') === 0) {
     run(`INSERT INTO users (username, full_name, email, role, avatar_initials) VALUES ('admin','Administrator','', 'Admin','AD')`);
@@ -252,6 +282,7 @@ function migrate(target: Database) {
     }
     // future: if (version < 2) { ... }
     run(SCHEMA); // idempotent: creates any missing table/index
+    ensureV2Columns();
     ensureDefaults();
     run(`PRAGMA user_version = ${SCHEMA_VERSION}`);
     run('PRAGMA foreign_keys = ON');
@@ -399,7 +430,7 @@ export function replaceWith(bytes: Buffer) {
   flush();
 }
 
-export function setActor(name: string) { actor = name || 'System'; }
+export function setActor(name: string, id?: number | null) { actor = name || 'System'; actorId = id ?? null; }
 
 // ---------------------------------------------------------------------------
 // Settings
@@ -424,6 +455,8 @@ function getAppSettings() {
     active_user_id: Number(s.active_user_id),
     auto_backup_enabled: s.auto_backup_enabled === '1',
     auto_backup_keep: Number(s.auto_backup_keep) || 14,
+    organization_name_bn: s.organization_name_bn || '',
+    org_logo: s.org_logo || '',
   };
 }
 
@@ -434,6 +467,7 @@ function saveAppSettings(patch: Record<string, any>) {
       const val = typeof v === 'boolean' ? (v ? '1' : '0') : String(v ?? '');
       if (['default_monthly_due', 'late_fee_amount'].includes(k) && (isNaN(+val) || +val < 0)) fail(`${k} must be a positive number`);
       if (k === 'monthly_due_day' && (!(+val >= 1 && +val <= 28))) fail('Due day must be between 1 and 28');
+      if (k === 'org_logo') checkImage(val, 'Logo');
       run('INSERT OR REPLACE INTO app_settings (key, value) VALUES (?,?)', [k, val]);
     }
     audit('update', 'settings', null, Object.keys(patch || {}).join(', '));
@@ -521,7 +555,7 @@ function getMembers(search = '', status = 'All', page = 1, limit = 10, month?: s
     WITH paid AS (SELECT member_id, SUM(contribution_amount) s, MAX(payment_date) last FROM collections GROUP BY member_id),
          cur AS (SELECT member_id, id FROM collections WHERE payment_month = ?)
     SELECT m.id, m.member_code, m.name, m.phone, m.email, m.designation, m.status, m.monthly_due, m.join_date,
-           m.avatar_initials, m.notes, m.opening_balance,
+           m.avatar_initials, m.notes, m.opening_balance, m.name_bn,
            m.opening_balance + COALESCE(p.s,0) AS total_contributed, p.last AS last_payment_date,
            CASE WHEN cur.id IS NOT NULL THEN 'Paid'
                 WHEN m.status != 'Active' OR substr(m.join_date,1,7) > ? THEN NULL
@@ -532,9 +566,9 @@ function getMembers(search = '', status = 'All', page = 1, limit = 10, month?: s
   const where: string[] = [];
   const params: any[] = [];
   if (search?.trim()) {
-    where.push('(name LIKE ? OR phone LIKE ? OR member_code LIKE ? OR email LIKE ?)');
+    where.push('(name LIKE ? OR name_bn LIKE ? OR phone LIKE ? OR member_code LIKE ? OR email LIKE ?)');
     const q = `%${search.trim()}%`;
-    params.push(q, q, q, q);
+    params.push(q, q, q, q, q);
   }
   if (status && status !== 'All') {
     if (status === 'Active' || status === 'Inactive') { where.push('status = ?'); params.push(status); }
@@ -559,7 +593,7 @@ function getMembers(search = '', status = 'All', page = 1, limit = 10, month?: s
 }
 
 function getAllMembersLite() {
-  return all(`SELECT id, member_code, name, phone, monthly_due, status, avatar_initials FROM members ORDER BY name COLLATE NOCASE`);
+  return all(`SELECT id, member_code, name, name_bn, phone, monthly_due, status, avatar_initials FROM members ORDER BY name COLLATE NOCASE`);
 }
 
 function validateMember(d: any) {
@@ -574,9 +608,9 @@ function addMember(d: any) {
   if (!code || get('SELECT 1 FROM members WHERE member_code = ?', [code])) code = getNextMemberCode();
   const name = d.name.trim();
   const id = tx(() => {
-    run(`INSERT INTO members (member_code, name, phone, email, designation, status, monthly_due, join_date, avatar_initials, opening_balance, notes)
-         VALUES (?,?,?,?,?,?,?,?,?,?,?)`,
-      [code, name, d.phone?.trim() || '', d.email?.trim() || '', d.designation || 'Member', d.status || 'Active',
+    run(`INSERT INTO members (member_code, name, name_bn, phone, email, designation, status, monthly_due, join_date, avatar_initials, opening_balance, notes)
+         VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`,
+      [code, name, d.name_bn?.trim() || null, d.phone?.trim() || '', d.email?.trim() || '', d.designation || 'Member', d.status || 'Active',
         d.monthly_due !== undefined && d.monthly_due !== '' ? Number(d.monthly_due) : Number(s.default_monthly_due),
         toISODate(d.join_date) || todayISO(), d.avatar_initials || initials(name),
         Number(d.opening_balance ?? d.total_contributed) || 0, d.notes || '']);
@@ -592,7 +626,7 @@ function updateMember(id: number, d: any) {
   if (!get('SELECT 1 FROM members WHERE id = ?', [id])) fail('Member not found.');
   if (d.name !== undefined) validateMember(d);
   const fields: Record<string, any> = {
-    name: d.name?.trim(), phone: d.phone, email: d.email, designation: d.designation, status: d.status,
+    name: d.name?.trim(), name_bn: d.name_bn !== undefined ? (String(d.name_bn).trim() || null) : undefined, phone: d.phone, email: d.email, designation: d.designation, status: d.status,
     monthly_due: d.monthly_due !== undefined ? Number(d.monthly_due) : undefined,
     join_date: d.join_date ? toISODate(d.join_date) : undefined, notes: d.notes,
     opening_balance: d.opening_balance !== undefined ? Number(d.opening_balance) : undefined,
@@ -912,7 +946,34 @@ function deleteExpense(id: number) {
 // ---------------------------------------------------------------------------
 // Users & master data
 // ---------------------------------------------------------------------------
-const getUsers = () => all('SELECT * FROM users ORDER BY id');
+// Never send credential columns to the renderer.
+const USER_COLS = `id, username, full_name, email, role, avatar_initials, status, created_at, phone, designation, address, bio, avatar,
+  last_login_at, updated_at, (password_hash IS NOT NULL) AS has_password`;
+const getUsers = () => all(`SELECT ${USER_COLS} FROM users ORDER BY id`);
+
+/** Profile page: user + activity statistics from the audit log. */
+function getUserProfile(id: number) {
+  const user = get(`SELECT ${USER_COLS} FROM users WHERE id = ?`, [id]);
+  if (!user) fail('User not found.');
+  const byAction = all(`SELECT action, entity, COUNT(*) AS count FROM audit_log WHERE user_id = ? GROUP BY action, entity ORDER BY count DESC`, [id]);
+  const span = get(`SELECT MIN(at) AS first_at, MAX(at) AS last_at, COUNT(*) AS total FROM audit_log WHERE user_id = ?`, [id]) || {};
+  const monthly = all(`SELECT substr(at,1,7) AS month, COUNT(*) AS count FROM audit_log WHERE user_id = ? AND at >= ? GROUP BY month ORDER BY month`,
+    [id, `${addMonths(currentMonthKey(), -11)}-01`]);
+  const paymentsRecorded = num(`SELECT COUNT(*) FROM audit_log WHERE user_id = ? AND action = 'payment'`, [id]);
+  const amountCollected = num(`SELECT SUM(c.total_amount) FROM collections c WHERE c.id IN (SELECT entity_id FROM audit_log WHERE user_id = ? AND action = 'payment')`, [id]);
+  return {
+    user,
+    stats: {
+      totalActions: Number(span.total) || 0, firstActivity: span.first_at || null, lastActivity: span.last_at || null,
+      paymentsRecorded, amountCollected,
+      expensesEntered: byAction.filter(a => a.entity === 'expense' && a.action === 'create').reduce((s, a) => s + a.count, 0),
+      membersAdded: byAction.filter(a => a.entity === 'member' && (a.action === 'create' || a.action === 'import')).reduce((s, a) => s + a.count, 0),
+    },
+    byAction,
+    monthly,
+    recent: all(`SELECT id, at, action, entity, entity_id, details FROM audit_log WHERE user_id = ? ORDER BY id DESC LIMIT 50`, [id]),
+  };
+}
 
 function addUser(u: any) {
   const username = String(u?.username || '').trim().toLowerCase();
@@ -920,8 +981,10 @@ function addUser(u: any) {
   if (!u.full_name?.trim()) fail('Full name is required.');
   if (get('SELECT 1 FROM users WHERE username = ?', [username])) fail(`Username "${username}" is already taken.`);
   const id = tx(() => {
-    run('INSERT INTO users (username, full_name, email, role, avatar_initials, status) VALUES (?,?,?,?,?,?)',
-      [username, u.full_name.trim(), u.email?.trim() || '', u.role || 'Manager', u.avatar_initials || initials(u.full_name), u.status || 'Active']);
+    checkImage(u.avatar, 'Profile picture');
+    run('INSERT INTO users (username, full_name, email, role, avatar_initials, status, phone, designation, address, bio, avatar) VALUES (?,?,?,?,?,?,?,?,?,?,?)',
+      [username, u.full_name.trim(), u.email?.trim() || '', u.role || 'Manager', u.avatar_initials || initials(u.full_name), u.status || 'Active',
+        u.phone || '', u.designation || '', u.address || '', u.bio || '', u.avatar || null]);
     const nid = lastId();
     audit('create', 'user', nid, username);
     return nid;
@@ -935,8 +998,14 @@ function updateUser(id: number, u: any) {
   if (!cur) fail('User not found.');
   const demotingAdmin = cur.role === 'Admin' && ((u.role && u.role !== 'Admin') || u.status === 'Inactive');
   if (demotingAdmin && num(`SELECT COUNT(*) FROM users WHERE role='Admin' AND status='Active'`) <= 1) fail('At least one active Admin is required.');
+  if (u.full_name !== undefined && !String(u.full_name).trim()) fail('Full name is required.');
+  if (u.email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(u.email)) fail('Please enter a valid email address.');
+  checkImage(u.avatar, 'Profile picture');
   const f: Record<string, any> = { full_name: u.full_name?.trim(), email: u.email, role: u.role, status: u.status,
+    phone: u.phone, designation: u.designation, address: u.address, bio: u.bio,
+    avatar: u.avatar === undefined ? undefined : (u.avatar || null),
     avatar_initials: u.full_name ? initials(u.full_name) : undefined };
+  if (Object.values(f).some(v => v !== undefined)) f.updated_at = new Date().toISOString().slice(0, 19).replace('T', ' ');
   const keys = Object.keys(f).filter(k => f[k] !== undefined);
   if (!keys.length) return;
   tx(() => { run(`UPDATE users SET ${keys.map(k => `${k} = ?`).join(', ')} WHERE id = ?`, [...keys.map(k => f[k]), id]); audit('update', 'user', id, keys.join(', ')); });
@@ -965,7 +1034,7 @@ function addMasterItem(d: any) {
   if (!['expense_category', 'investment_sector', 'payment_method'].includes(d.type)) fail('Unknown master data type.');
   if (get('SELECT 1 FROM master_data WHERE type = ? AND name = ? COLLATE NOCASE', [d.type, d.name.trim()])) fail(`"${d.name.trim()}" already exists.`);
   const id = tx(() => {
-    run('INSERT INTO master_data (type, name, description, is_active) VALUES (?,?,?,?)', [d.type, d.name.trim(), d.description || '', d.is_active ?? 1]);
+    run('INSERT INTO master_data (type, name, name_bn, description, is_active) VALUES (?,?,?,?,?)', [d.type, d.name.trim(), d.name_bn?.trim() || null, d.description || '', d.is_active ?? 1]);
     const nid = lastId();
     audit('create', 'master_data', nid, `${d.type}: ${d.name}`);
     return nid;
@@ -981,6 +1050,7 @@ function updateMasterItem(id: number, d: any) {
   tx(() => {
     run('UPDATE master_data SET name = COALESCE(?, name), description = COALESCE(?, description), is_active = COALESCE(?, is_active) WHERE id = ?',
       [name || null, d.description ?? null, d.is_active ?? null, id]);
+    if (d.name_bn !== undefined) run('UPDATE master_data SET name_bn = ? WHERE id = ?', [String(d.name_bn).trim() || null, id]);
     if (name && name !== cur.name) {
       // keep existing records consistent with the renamed category
       if (cur.type === 'expense_category') run('UPDATE expenses SET category = ? WHERE category = ?', [name, cur.name]);
@@ -1287,9 +1357,9 @@ export const api: Record<string, (...args: any[]) => any> = {
   getCollections, recordPayment, deletePayment, suggestLateFee,
   getInvestments, addInvestment, updateInvestment, updateInvestmentValuation, deleteInvestment,
   getExpenses, addExpense, updateExpense, verifyExpenseReceipt, deleteExpense,
-  getUsers, addUser, updateUser, deleteUser,
+  getUsers, getUserProfile, addUser, updateUser, deleteUser,
   getMasterData, addMasterItem, updateMasterItem, deleteMasterItem,
   getOverviewMetrics, getOverviewData, getTransactions, getAuditLog, getDynamicNotifications,
   getBackupLogs, getDatabaseStats, resetDatabase, loadDemoData,
-  setActor: (n: string) => setActor(n),
+  setActor: (n: string, id?: number) => setActor(n, id),
 };

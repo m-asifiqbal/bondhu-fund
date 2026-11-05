@@ -1,4 +1,4 @@
-﻿export type PaymentStatus = 'Paid' | 'Pending' | 'Overdue';
+export type PaymentStatus = 'Paid' | 'Pending' | 'Overdue';
 export type InvestmentStatus = 'Growing' | 'Review' | 'Sold';
 export type ExpenseStatus = 'Verified' | 'Needs receipt';
 export type UserRole = 'Treasurer' | 'Admin' | 'Auditor' | 'Manager';
@@ -15,7 +15,8 @@ export type NavTab =
   | 'users'
   | 'backup'
   | 'reports'
-  | 'settings';
+  | 'settings'
+  | 'profile';
 
 export interface AppNotification {
   id: string;
@@ -43,6 +44,7 @@ export interface Member {
   total_contributed?: number;
   last_payment_date?: string;
   current_month_status?: PaymentStatus | null;
+  name_bn?: string | null;
   opening_balance?: number;
   notes?: string;
 }
@@ -108,6 +110,16 @@ export interface AppUser {
   avatar_initials: string;
   status: UserStatus;
   created_at: string;
+  phone?: string;
+  designation?: string;
+  address?: string;
+  bio?: string;
+  /** data:image/... */
+  avatar?: string | null;
+  last_login_at?: string | null;
+  updated_at?: string | null;
+  /** sign-in not enabled yet; column exists for the future */
+  has_password?: number;
 }
 
 export interface MasterCategory {
@@ -116,6 +128,7 @@ export interface MasterCategory {
   name: string;
   description?: string;
   is_active: number; // 1 or 0
+  name_bn?: string | null;
 }
 
 export interface BackupRecord {
@@ -138,6 +151,9 @@ export interface AppSettings {
   fiscal_year_start_month?: number;
   auto_backup_enabled?: boolean;
   auto_backup_keep?: number;
+  organization_name_bn?: string;
+  /** data:image/... logo, '' when unset */
+  org_logo?: string;
 }
 
 export interface OverviewMetrics {
@@ -223,4 +239,15 @@ export interface OverviewData {
     lastBackup: string;
   };
   recent: Array<{ kind: 'collection' | 'expense' | 'investment' | 'member'; id: number; title: string; sub: string; amount: number; date: string; created_at: string }>;
+}
+
+export interface UserProfile {
+  user: AppUser;
+  stats: {
+    totalActions: number; firstActivity: string | null; lastActivity: string | null;
+    paymentsRecorded: number; amountCollected: number; expensesEntered: number; membersAdded: number;
+  };
+  byAction: Array<{ action: string; entity: string; count: number }>;
+  monthly: Array<{ month: string; count: number }>;
+  recent: AuditEntry[];
 }
