@@ -17,7 +17,12 @@ import {
   PanelLeftOpen,
   UserCircle2,
   UsersRound,
+  Lock,
+  KeyRound,
+  LogOut,
 } from 'lucide-react';
+import { Modal } from '../common/Modal';
+import { ChangePasswordPrompt } from '../../views/LoginScreen';
 import { useApp } from '../../context/AppContext';
 import { AppUser, NavTab } from '../../types';
 
@@ -38,10 +43,10 @@ export const UserAvatar: React.FC<{
     </div>
   );
 
-/** Shared popover: my profile + profile switcher (used by Sidebar and TopBar). */
+/** Shared popover for the signed-in user: my profile, change password, sign out (used by Sidebar and TopBar). */
 export const ProfileMenu: React.FC<{ onClose: () => void; className?: string }> = ({ onClose, className = '' }) => {
-  const { currentUser, users, setCurrentUser, openProfile, setActiveTab, showToast, t, tv } = useApp();
-  const activeUsers = useMemo(() => users.filter(u => u.status === 'Active'), [users]);
+  const { currentUser, openProfile, t, tv } = useApp();
+  const item = 'w-full flex items-center gap-2.5 px-2.5 py-2 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 text-left font-semibold text-slate-800 dark:text-slate-200';
 
   return (
     <div className={`bg-white dark:bg-[#16252d] border border-slate-200 dark:border-[#283e4a] rounded-2xl shadow-2xl p-2 z-50 text-xs animate-pop ${className}`}>
@@ -49,61 +54,72 @@ export const ProfileMenu: React.FC<{ onClose: () => void; className?: string }> 
         <div className="flex items-center gap-3 px-2 py-2.5 mb-1 border-b border-slate-100 dark:border-slate-800">
           <UserAvatar user={currentUser} className="w-10 h-10 rounded-xl" textClass="text-sm" />
           <div className="min-w-0">
-            <div className="font-bold text-slate-900 dark:text-white truncate" title={currentUser.full_name}>{currentUser.full_name}</div>
+            <div className="flex items-center gap-1.5 min-w-0">
+              <span className="font-bold text-slate-900 dark:text-white truncate" title={currentUser.full_name}>{currentUser.full_name}</span>
+              {!!currentUser.is_system && (
+                <span className="shrink-0 inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-md bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-300 text-[9px] font-bold uppercase">
+                  <Lock size={9} />{t('shell.system_badge', 'System')}
+                </span>
+              )}
+            </div>
             <div className="text-[11px] text-slate-500 dark:text-slate-400 truncate">{tv(currentUser.role)}{currentUser.designation ? ` · ${currentUser.designation}` : ''}</div>
           </div>
         </div>
       )}
-      <button
-        type="button"
-        onClick={() => { openProfile(); onClose(); }}
-        className="w-full flex items-center gap-2.5 px-2.5 py-2 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 text-left font-semibold text-slate-800 dark:text-slate-200"
-      >
+      <button type="button" onClick={() => { openProfile(); onClose(); }} className={item}>
         <UserCircle2 size={15} className="text-brand dark:text-emerald-400" />
         {t('nav.profile', 'My profile')}
       </button>
-      <button
-        type="button"
-        onClick={() => { setActiveTab('users'); onClose(); }}
-        className="w-full flex items-center gap-2.5 px-2.5 py-2 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 text-left font-semibold text-slate-800 dark:text-slate-200"
-      >
-        <UsersRound size={15} className="text-brand dark:text-emerald-400" />
-        {t('shell.manage_users', 'Manage users')}
+      {currentUser && !currentUser.is_system && (
+        <button type="button" onClick={() => { window.dispatchEvent(new Event(PW_EVENT)); onClose(); }} className={item}>
+          <KeyRound size={15} className="text-brand dark:text-emerald-400" />
+          {t('shell.change_password', 'Change password')}
+        </button>
+      )}
+      <button type="button" onClick={() => { window.dispatchEvent(new Event(SIGNOUT_EVENT)); onClose(); }}
+        className="w-full flex items-center gap-2.5 px-2.5 py-2 mt-1 border-t border-slate-100 dark:border-slate-800 rounded-lg hover:bg-rose-50 dark:hover:bg-rose-950/40 text-left font-semibold text-rose-600 dark:text-rose-400">
+        <LogOut size={15} />
+        {t('shell.sign_out', 'Sign out')}
       </button>
-
-      <div className="px-2.5 pt-2.5 pb-1 mt-1 border-t border-slate-100 dark:border-slate-800 font-bold text-slate-400 dark:text-slate-500 text-[10px] uppercase tracking-wider">
-        {t('shell.switch_profile', 'Switch profile')}
-      </div>
-      <div className="max-h-64 overflow-y-auto">
-        {activeUsers.map(u => {
-          const isCurrent = currentUser?.id === u.id;
-          return (
-            <button
-              key={u.id}
-              type="button"
-              onClick={() => {
-                if (!isCurrent) {
-                  setCurrentUser(u);
-                  showToast(`${t('shell.switched_to', 'Active profile')}: ${u.full_name} (${tv(u.role)})`);
-                }
-                onClose();
-              }}
-              className={`w-full flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-left transition-colors ${isCurrent ? 'bg-emerald-50 dark:bg-emerald-950/40' : 'hover:bg-slate-100 dark:hover:bg-slate-800'}`}
-            >
-              <UserAvatar user={u} className="w-7 h-7 rounded-lg" textClass="text-[10px]" />
-              <span className="flex-1 min-w-0">
-                <span className="block font-semibold text-slate-800 dark:text-slate-200 truncate">{u.full_name}</span>
-                <span className="block text-[10px] text-slate-400 dark:text-slate-500">{tv(u.role)}</span>
-              </span>
-              {isCurrent && <Check size={14} className="text-emerald-600 dark:text-emerald-400 shrink-0" />}
-            </button>
-          );
-        })}
-        {activeUsers.length === 0 && (
-          <div className="px-2.5 py-3 text-slate-400 dark:text-slate-500">{t('shell.no_active_users', 'No active profiles.')}</div>
-        )}
-      </div>
     </div>
+  );
+};
+
+const PW_EVENT = 'bondhu:change-password';
+const SIGNOUT_EVENT = 'bondhu:sign-out';
+
+/**
+ * Dialogs opened from ProfileMenu. Mounted once (in Sidebar) so they survive the popover closing.
+ */
+const AccountDialogs: React.FC = () => {
+  const { signOut, t } = useApp();
+  const [pwOpen, setPwOpen] = useState(false);
+  const [confirmOut, setConfirmOut] = useState(false);
+  const [busy, setBusy] = useState(false);
+  useEffect(() => {
+    const onPw = () => setPwOpen(true);
+    const onOut = () => setConfirmOut(true);
+    window.addEventListener(PW_EVENT, onPw);
+    window.addEventListener(SIGNOUT_EVENT, onOut);
+    return () => { window.removeEventListener(PW_EVENT, onPw); window.removeEventListener(SIGNOUT_EVENT, onOut); };
+  }, []);
+  const doSignOut = async () => {
+    setBusy(true);
+    try { await signOut(); } finally { setBusy(false); setConfirmOut(false); }
+  };
+  return (
+    <>
+      <ChangePasswordPrompt open={pwOpen} onDone={() => setPwOpen(false)} />
+      <Modal open={confirmOut} onClose={() => setConfirmOut(false)} locked={busy} size="sm" icon={<LogOut size={18} />}
+        title={t('shell.sign_out_title', 'Sign out?')}
+        subtitle={t('shell.sign_out_msg', 'You will need your username and password to sign in again.')}
+        footer={<>
+          <button type="button" onClick={() => setConfirmOut(false)} disabled={busy} className="btn-secondary-modal">{t('common.cancel', 'Cancel')}</button>
+          <button type="button" onClick={doSignOut} disabled={busy} className="btn-primary-modal">{t('shell.sign_out', 'Sign out')}</button>
+        </>}>
+        <span />
+      </Modal>
+    </>
   );
 };
 
@@ -132,7 +148,7 @@ interface NavSection {
 }
 
 export const Sidebar: React.FC = () => {
-  const { activeTab, setActiveTab, currentUser, t, tv, settings, orgName } = useApp();
+  const { activeTab, setActiveTab, currentUser, t, tv, settings, orgName, isAdmin } = useApp();
   const [showUserMenu, setShowUserMenu] = useState(false);
   // Collapsible icon rail: below 1280px it auto-collapses; on wide screens the user's choice is remembered.
   const [isNarrow, setIsNarrow] = useState(() => !!window.matchMedia && window.matchMedia(NARROW_QUERY).matches);
@@ -188,13 +204,13 @@ export const Sidebar: React.FC = () => {
       key: 'admin',
       title: t('shell.section_admin', 'Administration'),
       items: [
-        { id: 'master', label: t('nav.master', 'Master Data'), icon: Database },
-        { id: 'users', label: t('nav.users', 'Users & Roles'), icon: UserCheck },
+        // Master Data, Users and Settings are Admin-only (also enforced by the main process)
+        ...(isAdmin ? [{ id: 'master', label: t('nav.master', 'Master Data'), icon: Database }, { id: 'users', label: t('nav.users', 'Users & Roles'), icon: UserCheck }] : []),
         { id: 'backup', label: t('nav.backup', 'Backup & Restore'), icon: HardDriveDownload },
-        { id: 'settings', label: t('nav.settings', 'Settings'), icon: Settings },
+        ...(isAdmin ? [{ id: 'settings', label: t('nav.settings', 'Settings'), icon: Settings }] : []),
       ],
     },
-  ], [t]);
+  ] as NavSection[], [t, isAdmin]);
 
   const logo = settings?.org_logo;
 
@@ -300,7 +316,7 @@ export const Sidebar: React.FC = () => {
             <UserAvatar user={currentUser} className="w-8 h-8 rounded-lg" />
             {!isCollapsed && (
               <span className="flex flex-col text-left min-w-0">
-                <span className="text-xs font-bold text-slate-900 dark:text-white truncate">{currentUser?.full_name || '—'}</span>
+                <span className="text-xs font-bold text-slate-900 dark:text-white truncate">{currentUser?.full_name || 'â€”'}</span>
                 <span className="text-[10px] text-slate-400 dark:text-slate-500 truncate">{tv(currentUser?.role)}</span>
               </span>
             )}
@@ -315,6 +331,7 @@ export const Sidebar: React.FC = () => {
           />
         )}
       </div>
+      <AccountDialogs />
     </aside>
   );
 };

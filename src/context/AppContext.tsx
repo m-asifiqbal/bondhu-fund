@@ -1,8 +1,8 @@
 import React, { createContext, useContext, useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { Copy, Check, AlertCircle, CheckCircle2, Info, X } from 'lucide-react';
-import { AppUser, AppNotification, NavTab, AppSettings, MasterCategory } from '../types';
+import { AppUser, AppNotification, NavTab, AppSettings, MasterCategory, SessionInfo } from '../types';
 export type { NavTab };
-import { getUsers, getDynamicNotifications, setActor, getAppSettings, saveAppSettings, getMasterData } from '../services/db';
+import { getUsers, getDynamicNotifications, getAppSettings, getMasterData, login as apiLogin, logout as apiLogout, getSession } from '../services/db';
 import { formatDate as formatDateUtil, formatMonth as formatMonthUtil, monthKeyToName, currentMonthKey } from '../utils/date';
 import { AppLanguage, translations, formatCurrency as formatCurrencyUtil, toBanglaDigits as toBanglaDigitsUtil } from '../utils/i18n';
 
@@ -60,6 +60,14 @@ interface AppContextType {
   /** Open the profile page for a user (own profile when id omitted). */
   openProfile: (userId?: number) => void;
   profileUserId: number | null;
+  /** Signed-in session (null = show sign-in screen). */
+  session: SessionInfo | null;
+  sessionChecked: boolean;
+  /** Only the protected iqbal_labs account may upload data (Excel/bulk import). */
+  canUpload: boolean;
+  isAdmin: boolean;
+  signIn: (username: string, password: string) => Promise<void>;
+  signOut: () => Promise<void>;
 }
 
 const AppContext = createContext<AppContextType | undefined>(undefined);
@@ -76,7 +84,9 @@ const VALUE_KEYS: Record<string, string> = {
 export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [activeTab, setActiveTab] = useState<NavTab>('overview');
   const [selectedMonth, setSelectedMonth] = useState(() => monthKeyToName(currentMonthKey()));
-  const [currentUser, setCurrentUserState] = useState<AppUser | null>(null);
+  const [session, setSession] = useState<SessionInfo | null>(null);
+  const [sessionChecked, setSessionChecked] = useState(false);
+  const currentUser: AppUser | null = session?.user ?? null;
   const [users, setUsers] = useState<AppUser[]>([]);
   const [refreshKey, setRefreshKey] = useState(0);
   const [toasts, setToasts] = useState<ToastInfo[]>([]);
@@ -159,9 +169,22 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
   const dismissToast = (id: number) => setToasts(prev => prev.filter(x => x.id !== id));
 
+  // Profiles can no longer be switched without signing in; this only refreshes the signed-in user's own details.
   const setCurrentUser = useCallback((u: AppUser) => {
-    setCurrentUserState(u);
-    saveAppSettings({ active_user_id: u.id }).catch(() => undefined);
+    setSession(s => (s && s.user.id === u.id ? { ...s, user: { ...s.user, ...u } } : s));
+  }, []);
+
+  const signIn = useCallback(async (username: string, password: string) => {
+    const s = await apiLogin(username, password);
+    setSession(s);
+    setActiveTab('overview');
+    setRefreshKey(k => k + 1);
+  }, []);
+
+  const signOut = useCallback(async () => {
+    try { await apiLogout(); } finally {
+      setSession(null); setUsers([]); setNotifications([]); setProfileUserId(null); setActiveTab('overview');
+    }
   }, []);
 
   const openProfile = useCallback((userId?: number) => {
@@ -169,31 +192,30 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     setActiveTab('profile' as NavTab);
   }, []);
 
-  // One round-trip on start and on every refresh: users, settings, master data, notifications.
+  // Settings are public (sign-in screen shows the logo/name); everything else needs a session.
   useEffect(() => {
     let cancelled = false;
     (async () => {
       try {
-        const [list, s, md] = await Promise.all([getUsers(), getAppSettings(), getMasterData()]);
+        const [s, sess] = await Promise.all([getAppSettings(), getSession()]);
         if (cancelled) return;
-        setUsers(list);
         setSettings(s);
-        setMasterData(md);
-        const active = list.filter(u => u.status === 'Active');
-        setCurrentUserState(prev =>
-          (prev && list.find(u => u.id === prev.id)) || list.find(u => u.id === s.active_user_id) || active[0] || list[0] || null);
+        setSession(sess);
+        if (sess) {
+          const [list, md] = await Promise.all([getUsers(), getMasterData()]);
+          if (cancelled) return;
+          setUsers(list);
+          setMasterData(md);
+          getDynamicNotifications().then(n => { if (!cancelled) setNotifications(n); }).catch(() => setNotifications([]));
+        }
       } catch (e: any) {
         showToast(`Could not load app data: ${e.message}`, 'error');
+      } finally {
+        if (!cancelled) setSessionChecked(true);
       }
-      getDynamicNotifications().then(n => { if (!cancelled) setNotifications(n); }).catch(() => setNotifications([]));
     })();
     return () => { cancelled = true; };
   }, [refreshKey, showToast]);
-
-  // Every change written to the database is attributed to the active profile (audit log).
-  useEffect(() => {
-    if (currentUser) setActor(`${currentUser.full_name} (${currentUser.role})`, currentUser.id).catch(() => undefined);
-  }, [currentUser?.id, currentUser?.full_name, currentUser?.role]);
 
   // Surface unexpected async errors instead of failing silently.
   useEffect(() => {
@@ -222,7 +244,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     memberFilterStatus, setMemberFilterStatus, selectedMemberIdForPayment, setSelectedMemberIdForPayment,
     isDarkMode, toggleDarkMode, language, setLanguage, toggleLanguage, t, formatCurrency, toBanglaDigits, formatDate, formatMonth,
     tv, bnName, settings, orgName, masterData, openProfile, profileUserId,
-  }), [activeTab, selectedMonth, currentUser, setCurrentUser, users, refreshKey, triggerRefresh, showToast, openRecordModal,
+    session, sessionChecked, canUpload: !!session?.canUpload, isAdmin: !!session?.isAdmin, signIn, signOut,
+  }), [session, sessionChecked, signIn, signOut, activeTab, selectedMonth, currentUser, setCurrentUser, users, refreshKey, triggerRefresh, showToast, openRecordModal,
     entryCenterInitialTab, notificationsWithRead, unreadNotificationCount, markNotificationRead, markAllNotificationsRead,
     memberFilterStatus, selectedMemberIdForPayment, isDarkMode, toggleDarkMode, language, setLanguage, toggleLanguage, t,
     formatCurrency, toBanglaDigits, formatDate, formatMonth, tv, bnName, settings, orgName, masterData, openProfile, profileUserId]);

@@ -2,6 +2,10 @@ import { app, BrowserWindow, ipcMain, dialog, shell, Menu } from 'electron';
 import * as path from 'path';
 import * as fs from 'fs';
 import * as store from './database';
+import { buildTemplate, parseWorkbook, buildMembersExport, type ParsedWorkbook } from './excel';
+
+/** Parsed import files waiting for confirmation (token → workbook). Kept in memory only. */
+const pendingImports = new Map<string, { parsed: ParsedWorkbook; fileName: string }>();
 
 let mainWindow: BrowserWindow | null = null;
 let dataDir = '';
@@ -168,10 +172,12 @@ function registerIpc() {
   ipcMain.handle('db:call', (_e, method: string, args: any[]) => wrap(() => {
     const fn = store.api[method];
     if (typeof fn !== 'function') throw new Error(`Unknown database operation: ${method}`);
+    store.authorize(method, Array.isArray(args) ? args : []);   // session + role + upload permission
     return fn(...(Array.isArray(args) ? args : []));
   }));
 
   ipcMain.handle('app:info', () => wrap(() => {
+    store.requireSession();
     const st = fs.existsSync(dbFile) ? fs.statSync(dbFile) : null;
     return {
       version: app.getVersion(),
@@ -184,6 +190,7 @@ function registerIpc() {
   }));
 
   ipcMain.handle('db:backup', () => wrap(async () => {
+    store.requireSession();
     const res = await dialog.showSaveDialog(mainWindow!, {
       title: 'Save database backup',
       defaultPath: path.join(app.getPath('documents'), `BondhuFund_Backup_${stamp()}.db`),
@@ -202,11 +209,13 @@ function registerIpc() {
     const bytes = fs.readFileSync(file);
     const safety = snapshot('PreRestore');       // current data is always kept first
     store.replaceWith(bytes);                     // validates + migrates; throws before touching anything if invalid
+    store.revalidateSession();                    // signed-in user may not exist in the restored data
     store.logBackup(path.basename(file), file, bytes.length, 'Restored');
     return { canceled: false, fileName: path.basename(file), safetySnapshot: safety };
   };
 
   ipcMain.handle('db:restore', () => wrap(async () => {
+    store.requireAdmin();
     const res = await dialog.showOpenDialog(mainWindow!, {
       title: 'Choose a Bondhu Fund backup to restore',
       properties: ['openFile'],
@@ -217,17 +226,19 @@ function registerIpc() {
   }));
 
   ipcMain.handle('db:restore-snapshot', (_e, fileName: string) => wrap(() => {
+    store.requireAdmin();
     const file = path.join(backupsDir, path.basename(String(fileName))); // basename: no path traversal
     if (!fs.existsSync(file)) throw new Error('Snapshot not found.');
     return restoreFrom(file);
   }));
 
-  ipcMain.handle('db:snapshots', () => wrap(() => listBackups()));
-  ipcMain.handle('db:snapshot-now', () => wrap(() => path.basename(snapshot('Manual'))));
+  ipcMain.handle('db:snapshots', () => wrap(() => { store.requireSession(); return listBackups(); }));
+  ipcMain.handle('db:snapshot-now', () => wrap(() => { store.requireSession(); return path.basename(snapshot('Manual')); }));
   ipcMain.handle('app:open-backups-folder', () => wrap(() => shell.openPath(backupsDir)));
 
   /** Native "Save as" for reports (CSV / HTML / JSON text). */
   ipcMain.handle('file:save-text', (_e, defaultName: string, content: string, filters?: Electron.FileFilter[]) => wrap(async () => {
+    store.requireSession();
     const res = await dialog.showSaveDialog(mainWindow!, {
       title: 'Save report',
       defaultPath: path.join(app.getPath('documents'), path.basename(String(defaultName || 'report.csv'))),
@@ -240,6 +251,74 @@ function registerIpc() {
   }));
 
   /** Print-quality PDF of the current window (reports). */
+  // ---- Excel: member import template / import / export ------------------------------------
+  ipcMain.handle('import:template', () => wrap(async () => {
+    store.requireUpload();
+    const s = store.api.getAppSettings();
+    const res = await dialog.showSaveDialog(mainWindow!, {
+      title: 'Save member import template',
+      defaultPath: path.join(app.getPath('documents'), 'BondhuFund_Member_Import_Template.xlsx'),
+      filters: [{ name: 'Excel workbook', extensions: ['xlsx'] }],
+    });
+    if (res.canceled || !res.filePath) return { canceled: true };
+    const now = new Date();
+    const buf = await buildTemplate({
+      orgName: s.organization_name, defaultDue: s.default_monthly_due, dueDay: s.monthly_due_day,
+      currentMonth: `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`,
+    });
+    fs.writeFileSync(res.filePath, buf);
+    shell.openPath(res.filePath);
+    return { canceled: false, filePath: res.filePath };
+  }));
+
+  ipcMain.handle('import:pick', (_e, opts: store.ImportOptions) => wrap(async () => {
+    store.requireUpload();
+    const res = await dialog.showOpenDialog(mainWindow!, {
+      title: 'Choose the filled member workbook',
+      properties: ['openFile'],
+      filters: [{ name: 'Excel workbook', extensions: ['xlsx'] }],
+    });
+    if (res.canceled || !res.filePaths[0]) return { canceled: true };
+    const file = res.filePaths[0];
+    if (fs.statSync(file).size > 25 * 1024 * 1024) throw new Error('The file is larger than 25 MB.');
+    const parsed = await parseWorkbook(fs.readFileSync(file));
+    const token = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    pendingImports.clear();                       // only one import in flight
+    pendingImports.set(token, { parsed, fileName: path.basename(file) });
+    return { canceled: false, token, fileName: path.basename(file), preview: store.previewMemberImport(parsed, opts) };
+  }));
+
+  ipcMain.handle('import:preview', (_e, token: string, opts: store.ImportOptions) => wrap(() => {
+    store.requireUpload();
+    const p = pendingImports.get(token);
+    if (!p) throw new Error('The import session expired. Please choose the file again.');
+    return store.previewMemberImport(p.parsed, opts);
+  }));
+
+  ipcMain.handle('import:commit', (_e, token: string, opts: store.ImportOptions) => wrap(() => {
+    store.requireUpload();
+    const p = pendingImports.get(token);
+    if (!p) throw new Error('The import session expired. Please choose the file again.');
+    snapshot('PreImport');                        // undo point: restore this snapshot to roll back an import
+    const result = store.commitMemberImport(p.parsed, opts);
+    pendingImports.delete(token);
+    return result;
+  }));
+
+  ipcMain.handle('members:export-xlsx', () => wrap(async () => {
+    store.requireSession();
+    const res = await dialog.showSaveDialog(mainWindow!, {
+      title: 'Export members to Excel',
+      defaultPath: path.join(app.getPath('documents'), `BondhuFund_Members_${new Date().toISOString().slice(0, 10)}.xlsx`),
+      filters: [{ name: 'Excel workbook', extensions: ['xlsx'] }],
+    });
+    if (res.canceled || !res.filePath) return { canceled: true };
+    const d = store.exportMembersData();
+    fs.writeFileSync(res.filePath, await buildMembersExport(d.members, d.payments, d.months));
+    shell.openPath(res.filePath);
+    return { canceled: false, filePath: res.filePath };
+  }));
+
   ipcMain.handle('file:save-pdf', (_e, defaultName: string, landscape?: boolean) => wrap(async () => {
     const res = await dialog.showSaveDialog(mainWindow!, {
       title: 'Save PDF',

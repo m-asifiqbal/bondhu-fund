@@ -13,4 +13,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
   saveText: (name: string, content: string, filters?: { name: string; extensions: string[] }[]) =>
     ipcRenderer.invoke('file:save-text', name, content, filters),
   savePdf: (name: string, landscape?: boolean) => ipcRenderer.invoke('file:save-pdf', name, landscape),
+  importTemplate: () => ipcRenderer.invoke('import:template'),
+  importPick: (opts: unknown) => ipcRenderer.invoke('import:pick', opts),
+  importPreview: (token: string, opts: unknown) => ipcRenderer.invoke('import:preview', token, opts),
+  importCommit: (token: string, opts: unknown) => ipcRenderer.invoke('import:commit', token, opts),
+  exportMembersXlsx: () => ipcRenderer.invoke('members:export-xlsx'),
 });

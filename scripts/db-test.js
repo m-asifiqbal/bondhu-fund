@@ -46,7 +46,7 @@ const throws = (fn, re, msg) => { try { fn(); ok(false, `${msg} (no error)`); } 
   if (fs.existsSync(freshDb)) fs.unlinkSync(freshDb);
   await store.openDatabase(freshDb, wasm);
   ok(A.getDatabaseStats().members === 0, 'fresh database starts empty');
-  ok(A.getUsers().length === 1 && A.getUsers()[0].role === 'Admin', 'fresh database has one Admin');
+  ok(A.getUsers().length === 2 && A.getUsers().every(u => u.role === 'Admin'), 'fresh database has the two built-in accounts (admin, iqbal_labs)');
   ok(A.getMasterData('payment_method').length >= 5, 'default payment methods present');
 
   const id = A.addMember({ name: 'Test Member', monthly_due: 2500, join_date: '2026-01-15' });
@@ -72,7 +72,7 @@ const throws = (fn, re, msg) => { try { fn(); ok(false, `${msg} (no error)`); } 
   ok(stm.rows.length >= 1, `statement rows ${stm.rows.length}`);
 
   throws(() => A.addUser({ username: 'admin', full_name: 'X' }), /taken/, 'duplicate username rejected');
-  throws(() => A.deleteUser(A.getUsers()[0].id), /only user|last Admin/, 'last admin protected');
+  throws(() => A.deleteUser(A.getUsers().find(u => u.username === 'iqbal_labs').id), /protected/, 'iqbal_labs cannot be deleted');
   const cat = A.getMasterData('expense_category')[0];
   A.addExpense({ title: 'Tea', category: cat.name, amount: 120, expense_date: store.todayISO() });
   throws(() => A.deleteMasterItem(cat.id), /in use|used by/, 'in-use category cannot be deleted');
@@ -117,6 +117,42 @@ const throws = (fn, re, msg) => { try { fn(); ok(false, `${msg} (no error)`); } 
     ok(A.getDatabaseStats().schemaVersion === 2, 'older backup restores and migrates');
   }
 
+
+  // 5) Sign-in, permissions, health check
+  A.logout();
+  throws(() => store.authorize('getMembers'), /sign in/i, 'no session → API calls refused');
+  throws(() => A.login('admin', 'wrong'), /Incorrect/, 'wrong password rejected');
+  const s1 = A.login('admin', 'admin');
+  ok(s1 && s1.isAdmin && !s1.canUpload && s1.mustChangePassword, 'admin/admin signs in (Admin, no upload, asked to change password)');
+  throws(() => store.authorize('bulkAddMembers'), /iqbal_labs/, 'admin cannot upload data');
+  throws(() => store.requireUpload(), /iqbal_labs/, 'admin blocked from Excel import');
+  throws(() => store.authorize('updateUser', [A.getUsers().find(u => u.username === 'iqbal_labs').id, { full_name: 'x' }]), /protected/, 'admin cannot edit iqbal_labs');
+  throws(() => A.setUserPassword(A.getUsers().find(u => u.username === 'iqbal_labs').id, 'newpass1'), /fixed/, 'iqbal_labs password cannot be set by admin');
+  throws(() => A.changeOwnPassword('admin', 'abc'), /at least 6/, 'short password rejected');
+  A.changeOwnPassword('admin', 'Secur3pass');
+  A.logout();
+  throws(() => A.login('admin', 'admin'), /Incorrect/, 'old admin password no longer works');
+  ok(!!A.login('admin', 'Secur3pass'), 'admin signs in with the new password');
+  A.logout();
+  throws(() => A.login('iqbal_labs', 'not-the-password'), /Incorrect/, 'iqbal_labs rejects a wrong password');
+  // The real system password is never stored in the repo: pass it via env to run these checks.
+  const sysPw = process.env.BONDHU_SYSTEM_PASSWORD;
+  if (sysPw) {
+    const s2 = A.login('IQBAL_LABS', sysPw);
+    ok(s2 && s2.canUpload && s2.isAdmin, 'iqbal_labs signs in (case-insensitive username) with upload rights');
+    store.authorize('bulkAddMembers'); store.requireUpload();
+    ok(true, 'iqbal_labs may upload');
+    throws(() => A.changeOwnPassword(sysPw, 'another1'), /fixed/, 'iqbal_labs password is fixed');
+    A.logout();
+  } else {
+    console.log('SKIP  iqbal_labs sign-in checks (set BONDHU_SYSTEM_PASSWORD to run them)');
+  }
+  for (let i = 0; i < 5; i++) { try { A.login('admin', 'nope'); } catch { /* expected */ } }
+  throws(() => A.login('admin', 'Secur3pass'), /Too many/, 'account locks after 5 wrong attempts');
+  // reopening restores the fixed account even if it was tampered with in the file
+  const health = A.checkAccountingHealth();
+  ok(health.fails === 0, `health check on demo data: ${health.passes} pass, ${health.warns} warn, ${health.fails} fail`);
+  store.flush();
   console.log(fails ? `\n${fails} FAILURE(S)` : '\nALL CHECKS PASSED');
   process.exit(fails ? 1 : 0);
 })().catch(e => { console.error('CRASH', e); process.exit(2); });

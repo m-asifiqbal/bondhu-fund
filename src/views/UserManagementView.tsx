@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
-import { UserPlus, Trash2, Pencil, History, Users, Repeat2, Camera, X, ChevronRight, Search } from 'lucide-react';
+import { UserPlus, Trash2, Pencil, History, Users, KeyRound, Lock, Camera, X, ChevronRight, Search, Loader2 } from 'lucide-react';
 import { useApp } from '../context/AppContext';
-import { getUsers, addUser, updateUser, deleteUser, getAuditLog } from '../services/db';
+import { getUsers, addUser, updateUser, deleteUser, getAuditLog, setUserPassword } from '../services/db';
 import { AppUser, AuditEntry, UserRole, UserStatus } from '../types';
 import { Modal } from '../components/common/Modal';
 import { SearchableSelect } from '../components/common/SearchableSelect';
@@ -11,16 +11,16 @@ import { USER_ROLES, ROLE_BADGE, initialsOf, useAuditLabels, useStamp } from './
 
 const USERNAME_RE = /^[a-z0-9._-]{3,32}$/;
 
-interface AddForm { full_name: string; username: string; email: string; phone: string; designation: string; role: UserRole; avatar: string }
+interface AddForm { full_name: string; username: string; email: string; phone: string; designation: string; role: UserRole; password: string; avatar: string }
 interface EditForm { full_name: string; email: string; phone: string; designation: string; role: UserRole; status: UserStatus }
 
-const EMPTY_ADD: AddForm = { full_name: '', username: '', email: '', phone: '', designation: '', role: 'Treasurer', avatar: '' };
+const EMPTY_ADD: AddForm = { full_name: '', username: '', email: '', phone: '', designation: '', role: 'Treasurer', password: '', avatar: '' };
 
 const btnSoft = 'flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-bold border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800/60 text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800 disabled:opacity-50 disabled:cursor-not-allowed transition-colors';
 const btnPrimary = 'flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-bold text-white bg-brand hover:bg-brand-hover dark:bg-emerald-700 dark:hover:bg-emerald-600 shadow-sm disabled:opacity-50 disabled:cursor-not-allowed transition-colors';
 
 export const UserManagementView: React.FC = () => {
-  const { currentUser, setCurrentUser, showToast, refreshKey, triggerRefresh, t, tv, openProfile, language, toBanglaDigits } = useApp();
+  const { currentUser, isAdmin, showToast, refreshKey, triggerRefresh, t, tv, openProfile, language, toBanglaDigits } = useApp();
   const labels = useAuditLabels();
   const stamp = useStamp();
   const num = (n: number) => (language === 'bn' ? toBanglaDigits(n) : String(n));
@@ -84,9 +84,10 @@ export const UserManagementView: React.FC = () => {
     e?.preventDefault();
     if (!add.full_name.trim()) { showToast(t('admin.name_required', 'Full name is required.'), 'error'); return; }
     if (!USERNAME_RE.test(uname)) { showToast(usernameRule, 'error'); return; }
+    if (add.password.length < 6) { showToast(t('admin.pw_rule', 'Password must be at least 6 characters.'), 'error'); return; }
     setBusy(true);
     try {
-      await addUser({
+      const newId = await addUser({
         username: uname,
         full_name: add.full_name.trim(),
         email: add.email.trim(),
@@ -97,6 +98,7 @@ export const UserManagementView: React.FC = () => {
         avatar_initials: initialsOf(add.full_name),
         status: 'Active',
       });
+      await setUserPassword(newId, add.password);
       done(`${t('admin.user_created', 'User created')}: ${add.full_name.trim()} (${tv(add.role)})`);
       setAdd(EMPTY_ADD);
       setAddOpen(false);
@@ -156,13 +158,20 @@ export const UserManagementView: React.FC = () => {
     }
   };
 
-  const handleSwitch = (u: AppUser) => {
-    if (u.status !== 'Active') {
-      showToast(t('admin.inactive_switch', 'Activate this user before switching to it.'), 'error');
-      return;
-    }
-    setCurrentUser(u);
-    showToast(`${t('shell.switched_to', 'Active profile')}: ${u.full_name} (${tv(u.role)})`);
+  // ---- admin: set another user's password ----
+  const [pwTarget, setPwTarget] = useState<AppUser | null>(null);
+  const [pw1, setPw1] = useState('');
+  const [pw2, setPw2] = useState('');
+  const [pwBusy, setPwBusy] = useState(false);
+  const savePassword = async () => {
+    if (!pwTarget) return;
+    if (pw1 !== pw2) { showToast(t('auth.mismatch', 'The new passwords do not match.'), 'error'); return; }
+    setPwBusy(true);
+    try {
+      await setUserPassword(pwTarget.id, pw1);
+      showToast(`${t('admin.password_set', 'Password set for')} ${pwTarget.full_name}`);
+      setPwTarget(null); triggerRefresh();
+    } catch (err: any) { showToast(err.message, 'error'); } finally { setPwBusy(false); }
   };
 
   const stop = (fn: () => void) => (e: React.MouseEvent) => { e.stopPropagation(); fn(); };
@@ -238,21 +247,24 @@ export const UserManagementView: React.FC = () => {
                 </div>
 
                 <div className="flex items-center gap-1 shrink-0">
-                  {!isCurrent && (
-                    <button
-                      type="button"
-                      onClick={stop(() => handleSwitch(u))}
-                      disabled={u.status !== 'Active'}
-                      title={t('admin.switch_to_profile', 'Switch to this profile')}
-                      className="flex items-center gap-1 px-3 py-1.5 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-brand dark:text-emerald-400 rounded-lg font-bold border border-slate-200 dark:border-slate-700 disabled:opacity-40"
-                    >
-                      <Repeat2 size={13} /> <span className="hidden sm:inline">{t('admin.switch', 'Switch')}</span>
-                    </button>
+                  {u.is_system ? (
+                    <span className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-amber-50 dark:bg-amber-950/40 text-amber-700 dark:text-amber-300 font-bold text-[11px]" title={t('admin.protected_hint', 'Protected system account: fixed password, data upload enabled')}>
+                      <Lock size={12} />{t('admin.protected', 'Protected')}
+                    </span>
+                  ) : isAdmin && (
+                    <>
+                      {!u.has_password && <span className="hidden md:inline text-[10px] font-semibold text-amber-600 dark:text-amber-400 mr-1">{t('admin.no_password', 'No password — cannot sign in')}</span>}
+                      <button type="button" onClick={stop(() => { setPwTarget(u); setPw1(''); setPw2(''); })}
+                        className="flex items-center gap-1 px-3 py-1.5 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-brand dark:text-emerald-400 rounded-lg font-bold border border-slate-200 dark:border-slate-700">
+                        <KeyRound size={13} /> <span className="hidden sm:inline">{t('admin.set_password', 'Set password')}</span>
+                      </button>
+                      <button type="button" onClick={stop(() => startEdit(u))} title={t('common.edit', 'Edit')} aria-label={t('common.edit', 'Edit')}
+                        className="p-2 text-slate-400 hover:text-slate-800 dark:hover:text-white rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800">
+                        <Pencil size={14} />
+                      </button>
+                    </>
                   )}
-                  <button type="button" onClick={stop(() => startEdit(u))} title={t('common.edit', 'Edit')} aria-label={t('common.edit', 'Edit')}
-                    className="p-2 text-slate-400 hover:text-slate-800 dark:hover:text-white rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800">
-                    <Pencil size={14} />
-                  </button>
+                  {isAdmin && !u.is_system && !isCurrent && (
                   <button
                     type="button"
                     onClick={stop(() => setDeleteTarget(u))}
@@ -263,6 +275,7 @@ export const UserManagementView: React.FC = () => {
                   >
                     <Trash2 size={15} />
                   </button>
+                  )}
                   <ChevronRight size={16} className="text-slate-300 dark:text-slate-600 group-hover:translate-x-0.5 transition-transform" />
                 </div>
               </div>
@@ -368,6 +381,11 @@ export const UserManagementView: React.FC = () => {
               <p className={`text-[11px] mt-1 ${usernameError ? 'text-rose-600 dark:text-rose-400' : 'text-slate-400 dark:text-slate-500'}`}>{usernameRule}</p>
             </div>
             <div>
+              <label className="form-label">{t('admin.initial_password', 'Password')} *</label>
+              <input type="password" autoComplete="new-password" className="form-input" value={add.password} onChange={e => setAdd(a => ({ ...a, password: e.target.value }))} />
+              <p className="text-[11px] mt-1 text-slate-400 dark:text-slate-500">{t('admin.pw_hint', 'At least 6 characters. The user can change it later from their profile.')}</p>
+            </div>
+            <div>
               <label className="form-label">{t('admin.email', 'Email')}</label>
               <input type="email" className="form-input" value={add.email} onChange={e => setAdd(a => ({ ...a, email: e.target.value }))} />
             </div>
@@ -465,6 +483,19 @@ export const UserManagementView: React.FC = () => {
           </div>
         )}
       </Modal>
-    </div>
+      <Modal open={!!pwTarget} onClose={() => setPwTarget(null)} locked={pwBusy} size="sm" icon={<KeyRound size={18} />}
+        title={t('admin.set_password', 'Set password')}
+        subtitle={pwTarget ? `${pwTarget.full_name} (@${pwTarget.username}) — ${t('admin.pw_change_next', 'they will be asked to change it after signing in.')}` : undefined}
+        footer={<>
+          <button type="button" onClick={() => setPwTarget(null)} disabled={pwBusy} className="btn-secondary-modal">{t('common.cancel', 'Cancel')}</button>
+          <button type="button" onClick={savePassword} disabled={pwBusy || !pw1} className="btn-primary-modal">{pwBusy && <Loader2 size={14} className="animate-spin" />}{t('admin.set_password', 'Set password')}</button>
+        </>}>
+        <div className="space-y-3.5">
+          <div><label className="form-label">{t('auth.new', 'New password')}</label><input type="password" autoComplete="new-password" className="form-input" value={pw1} onChange={e => setPw1(e.target.value)} />
+            <span className="form-hint">{t('auth.rules', 'At least 6 characters, different from the username.')}</span></div>
+          <div><label className="form-label">{t('auth.repeat', 'Repeat new password')}</label><input type="password" autoComplete="new-password" className="form-input" value={pw2} onChange={e => setPw2(e.target.value)}
+            onKeyDown={e => { if (e.key === 'Enter') savePassword(); }} /></div>
+        </div>
+      </Modal>    </div>
   );
 };

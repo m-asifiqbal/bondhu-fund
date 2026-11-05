@@ -13,6 +13,7 @@ import {
   History,
 } from 'lucide-react';
 import { Modal } from '../components/common/Modal';
+import { HealthCheckCard } from '../components/HealthCheckCard';
 import { useApp } from '../context/AppContext';
 import {
   performBackup,
@@ -115,7 +116,7 @@ const ConfirmDialog: React.FC<{ state: ConfirmState; onClose: () => void }> = ({
 };
 
 export const BackupRestoreView: React.FC = () => {
-  const { showToast, triggerRefresh, refreshKey, t, tv, formatDate, language, toBanglaDigits } = useApp();
+  const { showToast, triggerRefresh, refreshKey, t, tv, formatDate, language, toBanglaDigits, isAdmin } = useApp();
   const n = useCallback((v: number | string) => (language === 'bn' ? toBanglaDigits(v) : String(v)), [language, toBanglaDigits]);
   const kb = (v: number | string) => `${n(v)} ${t('finance.backup_kb', 'KB')}`;
   const [info, setInfo] = useState<AppInfo | null>(null);
@@ -319,6 +320,8 @@ export const BackupRestoreView: React.FC = () => {
         </p>
       </div>
 
+      <HealthCheckCard />
+
       {/* Status */}
       <div className="card-base p-6">
         <div className="flex items-start gap-4">
@@ -390,9 +393,10 @@ export const BackupRestoreView: React.FC = () => {
               {t('finance.backup_restore_desc', 'Replace current data with a backup file. Your current data is snapshotted first, so a restore can always be undone.')}
             </p>
           </div>
+          {!isAdmin && <p className="text-[11px] font-semibold text-slate-500">{t('finance.backup_admin_only', 'Only an Admin can restore or clear data.')}</p>}
           <button
             onClick={askRestoreFromFile}
-            disabled={!!busy}
+            disabled={!!busy || !isAdmin}
             className="flex items-center justify-center gap-2 py-2.5 bg-amber-600 hover:bg-amber-700 dark:bg-amber-700 dark:hover:bg-amber-600 text-white rounded-xl text-xs font-bold shadow-sm transition-all disabled:opacity-50"
           >
             <Upload size={15} />
@@ -441,7 +445,7 @@ export const BackupRestoreView: React.FC = () => {
                     <td className="px-5 py-2.5 text-right">
                       <button
                         onClick={() => askRestoreSnapshot(s)}
-                        disabled={!!busy}
+                        disabled={!!busy || !isAdmin}
                         className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-bold text-amber-700 dark:text-amber-400 hover:bg-amber-50 dark:hover:bg-amber-950/40 border border-amber-200 dark:border-amber-800 disabled:opacity-50"
                       >
                         <RotateCcw size={12} />
@@ -499,7 +503,7 @@ export const BackupRestoreView: React.FC = () => {
         </div>
 
         {/* Danger zone */}
-        <div className="card-base p-6 border-rose-200 dark:border-rose-900/60 space-y-4">
+        <div className={`card-base p-6 border-rose-200 dark:border-rose-900/60 space-y-4 ${isAdmin ? '' : 'hidden'}`}>
           <div className="flex items-center gap-2">
             <AlertTriangle size={18} className="text-rose-600" />
             <h3 className="text-sm font-bold text-rose-700 dark:text-rose-400">{t('finance.backup_danger_zone', 'Danger zone')}</h3>

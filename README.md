@@ -49,7 +49,7 @@ Get the latest files from **[Releases](https://github.com/m-asifiqbal/bondhu-fun
 | `BondhuFund-Portable-<version>.exe` | You want to run it without installing, for example from a USB drive. |
 
 - **Requirements:** Windows 10 or 11, 64-bit. No internet, server, database engine or runtime to install.
-- **First start:** the app opens with an empty database. Add your first member, **restore a backup** (Backup & Restore → Restore from file), or click **Explore with demo data** to look around.
+- **First start:** sign in with `admin` / `admin` (you'll be asked to set a new password). The database starts empty. Add your first member, **restore a backup** (Backup & Restore → Restore from file), or click **Explore with demo data** to look around.
 - **Upgrading:** run the newer Setup file. Your data is kept, and older databases and backups are upgraded automatically.
 - **Uninstalling:** your data is **kept** in `%APPDATA%\Bondhu Fund`.
 - **SmartScreen warning:** Windows may show *"Windows protected your PC / Unknown publisher"* until the installer is code-signed (see [RELEASE.md](docs/RELEASE.md)). Click **More info → Run anyway**.
@@ -90,6 +90,39 @@ Get the latest files from **[Releases](https://github.com/m-asifiqbal/bondhu-fun
   - Restore any local snapshot.
   - Demo data and "clear business data" (requires typing DELETE).
 
+### Sign-in & roles
+- The app opens on a **sign-in screen**. There are two built-in accounts:
+
+  | Account | Password | Access |
+  |---|---|---|
+  | `admin` | `admin` (you're asked to change it after the first sign-in) | Everything **except data upload** |
+  | `iqbal_labs` | fixed (given to the owner separately) | Everything, **including data upload**. A protected account: it can't be deleted, edited by others, deactivated, and its password can't be changed. |
+
+- Admins create users, set their passwords and assign roles (Admin, Treasurer, Manager, Auditor). **Auditors are read-only**. Master Data, Users and Settings are Admin-only.
+- Every rule is enforced in the main process, not just hidden in the interface. Passwords are stored only as salted **scrypt** hashes. After 5 wrong attempts the account locks for 5 minutes.
+
+### Import members from Excel (iqbal_labs only)
+**Members → Import from Excel** opens a 3-step wizard:
+1. **Download the template:** an `.xlsx` with an *Instructions* sheet (English and Bangla), a *Members* sheet and a *Payment History* sheet, with example rows. Example rows (codes starting with `EX-`) are always ignored.
+2. **Fill it in.** For each member's collections so far, choose **one** method:
+   - **Month by month (best):** in *Payment History*, enter the amount paid under each `YYYY-MM` column, or `P` for paid in full. Arrears, statements and reports are then exact.
+   - **Only a total:** put the total paid so far in **Opening Balance**, and set **Join Date** to the first month you'll track in the app.
+3. **Review and import:**
+   - Every row is checked: dates (DD/MM/YYYY, Bangla digits OK), amounts ("3,000", ৩,০০০), duplicate codes, unknown members, future months, and payments dated before the member joined.
+   - Rows with errors are skipped and listed with their row or cell number.
+   - Re-importing the same file never duplicates members or payments.
+   - Everything is saved in one transaction, after a `PreImport_*.db` safety snapshot.
+
+**Members → Export to Excel** writes the same layout, so you can make corrections and re-import.
+
+### Accounting health check
+**Backup & Restore → Accounting health check** runs 19 read-only checks:
+- the integrity of the database file;
+- every payment: total = contribution + late fee, a positive amount, valid dates, and the member exists;
+- member, expense and investment values;
+- sold investments have their sale details;
+- the settings;
+- **reconciliation:** opening balances + money in − money out must equal cash in hand, and member totals must equal total contributions.
 ### Experience
 - **English / বাংলা** everywhere: labels, data values (statuses, categories, methods), dates, months and digits (০১২৩…).
 - **Light / dark** themes, a collapsible sidebar, and layouts that work down to 960 px wide.
@@ -364,6 +397,7 @@ npm run electron:dev     # Vite dev server + Electron, with hot reload for the U
 |---|---|
 | `npm run electron:dev` | Development mode (Vite on :5173 + Electron) |
 | `npm run typecheck` | TypeScript check for the renderer and main process |
+| `npm run test:import` | Excel import suite: template, a messy realistic workbook (Bangla digits, P markers, duplicates, future months), preview, commit, re-import, export round trip |
 | `npm run test:db` | Database test suite (fresh DB, CRUD, rules, reconciliation, backup/restore). Add `-- path\to\old.db` to also test migrating a copy of an older database. |
 | `npm run screenshots` | Builds the app and regenerates `docs/screenshots/*.png` using demo data in a temporary profile |
 | `npm run build:all` | Production build of the renderer (`dist/`) and main process (`dist-electron/`) |
@@ -499,7 +533,6 @@ Then create a GitHub Release with tag `vX.Y.Z` and attach both `.exe` files.
 ---
 
 ## 🗺 Roadmap
-- [ ] Sign-in with per-user passwords and role permissions (database columns already exist).
 - [ ] Bangla text in the downloadable payment voucher (`.txt`).
 - [ ] Optional encrypted backups.
 - [ ] Auto-update from GitHub Releases.

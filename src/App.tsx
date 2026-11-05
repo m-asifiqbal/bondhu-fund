@@ -4,6 +4,7 @@ import { AppProvider, useApp } from './context/AppContext';
 import { Sidebar } from './components/layout/Sidebar';
 import { TopBar } from './components/layout/TopBar';
 import { RecordPaymentModal } from './components/modals/RecordPaymentModal';
+import { LoginScreen, ChangePasswordPrompt } from './views/LoginScreen';
 
 // Views
 const OverviewView = React.lazy(() => import('./views/OverviewView').then(m => ({ default: m.OverviewView })));
@@ -143,10 +144,27 @@ const MainLayout: React.FC = () => {
   );
 };
 
+/** Sign-in gate: nothing behind it is rendered (or queried) without a session. */
+const AuthGate: React.FC = () => {
+  const { session, sessionChecked } = useApp();
+  const [promptDismissed, setPromptDismissed] = React.useState(false);
+  React.useEffect(() => { if (!session) setPromptDismissed(false); }, [session]);
+  if (!sessionChecked) {
+    return <div className="h-screen w-screen flex items-center justify-center bg-slate-100 dark:bg-[#0b1317]"><RotateCw size={18} className="animate-spin text-slate-400" /></div>;
+  }
+  if (!session) return <LoginScreen />;
+  return (
+    <>
+      <MainLayout />
+      <ChangePasswordPrompt open={session.mustChangePassword && !promptDismissed} forced onDone={() => setPromptDismissed(true)} />
+    </>
+  );
+};
+
 export function App() {
   return (
     <AppProvider>
-      <MainLayout />
+      <AuthGate />
     </AppProvider>
   );
 }

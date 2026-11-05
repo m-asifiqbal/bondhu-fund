@@ -162,3 +162,19 @@ button, a, input, select, textarea {
 /* Bangla: Bengali-first font stack and a little more line height so conjuncts don't clip. */
 html[lang="bn"] body { font-family: 'Noto Sans Bengali', 'Inter', system-ui, sans-serif; }
 html[lang="bn"] body :where(p, span, label, td, th, li, button, h1, h2, h3, h4) { line-height: 1.55; }
+/* Dialog footer buttons (Modal footers) */
+.btn-primary-modal {
+  display: inline-flex; align-items: center; gap: .5rem; padding: .7rem 1.1rem; border-radius: .85rem;
+  background: #0f4a3c; color: #fff; font-size: .8rem; font-weight: 700; box-shadow: 0 1px 2px rgba(15,74,60,.25);
+}
+.btn-primary-modal:hover:not(:disabled) { background: #135e4d; }
+.btn-secondary-modal {
+  display: inline-flex; align-items: center; gap: .5rem; padding: .7rem 1.1rem; border-radius: .85rem;
+  background: #fff; color: #334155; border: 1px solid #cbd5e1; font-size: .8rem; font-weight: 700;
+}
+.btn-secondary-modal:hover:not(:disabled) { background: #f8fafc; }
+.dark .btn-primary-modal { background: #059669; }
+.dark .btn-primary-modal:hover:not(:disabled) { background: #047857; }
+.dark .btn-secondary-modal { background: #16252d; color: #e2e8f0; border-color: #283e4a; }
+.dark .btn-secondary-modal:hover:not(:disabled) { background: #1b2c34; }
+.btn-primary-modal:disabled, .btn-secondary-modal:disabled { opacity: .55; cursor: not-allowed; }

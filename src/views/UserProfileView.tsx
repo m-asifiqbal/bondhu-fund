@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Activity, AtSign, BadgeCheck, Banknote, Briefcase, Calendar, Camera, Clock, FileText, Loader2, Mail, MapPin,
-  Pencil, Phone, Receipt, Repeat2, ShieldCheck, Trash2, UserPlus, UserRound, Users, BarChart3, ListChecks, History,
+  Pencil, Phone, Receipt, Repeat2, ShieldCheck, KeyRound, Lock, Trash2, UserPlus, UserRound, Users, BarChart3, ListChecks, History,
 } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 import { getUserProfile, updateUser } from '../services/db';
@@ -9,6 +9,7 @@ import { imageFileToDataUrl } from '../utils/image';
 import { addMonths, currentMonthKey, MONTH_SHORT, BN_MONTHS } from '../utils/date';
 import { AppUser, UserProfile, UserRole, UserStatus } from '../types';
 import { Modal } from '../components/common/Modal';
+import { ChangePasswordPrompt } from './LoginScreen';
 import { SearchableSelect } from '../components/common/SearchableSelect';
 import { UserAvatar } from '../components/layout/Sidebar';
 
@@ -58,7 +59,7 @@ interface EditForm { full_name: string; email: string; phone: string; designatio
 
 export const UserProfileView: React.FC = () => {
   const {
-    t, tv, language, formatCurrency, toBanglaDigits, formatDate, currentUser, setCurrentUser, profileUserId,
+    t, tv, language, formatCurrency, toBanglaDigits, formatDate, currentUser, isAdmin, profileUserId,
     refreshKey, triggerRefresh, showToast, setActiveTab,
   } = useApp();
   const labels = useAuditLabels();
@@ -90,6 +91,10 @@ export const UserProfileView: React.FC = () => {
 
   const user = profile?.user;
   const isSelf = !!user && user.id === currentUser?.id;
+  const isSystem = !!user?.is_system;
+  // own profile, or an Admin editing a normal (non-system) user
+  const canEdit = isSelf || (isAdmin && !isSystem);
+  const [pwOpen, setPwOpen] = useState(false);
 
   const roleOptions = useMemo(() => USER_ROLES.map(r => ({ value: r, label: tv(r) })), [tv]);
   const statusOptions = useMemo(() => (['Active', 'Inactive'] as UserStatus[]).map(s => ({ value: s, label: tv(s) })), [tv]);
@@ -184,12 +189,6 @@ export const UserProfileView: React.FC = () => {
     setAdminBusy(false);
   };
 
-  const switchTo = () => {
-    if (!user) return;
-    if (user.status !== 'Active') { showToast(t('admin.inactive_switch', 'Activate this user before switching to it.'), 'error'); return; }
-    setCurrentUser(user);
-    showToast(`${t('shell.switched_to', 'Active profile')}: ${user.full_name} (${tv(user.role)})`);
-  };
 
   // ---------------------------------------------------------------- states
   if (loading && !profile) {
@@ -273,12 +272,21 @@ export const UserProfileView: React.FC = () => {
                   <Trash2 size={14} /> {t('admin.remove_photo', 'Remove photo')}
                 </button>
               )}
-              <button type="button" onClick={() => fileRef.current?.click()} disabled={photoBusy} className={btnSoft}>
-                <Camera size={14} /> {t('admin.change_photo', 'Change photo')}
-              </button>
-              <button type="button" onClick={openEdit} className={btnPrimary}>
-                <Pencil size={14} /> {t('admin.edit_profile', 'Edit profile')}
-              </button>
+              {isSelf && !isSystem && (
+                <button type="button" onClick={() => setPwOpen(true)} className={btnSoft}>
+                  <KeyRound size={14} /> {t('shell.change_password', 'Change password')}
+                </button>
+              )}
+              {canEdit && (
+                <button type="button" onClick={() => fileRef.current?.click()} disabled={photoBusy} className={btnSoft}>
+                  <Camera size={14} /> {t('admin.change_photo', 'Change photo')}
+                </button>
+              )}
+              {canEdit && (
+                <button type="button" onClick={openEdit} className={btnPrimary}>
+                  <Pencil size={14} /> {t('admin.edit_profile', 'Edit profile')}
+                </button>
+              )}
             </div>
           </div>
 
@@ -346,7 +354,14 @@ export const UserProfileView: React.FC = () => {
             </dl>
           </div>
 
-          {!isSelf && (
+          {isSystem && (
+            <div className="card-base p-5 border-amber-200 dark:border-amber-900/60 bg-amber-50/60 dark:bg-amber-950/20">
+              <h3 className="text-sm font-bold text-amber-800 dark:text-amber-200 flex items-center gap-2"><Lock size={15} />{t('admin.system_title', 'Protected system account')}</h3>
+              <p className="mt-1.5 text-amber-800/80 dark:text-amber-200/80">{t('admin.system_desc', 'Fixed password. Cannot be deleted, deactivated or edited by other users. This is the only account that can upload data (Excel / bulk member import).')}</p>
+            </div>
+          )}
+
+          {!isSelf && isAdmin && !isSystem && (
             <div className="card-base p-5">
               <h3 className="text-sm font-bold text-slate-900 dark:text-white flex items-center gap-2 mb-1">
                 <ShieldCheck size={16} className="text-brand dark:text-emerald-400" />{t('admin.access', 'Access & role')}
@@ -361,10 +376,6 @@ export const UserProfileView: React.FC = () => {
                   <label className="form-label">{t('admin.status', 'Status')}</label>
                   <SearchableSelect options={statusOptions} value={user.status} onChange={v => changeStatus(v as UserStatus)} disabled={adminBusy} />
                 </div>
-                <button type="button" onClick={switchTo} disabled={user.status !== 'Active'} className={`${btnSoft} w-full justify-center`}
-                  title={user.status !== 'Active' ? t('admin.inactive_switch', 'Activate this user before switching to it.') : undefined}>
-                  <Repeat2 size={14} /> {t('admin.switch_to_profile', 'Switch to this profile')}
-                </button>
               </div>
             </div>
           )}
@@ -529,6 +540,7 @@ export const UserProfileView: React.FC = () => {
       >
         <p className="text-xs text-slate-600 dark:text-slate-300">{t('admin.remove_photo_confirm', 'The profile photo will be removed and initials shown instead.')}</p>
       </Modal>
+      <ChangePasswordPrompt open={pwOpen} onDone={() => setPwOpen(false)} />
     </div>
   );
 };

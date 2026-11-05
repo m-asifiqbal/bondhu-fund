@@ -5,13 +5,14 @@ import {
 } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 import {
-  getMembers, addMember, updateMember, deleteMember, getMemberStatement, bulkAddMembers, getNextMemberCode,
+  getMembers, addMember, updateMember, deleteMember, getMemberStatement, bulkAddMembers, getNextMemberCode, exportMembersToExcel,
 } from '../services/db';
 import { Member, MemberStats, MemberStatement, PaymentStatus } from '../types';
 import { todayISO } from '../utils/date';
 import { SearchableSelect, SelectOption } from '../components/common/SearchableSelect';
 import { DatePicker } from '../components/common/DatePicker';
 import { Modal } from '../components/common/Modal';
+import { ExcelImportModal } from '../components/modals/ExcelImportModal';
 
 const PAGE_SIZE = 10;
 const EMPTY_STATS: MemberStats = { total: 0, active: 0, paid: 0, pending: 0, overdue: 0 };
@@ -48,6 +49,7 @@ export const MembersView: React.FC = () => {
     showToast, refreshKey, triggerRefresh, memberFilterStatus, setMemberFilterStatus, setOpenRecordModal,
     setSelectedMemberIdForPayment, selectedMonth, t, tv, bnName, language, toBanglaDigits, settings,
     formatCurrency, formatDate, formatMonth,
+    canUpload,
   } = useApp();
   const bn = language === 'bn';
   const n = (v: string | number) => (bn ? toBanglaDigits(v) : String(v));
@@ -82,6 +84,11 @@ export const MembersView: React.FC = () => {
 
   // Import modal
   const [showImportModal, setShowImportModal] = useState(false);
+  const [showExcelImport, setShowExcelImport] = useState(false);
+  const onExportExcel = async () => {
+    try { const r = await exportMembersToExcel(); if (!r.canceled) showToast(t('members.export_saved', 'Members exported') + (r.filePath ? `: ${r.filePath}` : '')); }
+    catch (e: any) { showToast(e.message, 'error'); }
+  };
   const [csvText, setCsvText] = useState('');
   const [importing, setImporting] = useState(false);
 
@@ -346,9 +353,15 @@ export const MembersView: React.FC = () => {
             <Plus size={16} strokeWidth={2.5} />
             <span>{t('members.add', 'Add member')}</span>
           </button>
-          <button type="button" onClick={() => setShowImportModal(true)} className={btnSecondary}>
-            <Upload size={14} className="text-slate-500" />
-            <span>{t('members.import', 'Import list')}</span>
+          {canUpload && (
+            <button type="button" onClick={() => setShowExcelImport(true)} className={btnSecondary}>
+              <Upload size={14} className="text-slate-500" />
+              <span>{t('members.import_excel', 'Import from Excel')}</span>
+            </button>
+          )}
+          <button type="button" onClick={onExportExcel} className={btnSecondary}>
+            <FileSpreadsheet size={14} className="text-slate-500" />
+            <span>{t('members.export_excel', 'Export to Excel')}</span>
           </button>
         </div>
       </div>
@@ -838,6 +851,10 @@ export const MembersView: React.FC = () => {
           )}
         </div>
       </Modal>
+
+      {canUpload && (
+        <ExcelImportModal open={showExcelImport} onClose={() => setShowExcelImport(false)} onPasteInstead={() => setShowImportModal(true)} />
+      )}
     </div>
   );
 };

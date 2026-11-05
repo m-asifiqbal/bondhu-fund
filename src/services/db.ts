@@ -9,7 +9,7 @@
 import type {
   Member, CollectionRecord, Investment, Expense, AppUser, MasterCategory, BackupRecord,
   OverviewMetrics, AppSettings, AppNotification, OverviewData, MemberStats, CollectionStats,
-  LedgerRow, AuditEntry, SnapshotFile, AppInfo, MemberStatement, UserProfile,
+  LedgerRow, AuditEntry, SnapshotFile, AppInfo, MemberStatement, UserProfile, ImportOptions, ImportPreview, ImportResult, SessionInfo, HealthReport,
 } from '../types';
 
 type Result<T> = { ok: true; data: T } | { ok: false; error: string };
@@ -26,6 +26,11 @@ interface ElectronAPI {
   openBackupsFolder: () => Promise<Result<string>>;
   saveText: (name: string, content: string, filters?: { name: string; extensions: string[] }[]) => Promise<Result<{ canceled: boolean; filePath?: string }>>;
   savePdf: (name: string, landscape?: boolean) => Promise<Result<{ canceled: boolean; filePath?: string }>>;
+  importTemplate: () => Promise<Result<{ canceled: boolean; filePath?: string }>>;
+  importPick: (opts: ImportOptions) => Promise<Result<{ canceled: boolean; token?: string; fileName?: string; preview?: ImportPreview }>>;
+  importPreview: (token: string, opts: ImportOptions) => Promise<Result<ImportPreview>>;
+  importCommit: (token: string, opts: ImportOptions) => Promise<Result<ImportResult>>;
+  exportMembersXlsx: () => Promise<Result<{ canceled: boolean; filePath?: string }>>;
 }
 
 declare global {
@@ -174,3 +179,22 @@ export function matchesDateRange(dateStr: string | undefined | null, startDate?:
   if (endDate && d > endDate) return false;
   return true;
 }
+
+// Excel import / export (members + till-date payment history) -----------------------------
+/** Native Save dialog → writes the bilingual .xlsx template and opens it in Excel. */
+export const downloadImportTemplate = () => unwrap(bridge().importTemplate());
+/** Native Open dialog → parses + validates; nothing is saved yet. */
+export const pickImportFile = (opts: ImportOptions) => unwrap(bridge().importPick(opts));
+/** Re-validate the picked file with different options (e.g. update existing members). */
+export const previewImport = (token: string, opts: ImportOptions) => unwrap(bridge().importPreview(token, opts));
+/** Imports all valid rows in one transaction (a PreImport snapshot is taken first). */
+export const commitImport = (token: string, opts: ImportOptions) => unwrap(bridge().importCommit(token, opts));
+export const exportMembersToExcel = () => unwrap(bridge().exportMembersXlsx());
+// Sign-in & health --------------------------------------------------------------------------
+export const login = (username: string, password: string) => call<SessionInfo>('login', username, password);
+export const logout = () => call<void>('logout');
+export const getSession = () => call<SessionInfo | null>('getSession');
+export const changeOwnPassword = (current: string, next: string) => call<void>('changeOwnPassword', current, next);
+/** Admin only; not allowed for the protected iqbal_labs account. */
+export const setUserPassword = (userId: number, next: string) => call<void>('setUserPassword', userId, next);
+export const checkAccountingHealth = () => call<HealthReport>('checkAccountingHealth');

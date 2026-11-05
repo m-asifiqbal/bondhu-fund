@@ -12,10 +12,12 @@
  */
 import * as fs from 'fs';
 import * as path from 'path';
+import * as crypto from 'crypto';
 import initSqlJs from 'sql.js';
 import type { Database, SqlJsStatic } from 'sql.js';
+import type { ParsedWorkbook } from './excel';
 
-export const SCHEMA_VERSION = 2;
+export const SCHEMA_VERSION = 3;
 
 let SQL: SqlJsStatic;
 let db: Database;
@@ -284,6 +286,7 @@ function migrate(target: Database) {
     run(SCHEMA); // idempotent: creates any missing table/index
     ensureV2Columns();
     ensureDefaults();
+    ensureAccounts();
     run(`PRAGMA user_version = ${SCHEMA_VERSION}`);
     run('PRAGMA foreign_keys = ON');
   } finally {
@@ -703,6 +706,216 @@ function bulkAddMembers(list: any[]) {
 }
 
 // ---------------------------------------------------------------------------
+// Excel import (members + till-date payment history)
+// ---------------------------------------------------------------------------
+type Level = 'ok' | 'warning' | 'error';
+export interface ImportOptions { existing?: 'skip' | 'update'; payment_method?: string }
+
+/**
+ * Validates a parsed workbook against the database and produces a deterministic plan.
+ * Used for both the preview and the commit, so what the user previews is exactly what is imported.
+ */
+function planImport(p: ParsedWorkbook, opts: ImportOptions = {}) {
+  const existingMode = opts.existing === 'update' ? 'update' : 'skip';
+  const s = settingsMap();
+  const today = todayISO();
+  const curM = currentMonthKey();
+  const defDue = Number(s.default_monthly_due) || 0;
+  const dbMembers = all('SELECT id, member_code, name, monthly_due, join_date FROM members');
+  const dbByCode = new Map(dbMembers.map(m => [String(m.member_code).toLowerCase(), m]));
+  const dbByName = new Map<string, Row[]>();
+  for (const m of dbMembers) {
+    const k = String(m.name).trim().toLowerCase();
+    dbByName.set(k, [...(dbByName.get(k) || []), m]);
+  }
+
+  // ---- members ----
+  const seenCodes = new Map<string, number>();
+  const reservedCodes = p.members.map(m => m.code).filter(Boolean);
+  const members = p.members.map(m => {
+    const msgs: Array<{ level: Level; text: string }> = m.problems.map(t => ({ level: 'error' as Level, text: t }));
+    const name = m.name.trim();
+    if (!name) msgs.push({ level: 'error', text: 'Name is required' });
+    const statusRaw = m.status.trim().toLowerCase();
+    const status = !statusRaw || /^(active|সক্রিয়)$/.test(statusRaw) ? 'Active' : /^(inactive|নিষ্ক্রিয়)$/.test(statusRaw) ? 'Inactive' : null;
+    if (!status) msgs.push({ level: 'error', text: `Status "${m.status}" must be Active or Inactive` });
+    if (m.monthly_due !== null && m.monthly_due < 0) msgs.push({ level: 'error', text: 'Monthly due cannot be negative' });
+    if (m.opening_balance !== null && m.opening_balance < 0) msgs.push({ level: 'error', text: 'Opening balance cannot be negative' });
+    if (m.join_date && m.join_date > today) msgs.push({ level: 'error', text: 'Join date is in the future' });
+    if (m.email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(m.email)) msgs.push({ level: 'warning', text: 'Email looks invalid' });
+
+    let code = m.code.trim();
+    const key = code.toLowerCase();
+    if (code) {
+      if (seenCodes.has(key)) msgs.push({ level: 'error', text: `Member code ${code} appears twice in the file (row ${seenCodes.get(key)})` });
+      else seenCodes.set(key, m.row);
+    }
+    let existing = code ? dbByCode.get(key) : undefined;
+    // No code: re-importing the same sheet must not duplicate people → match a unique exact name already in the app
+    if (!code && name) {
+      const same = dbByName.get(name.toLowerCase()) || [];
+      if (same.length === 1) {
+        existing = same[0];
+        code = String(existing.member_code);
+        msgs.push({ level: 'warning', text: `No member code — matched existing member ${code} by name` });
+      } else if (same.length > 1) {
+        msgs.push({ level: 'error', text: `No member code and ${same.length} members named "${name}" exist — add the Member Code` });
+      }
+    }
+    const action: 'new' | 'update' | 'skip' = existing ? (existingMode === 'update' ? 'update' : 'skip') : 'new';
+    if (existing && action === 'skip') msgs.push({ level: 'warning', text: `${code} already exists — details not changed (choose "Update existing members" to apply changes)` });
+    if (!existing && !code) { code = getNextMemberCode(reservedCodes); reservedCodes.push(code); }
+    const level: Level = msgs.some(x => x.level === 'error') ? 'error' : msgs.length ? 'warning' : 'ok';
+    return {
+      row: m.row, code, name, name_bn: m.name_bn, phone: m.phone, email: m.email, designation: m.designation || 'Member',
+      status: status || 'Active', monthly_due: m.monthly_due ?? (existing ? Number(existing.monthly_due) : defDue),
+      join_date: m.join_date, opening_balance: m.opening_balance ?? 0, notes: m.notes,
+      existingId: existing ? Number(existing.id) : null, action: level === 'error' ? 'error' as const : action, level, messages: msgs,
+      payments: 0, paidTotal: 0, autoGeneratedCode: !m.code.trim() && !existing,
+    };
+  });
+  // First occurrence wins: a later duplicate-code row (an error) must not capture the valid member's payments.
+  const fileByCode = new Map<string, (typeof members)[number]>();
+  for (const m of members) if (m.code && !fileByCode.has(m.code.toLowerCase())) fileByCode.set(m.code.toLowerCase(), m);
+  const fileByName = new Map<string, typeof members>();
+  for (const m of members) { const k = m.name.toLowerCase(); fileByName.set(k, [...(fileByName.get(k) || []), m]); }
+
+  // ---- payments ----
+  const existingPaid = new Set(all('SELECT member_id, payment_month FROM collections').map(r => `${r.member_id}|${r.payment_month}`));
+  const seenPay = new Map<string, string>();
+  const payments = p.payments.map(x => {
+    const msgs: Array<{ level: Level; text: string }> = x.problems.map(t => ({ level: 'error' as Level, text: t }));
+    // resolve member: code first (file, then DB), then unique exact name
+    let fileM = x.code ? fileByCode.get(x.code.toLowerCase()) : undefined;
+    let dbM = !fileM && x.code ? dbByCode.get(x.code.toLowerCase()) : undefined;
+    if (!fileM && !dbM && !x.code && x.name) {
+      const k = x.name.trim().toLowerCase();
+      const fm = fileByName.get(k) || [];
+      // an app member already represented by a sheet row (matched by code or name) is the same person, not a second one
+      const dm = (dbByName.get(k) || []).filter(d => !fm.some(f => f.existingId === Number(d.id)));
+      if (fm.length + dm.length > 1) msgs.push({ level: 'error', text: `More than one member is named "${x.name}" — add the Member Code` });
+      else { fileM = fm[0]; dbM = dm[0]; }
+    }
+    if (!fileM && !dbM) msgs.push({ level: 'error', text: `Member ${x.code || x.name} not found in the Members sheet or the app` });
+    if (fileM && fileM.action === 'error') msgs.push({ level: 'error', text: `Member row ${fileM.row} has errors` });
+    if (x.month > curM) msgs.push({ level: 'error', text: `${x.month} is in the future` });
+
+    const memberId = fileM?.existingId ?? (dbM ? Number(dbM.id) : null);
+    const due = fileM ? fileM.monthly_due : dbM ? Number(dbM.monthly_due) : defDue;
+    const amount = x.amount === null ? due : x.amount;
+    if (!(amount > 0) && !msgs.some(m => m.level === 'error')) msgs.push({ level: 'error', text: 'Amount must be greater than zero' });
+    const key = `${(fileM?.code || dbM?.member_code || x.code || x.name).toLowerCase()}|${x.month}`;
+    if (seenPay.has(key)) msgs.push({ level: 'error', text: `Duplicate: ${x.month} for this member already in cell ${seenPay.get(key)}` });
+    else seenPay.set(key, x.cell);
+
+    let action: 'new' | 'exists' | 'error' = 'new';
+    if (msgs.some(m => m.level === 'error')) action = 'error';
+    else if (memberId && existingPaid.has(`${memberId}|${x.month}`)) {
+      action = 'exists';
+      msgs.push({ level: 'warning', text: `A payment for ${x.month} is already recorded in the app — kept as is` });
+    } else if (fileM && fileM.action === 'skip') {
+      // member skipped but exists in DB: payments still imported against the existing member
+    }
+    if (action === 'new' && fileM) { fileM.payments++; fileM.paidTotal += amount; }
+    return { row: x.row, cell: x.cell, code: fileM?.code || dbM?.member_code || x.code, name: fileM?.name || dbM?.name || x.name,
+      month: x.month, amount, fullMarker: x.amount === null, action, level: (action === 'error' ? 'error' : msgs.length ? 'warning' : 'ok') as Level,
+      messages: msgs, memberId, fileMemberRow: fileM?.row ?? null };
+  });
+
+  // join date: missing → earliest payment month or today; payments before join → move join earlier
+  for (const m of members) {
+    if (m.action === 'error') continue;
+    const months = payments.filter(x => x.fileMemberRow === m.row && x.action === 'new').map(x => x.month).sort();
+    if (!m.join_date) {
+      m.join_date = months.length ? `${months[0]}-01` : today;
+      m.messages.push({ level: 'warning', text: `Join date missing — using ${m.join_date}` });
+    } else if (months.length && months[0] < m.join_date.slice(0, 7)) {
+      m.messages.push({ level: 'warning', text: `Payments start ${months[0]}, before the join date — join date set to ${months[0]}-01` });
+      m.join_date = `${months[0]}-01`;
+    }
+    if (m.level === 'ok' && m.messages.length) m.level = 'warning';
+  }
+
+  const ok = <T extends { action: string }>(xs: T[], a: string) => xs.filter(x => x.action === a).length;
+  const newPays = payments.filter(x => x.action === 'new');
+  return {
+    members, payments,
+    summary: {
+      membersInFile: members.length, newMembers: ok(members, 'new'), updatedMembers: ok(members, 'update'),
+      skippedMembers: ok(members, 'skip'), memberErrors: ok(members, 'error'),
+      paymentsInFile: payments.length, newPayments: newPays.length, existingPayments: ok(payments, 'exists'), paymentErrors: ok(payments, 'error'),
+      paymentTotal: newPays.reduce((a, x) => a + x.amount, 0),
+      openingTotal: members.filter(m => m.action === 'new' || m.action === 'update').reduce((a, m) => a + (m.opening_balance || 0), 0),
+      monthRange: newPays.length ? [newPays.map(x => x.month).sort()[0], newPays.map(x => x.month).sort().slice(-1)[0]] : null,
+      examplesSkipped: p.examplesSkipped,
+    },
+    sheetWarnings: p.sheetWarnings,
+  };
+}
+
+export function previewMemberImport(p: ParsedWorkbook, opts: ImportOptions = {}) {
+  const plan = planImport(p, opts);
+  // keep the payload small for the renderer: members in full, payments only when they need attention
+  return { ...plan, payments: plan.payments.filter(x => x.level !== 'ok').slice(0, 500) };
+}
+
+export function commitMemberImport(p: ParsedWorkbook, opts: ImportOptions = {}) {
+  const plan = planImport(p, opts);
+  const method = opts.payment_method || 'Cash';
+  const dd = dueDay();
+  const today = todayISO();
+  const result = tx(() => {
+    const idByRow = new Map<number, number>();
+    let created = 0, updated = 0, paymentsAdded = 0, amount = 0;
+    for (const m of plan.members) {
+      if (m.action === 'new') {
+        run(`INSERT INTO members (member_code, name, name_bn, phone, email, designation, status, monthly_due, join_date, avatar_initials, opening_balance, notes)
+             VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`,
+          [m.code, m.name, m.name_bn || null, m.phone, m.email, m.designation, m.status, m.monthly_due, m.join_date, initials(m.name), m.opening_balance, m.notes]);
+        idByRow.set(m.row, lastId());
+        created++;
+      } else if (m.action === 'update' && m.existingId) {
+        run(`UPDATE members SET name = ?, name_bn = COALESCE(NULLIF(?, ''), name_bn), phone = COALESCE(NULLIF(?, ''), phone), email = COALESCE(NULLIF(?, ''), email),
+               designation = ?, status = ?, monthly_due = ?, join_date = ?, avatar_initials = ?, opening_balance = ?, notes = COALESCE(NULLIF(?, ''), notes),
+               updated_at = datetime('now','localtime') WHERE id = ?`,
+          [m.name, m.name_bn, m.phone, m.email, m.designation, m.status, m.monthly_due, m.join_date, initials(m.name), m.opening_balance, m.notes, m.existingId]);
+        idByRow.set(m.row, m.existingId);
+        updated++;
+      } else if (m.action === 'skip' && m.existingId) {
+        idByRow.set(m.row, m.existingId);
+      }
+    }
+    for (const x of plan.payments) {
+      if (x.action !== 'new') continue;
+      const memberId = x.fileMemberRow !== null ? idByRow.get(x.fileMemberRow) : x.memberId;
+      if (!memberId) continue;
+      let pd = dueDateOf(x.month, dd);
+      if (pd > today) pd = today;
+      run(`INSERT OR IGNORE INTO collections (member_id, payment_month, payment_date, contribution_amount, late_fee, total_amount, payment_method, trx_id, note, created_by)
+           VALUES (?,?,?,?,0,?,?,?,?,?)`,
+        [memberId, x.month, pd, x.amount, x.amount, method, '', 'Imported from Excel', actor]);
+      paymentsAdded++;
+      amount += x.amount;
+    }
+    audit('import', 'member', null, `Excel import: ${created} new, ${updated} updated members; ${paymentsAdded} payments (${amount})`);
+    return { created, updated, skipped: plan.summary.skippedMembers, errors: plan.summary.memberErrors + plan.summary.paymentErrors, paymentsAdded, amount };
+  });
+  mutated();
+  return result;
+}
+
+/** Members + payment grid for "Export to Excel" (same layout as the import template). */
+export function exportMembersData() {
+  const members = all(`SELECT member_code, name, name_bn, phone, email, designation, status, monthly_due, join_date, opening_balance, notes FROM members ORDER BY member_code`);
+  const payments = all(`SELECT m.member_code, c.payment_month, c.contribution_amount FROM collections c JOIN members m ON m.id = c.member_id`) as
+    Array<{ member_code: string; payment_month: string; contribution_amount: number }>;
+  const first = all('SELECT MIN(payment_month) AS f FROM collections')[0]?.f || currentMonthKey();
+  const months: string[] = [];
+  for (let k = first; k <= currentMonthKey() && months.length < 240; k = addMonths(k, 1)) months.push(k);
+  return { members, payments, months };
+}
+
+// ---------------------------------------------------------------------------
 // Collections
 // ---------------------------------------------------------------------------
 const COLL_SORT: Record<string, string> = {
@@ -948,7 +1161,7 @@ function deleteExpense(id: number) {
 // ---------------------------------------------------------------------------
 // Never send credential columns to the renderer.
 const USER_COLS = `id, username, full_name, email, role, avatar_initials, status, created_at, phone, designation, address, bio, avatar,
-  last_login_at, updated_at, (password_hash IS NOT NULL) AS has_password`;
+  last_login_at, updated_at, is_system, (password_hash IS NOT NULL) AS has_password`;
 const getUsers = () => all(`SELECT ${USER_COLS} FROM users ORDER BY id`);
 
 /** Profile page: user + activity statistics from the audit log. */
@@ -1015,11 +1228,164 @@ function updateUser(id: number, u: any) {
 function deleteUser(id: number) {
   const u = get('SELECT * FROM users WHERE id = ?', [id]);
   if (!u) return;
+  if (u.is_system) fail('The iqbal_labs account is protected and cannot be deleted.');
+  if (session && u.id === session.id) fail('You cannot delete the account you are signed in with.');
   if (num('SELECT COUNT(*) FROM users') <= 1) fail('You cannot delete the only user.');
   if (u.role === 'Admin' && num(`SELECT COUNT(*) FROM users WHERE role='Admin' AND status='Active'`) <= 1) fail('You cannot delete the last Admin.');
   tx(() => { run('DELETE FROM users WHERE id = ?', [id]); audit('delete', 'user', id, u.username); });
   mutated();
 }
+
+// ---------------------------------------------------------------------------
+// Sign-in, session & permissions
+// ---------------------------------------------------------------------------
+/**
+ * Built-in accounts (ensured on every open):
+ *  - admin       : role Admin, initial password "admin" (changeable). Everything except data upload.
+ *  - iqbal_labs  : protected system account, fixed password (only its scrypt hash is stored here),
+ *                  the ONLY account allowed to upload data (Excel / bulk member import).
+ */
+const SYSTEM_USER = 'iqbal_labs';
+const SYSTEM_SALT = '1b67ae44a77d2428a68be9cc886d8780';
+const SYSTEM_HASH = 'e18f832c1169fc1b872765ebfd326224e7e9ac637ea143e0e8b26bcb1650b331a9edf6f1cb9cd3b03fefaa5711d88b098969a050254d52b336ec88a826410b29';
+const SCRYPT = { N: 16384, r: 8, p: 1 };
+
+interface Session { id: number; username: string; role: string; isSystem: boolean }
+let session: Session | null = null;
+
+function hashPassword(password: string, salt = crypto.randomBytes(16).toString('hex')) {
+  return { salt, hash: crypto.scryptSync(password, salt, 64, SCRYPT).toString('hex') };
+}
+function verifyPassword(password: string, salt: string, hash: string) {
+  const a = Buffer.from(crypto.scryptSync(password, salt, 64, SCRYPT).toString('hex'), 'hex');
+  const b = Buffer.from(hash, 'hex');
+  return a.length === b.length && crypto.timingSafeEqual(a, b);
+}
+
+/** Schema v3: is_system flag + the two built-in accounts. Idempotent. */
+function ensureAccounts() {
+  addColumn('users', 'is_system', 'INTEGER NOT NULL DEFAULT 0');
+  const admin = get(`SELECT id, password_hash FROM users WHERE username = 'admin'`);
+  if (!admin) {
+    const h = hashPassword('admin');
+    run(`INSERT INTO users (username, full_name, email, role, avatar_initials, status, password_hash, password_salt, must_change_password)
+         VALUES ('admin','Administrator','','Admin','AD','Active',?,?,1)`, [h.hash, h.salt]);
+  } else if (!admin.password_hash) {
+    const h = hashPassword('admin');
+    run(`UPDATE users SET password_hash = ?, password_salt = ?, must_change_password = 1, status = 'Active', role = 'Admin' WHERE id = ?`, [h.hash, h.salt, admin.id]);
+  }
+  const sys = get('SELECT id FROM users WHERE username = ?', [SYSTEM_USER]);
+  if (!sys) {
+    run(`INSERT INTO users (username, full_name, email, role, avatar_initials, status, password_hash, password_salt, is_system, designation)
+         VALUES (?, 'Iqbal Labs', '', 'Admin', 'IL', 'Active', ?, ?, 1, 'System owner')`, [SYSTEM_USER, SYSTEM_HASH, SYSTEM_SALT]);
+  } else {
+    // fixed account: credentials, role and status are always restored
+    run(`UPDATE users SET password_hash = ?, password_salt = ?, is_system = 1, role = 'Admin', status = 'Active', must_change_password = 0 WHERE id = ?`,
+      [SYSTEM_HASH, SYSTEM_SALT, sys.id]);
+  }
+}
+
+function login(username: string, password: string) {
+  const u = get(`SELECT * FROM users WHERE username = ? COLLATE NOCASE`, [String(username || '').trim()]);
+  const bad = () => fail('Incorrect username or password.');
+  if (!u) bad();
+  if (u.status !== 'Active') fail('This account is inactive. Ask an administrator to activate it.');
+  if (!u.password_hash) fail('No password has been set for this account yet. Ask an administrator to set one.');
+  const lockedUntil = u.failed_logins >= 5 && u.last_login_at ? Date.parse(u.last_login_at.replace(' ', 'T')) + 5 * 60_000 : 0;
+  if (lockedUntil > Date.now()) fail('Too many wrong attempts. Please wait 5 minutes and try again.');
+  if (!verifyPassword(String(password || ''), u.password_salt, u.password_hash)) {
+    run(`UPDATE users SET failed_logins = failed_logins + 1, last_login_at = CASE WHEN failed_logins + 1 >= 5 THEN datetime('now','localtime') ELSE last_login_at END WHERE id = ?`, [u.id]);
+    mutated();
+    bad();
+  }
+  run(`UPDATE users SET failed_logins = 0, last_login_at = datetime('now','localtime') WHERE id = ?`, [u.id]);
+  session = { id: u.id, username: u.username, role: u.role, isSystem: !!u.is_system };
+  setActor(`${u.full_name} (${u.role})`, u.id);
+  audit('login', 'user', u.id, u.username);
+  mutated();
+  return getSession();
+}
+
+function logout() {
+  if (session) { audit('logout', 'user', session.id, session.username); mutated(); }
+  session = null;
+  setActor('System', null);
+}
+
+function getSession() {
+  if (!session) return null;
+  const u = get(`SELECT ${USER_COLS}, must_change_password, is_system FROM users WHERE id = ?`, [session.id]);
+  if (!u || u.status !== 'Active') { session = null; return null; }      // e.g. after a restore
+  session.role = u.role;
+  return { user: u, canUpload: !!u.is_system, isAdmin: u.role === 'Admin', mustChangePassword: !!u.must_change_password && !u.is_system };
+}
+
+/** After a restore the database is different: drop the session if that user no longer exists. */
+export function revalidateSession() { getSession(); }
+
+function changeOwnPassword(current: string, next: string) {
+  if (!session) fail('Please sign in first.');
+  if (session.isSystem) fail('The iqbal_labs account password is fixed and cannot be changed.');
+  const u = get('SELECT * FROM users WHERE id = ?', [session.id]);
+  if (!verifyPassword(String(current || ''), u.password_salt, u.password_hash)) fail('Current password is incorrect.');
+  validateNewPassword(next, u.username);
+  const h = hashPassword(next);
+  tx(() => {
+    run(`UPDATE users SET password_hash = ?, password_salt = ?, must_change_password = 0, updated_at = datetime('now','localtime') WHERE id = ?`, [h.hash, h.salt, u.id]);
+    audit('password', 'user', u.id, 'changed own password');
+  });
+  mutated();
+}
+
+function setUserPassword(userId: number, next: string) {
+  const u = get('SELECT * FROM users WHERE id = ?', [userId]);
+  if (!u) fail('User not found.');
+  if (u.is_system) fail('The iqbal_labs account password is fixed and cannot be changed.');
+  validateNewPassword(next, u.username);
+  const h = hashPassword(next);
+  tx(() => {
+    run(`UPDATE users SET password_hash = ?, password_salt = ?, must_change_password = 1, failed_logins = 0, updated_at = datetime('now','localtime') WHERE id = ?`, [h.hash, h.salt, userId]);
+    audit('password', 'user', userId, `password set by ${session?.username}`);
+  });
+  mutated();
+}
+
+function validateNewPassword(p: string, username: string) {
+  const s = String(p || '');
+  if (s.length < 6) fail('Password must be at least 6 characters.');
+  if (s.toLowerCase() === String(username).toLowerCase() || s === 'admin') fail('Choose a password that is different from the username and from "admin".');
+}
+
+// Permission model -----------------------------------------------------------------------
+const PUBLIC = new Set(['login', 'getSession', 'getAppSettings']);
+const UPLOAD = new Set(['bulkAddMembers']);                          // + Excel import IPC (main.ts)
+const ADMIN = new Set(['addUser', 'deleteUser', 'setUserPassword', 'saveAppSettings', 'resetDatabase', 'loadDemoData',
+  'addMasterItem', 'updateMasterItem', 'deleteMasterItem']);
+const READ = /^(get|suggest|preview|export)/;
+
+/** Throws unless the signed-in user may call `method` with `args`. Called by main.ts for every IPC call. */
+export function authorize(method: string, args: any[] = []) {
+  if (PUBLIC.has(method)) return;
+  const s = getSession();
+  if (!s) fail('Your session has ended. Please sign in again.');
+  if (UPLOAD.has(method) && !s.canUpload) fail('Data upload is only available to the iqbal_labs account.');
+  if (ADMIN.has(method) && !s.isAdmin) fail('Only an Admin can do this.');
+  if (method === 'updateUser') {
+    const targetId = Number(args[0]);
+    const patch = args[1] || {};
+    const target = get('SELECT is_system FROM users WHERE id = ?', [targetId]);
+    if (target?.is_system && targetId !== s.user.id) fail('The iqbal_labs account is protected.');
+    const privileged = ['role', 'status'].some(k => patch[k] !== undefined);
+    if (targetId !== s.user.id && !s.isAdmin) fail('You can only edit your own profile.');
+    if (privileged && (targetId === s.user.id || !s.isAdmin)) fail(targetId === s.user.id ? 'You cannot change your own role or status.' : 'Only an Admin can change roles.');
+  }
+  if (s.user.role === 'Auditor' && !READ.test(method) && !['logout', 'changeOwnPassword', 'updateUser', 'setActor'].includes(method)) {
+    fail('Auditors have read-only access.');
+  }
+}
+export function requireUpload() { const s = getSession(); if (!s?.canUpload) fail('Data upload is only available to the iqbal_labs account.'); }
+export function requireAdmin() { const s = getSession(); if (!s) fail('Please sign in.'); if (!s.isAdmin) fail('Only an Admin can do this.'); }
+export function requireSession() { if (!getSession()) fail('Please sign in.'); }
 
 function getMasterData(type?: string, activeOnly = false) {
   const where: string[] = [];
@@ -1273,7 +1639,116 @@ function resetDatabase(keepSetup = true) {
     audit('reset', 'database', null, keepSetup ? 'business data cleared' : 'factory reset');
   });
   ensureDefaults();
+  ensureAccounts();
   mutated();
+}
+
+/**
+ * Accounting health check: verifies every stored entry and reconciles the books.
+ * Read-only. Each check: pass | warn (should be reviewed) | fail (data is wrong).
+ */
+function checkAccountingHealth() {
+  type Status = 'pass' | 'warn' | 'fail';
+  const checks: Array<{ id: string; title: string; status: Status; count: number; details: string[] }> = [];
+  const today = todayISO();
+  const add = (id: string, title: string, status: Status, rows: Row[], fmt: (r: Row) => string) =>
+    checks.push({ id, title, status: rows.length ? status : 'pass', count: rows.length, details: rows.slice(0, 20).map(fmt) });
+  const ISO = `(%s GLOB '[0-9][0-9][0-9][0-9]-[0-1][0-9]-[0-3][0-9]')`;
+  const iso = (col: string) => ISO.replace('%s', col);
+
+  // database engine
+  const integrity = String(db.exec('PRAGMA integrity_check')[0]?.values[0]?.[0] ?? 'unknown');
+  checks.push({ id: 'integrity', title: 'Database file integrity', status: integrity === 'ok' ? 'pass' : 'fail', count: integrity === 'ok' ? 0 : 1, details: integrity === 'ok' ? [] : [integrity] });
+  add('fk', 'Payments linked to existing members', 'fail', all('SELECT c.id, c.member_id FROM collections c LEFT JOIN members m ON m.id = c.member_id WHERE m.id IS NULL'),
+    r => `Payment #${r.id} points to missing member #${r.member_id}`);
+
+  // collections
+  add('coll_total', 'Payment total = contribution + late fee', 'fail',
+    all('SELECT c.id, m.member_code, c.payment_month, c.contribution_amount, c.late_fee, c.total_amount FROM collections c JOIN members m ON m.id=c.member_id WHERE ABS(c.total_amount - (c.contribution_amount + c.late_fee)) > 0.009'),
+    r => `${r.member_code} ${r.payment_month}: ${r.contribution_amount} + ${r.late_fee} ≠ ${r.total_amount}`);
+  add('coll_amount', 'Payment amounts are positive', 'fail',
+    all('SELECT c.id, m.member_code, c.payment_month, c.contribution_amount, c.late_fee FROM collections c JOIN members m ON m.id=c.member_id WHERE c.contribution_amount <= 0 OR c.late_fee < 0'),
+    r => `${r.member_code} ${r.payment_month}: contribution ${r.contribution_amount}, late fee ${r.late_fee}`);
+  add('coll_dates', 'Payment dates and months are valid', 'fail',
+    all(`SELECT c.id, m.member_code, c.payment_month, c.payment_date FROM collections c JOIN members m ON m.id=c.member_id
+         WHERE NOT ${iso('c.payment_date')} OR c.payment_month NOT GLOB '[0-9][0-9][0-9][0-9]-[0-1][0-9]'`),
+    r => `${r.member_code}: month "${r.payment_month}", date "${r.payment_date}"`);
+  add('coll_future', 'No payments dated in the future', 'fail',
+    all('SELECT c.id, m.member_code, c.payment_month, c.payment_date FROM collections c JOIN members m ON m.id=c.member_id WHERE c.payment_date > ? OR c.payment_month > ?', [today, today.slice(0, 7)]),
+    r => `${r.member_code} ${r.payment_month} paid ${r.payment_date}`);
+  add('coll_before_join', 'Payments are not for months before the member joined', 'warn',
+    all('SELECT m.member_code, m.name, c.payment_month, m.join_date FROM collections c JOIN members m ON m.id=c.member_id WHERE c.payment_month < substr(m.join_date,1,7)'),
+    r => `${r.member_code} ${r.name}: paid ${r.payment_month}, joined ${r.join_date}`);
+  add('coll_overpay', 'Contribution matches the monthly due', 'warn',
+    all('SELECT m.member_code, m.name, c.payment_month, c.contribution_amount, m.monthly_due FROM collections c JOIN members m ON m.id=c.member_id WHERE ABS(c.contribution_amount - m.monthly_due) > 0.009'),
+    r => `${r.member_code} ${r.payment_month}: paid ${r.contribution_amount}, due ${r.monthly_due}`);
+
+  // members
+  add('mem_values', 'Member dues and opening balances are valid', 'fail',
+    all(`SELECT member_code, name, monthly_due, opening_balance, join_date FROM members WHERE monthly_due < 0 OR opening_balance < 0 OR TRIM(name) = '' OR NOT ${iso('join_date')}`),
+    r => `${r.member_code} ${r.name}: due ${r.monthly_due}, opening ${r.opening_balance}, joined "${r.join_date}"`);
+  add('mem_future', 'No members joining in the future', 'warn',
+    all('SELECT member_code, name, join_date FROM members WHERE join_date > ?', [today]), r => `${r.member_code} ${r.name}: ${r.join_date}`);
+
+  // expenses
+  add('exp_values', 'Expenses have a positive amount and a valid date', 'fail',
+    all(`SELECT id, title, amount, expense_date FROM expenses WHERE amount <= 0 OR NOT ${iso('expense_date')} OR expense_date > ?`, [today]),
+    r => `#${r.id} ${r.title}: ${r.amount} on "${r.expense_date}"`);
+  add('exp_category', 'Expense categories exist in master data', 'warn',
+    all(`SELECT DISTINCT category FROM expenses WHERE category NOT IN (SELECT name FROM master_data WHERE type='expense_category')`), r => String(r.category));
+  add('exp_receipt', 'Expenses have receipts', 'warn',
+    all(`SELECT id, title, amount, expense_date FROM expenses WHERE status = 'Needs receipt'`), r => `${r.title} (${r.amount}, ${r.expense_date})`);
+
+  // investments
+  add('inv_values', 'Investments have valid amounts and dates', 'fail',
+    all(`SELECT id, name, invested_amount, current_estimated_value, purchase_date FROM investments
+         WHERE invested_amount <= 0 OR current_estimated_value < 0 OR NOT ${iso('purchase_date')} OR purchase_date > ?`, [today]),
+    r => `${r.name}: cost ${r.invested_amount}, value ${r.current_estimated_value}, bought "${r.purchase_date}"`);
+  add('inv_sold', 'Sold investments have sale amount and date', 'fail',
+    all(`SELECT id, name, sold_amount, sold_date, purchase_date FROM investments WHERE status = 'Sold' AND (sold_amount IS NULL OR sold_amount < 0 OR sold_date IS NULL OR sold_date < purchase_date)`),
+    r => `${r.name}: sold ${r.sold_amount ?? '—'} on ${r.sold_date ?? '—'}`);
+  add('inv_sector', 'Investment sectors exist in master data', 'warn',
+    all(`SELECT DISTINCT sector FROM investments WHERE sector NOT IN (SELECT name FROM master_data WHERE type='investment_sector')`), r => String(r.sector));
+
+  // settings
+  const st = settingsMap();
+  const badSettings: Row[] = [];
+  if (!(+st.monthly_due_day >= 1 && +st.monthly_due_day <= 28)) badSettings.push({ k: `monthly_due_day = ${st.monthly_due_day}` });
+  if (!(+st.late_fee_amount >= 0)) badSettings.push({ k: `late_fee_amount = ${st.late_fee_amount}` });
+  if (!(+st.default_monthly_due >= 0)) badSettings.push({ k: `default_monthly_due = ${st.default_monthly_due}` });
+  add('settings', 'Fund settings are valid', 'fail', badSettings, r => r.k);
+
+  // reconciliation: independent sums vs. the fund position used everywhere in the app
+  const pos = fundPosition('9999-12-31');
+  const opening = num('SELECT COALESCE(SUM(opening_balance),0) FROM members');
+  const credits = num('SELECT COALESCE(SUM(total_amount),0) FROM collections')
+    + num(`SELECT COALESCE(SUM(sold_amount),0) FROM investments WHERE status='Sold'`);
+  const debits = num('SELECT COALESCE(SUM(amount),0) FROM expenses') + num('SELECT COALESCE(SUM(invested_amount),0) FROM investments');
+  const ledgerCash = opening + credits - debits;
+  const diff = Math.round((ledgerCash - pos.cashInHand) * 100) / 100;
+  checks.push({ id: 'reconcile', title: 'Cash book reconciles with cash in hand', status: Math.abs(diff) < 0.01 ? 'pass' : 'fail',
+    count: Math.abs(diff) < 0.01 ? 0 : 1, details: Math.abs(diff) < 0.01 ? [] : [`Ledger ${ledgerCash} vs cash in hand ${pos.cashInHand} (difference ${diff})`] });
+  const memberSum = num(`SELECT COALESCE(SUM(m.opening_balance + COALESCE((SELECT SUM(contribution_amount) FROM collections c WHERE c.member_id = m.id),0)),0) FROM members m`);
+  const contribSum = opening + num('SELECT COALESCE(SUM(contribution_amount),0) FROM collections');
+  checks.push({ id: 'member_totals', title: 'Member totals add up to total contributions', status: Math.abs(memberSum - contribSum) < 0.01 ? 'pass' : 'fail',
+    count: Math.abs(memberSum - contribSum) < 0.01 ? 0 : 1, details: Math.abs(memberSum - contribSum) < 0.01 ? [] : [`Members ${memberSum} vs contributions ${contribSum}`] });
+  if (pos.cashInHand < 0) checks.push({ id: 'negative_cash', title: 'Cash in hand is not negative', status: 'warn', count: 1,
+    details: [`Cash in hand is ${pos.cashInHand}: more was spent or invested than was collected (missing opening balances or payments?)`] });
+
+  const fails = checks.filter(c => c.status === 'fail').length, warns = checks.filter(c => c.status === 'warn').length;
+  return {
+    checkedAt: new Date().toISOString(),
+    status: (fails ? 'fail' : warns ? 'warn' : 'pass') as Status,
+    fails, warns, passes: checks.length - fails - warns,
+    totals: {
+      members: num('SELECT COUNT(*) FROM members'), payments: num('SELECT COUNT(*) FROM collections'),
+      expenses: num('SELECT COUNT(*) FROM expenses'), investments: num('SELECT COUNT(*) FROM investments'),
+      openingBalances: opening, collected: num('SELECT COALESCE(SUM(total_amount),0) FROM collections'),
+      spent: num('SELECT COALESCE(SUM(amount),0) FROM expenses'), invested: num('SELECT COALESCE(SUM(invested_amount),0) FROM investments'),
+      fundBalance: pos.fundBalance, cashInHand: pos.cashInHand,
+    },
+    checks,
+  };
 }
 
 /** Realistic 18-month demo dataset relative to today (for training / evaluation). */
@@ -1358,8 +1833,10 @@ export const api: Record<string, (...args: any[]) => any> = {
   getInvestments, addInvestment, updateInvestment, updateInvestmentValuation, deleteInvestment,
   getExpenses, addExpense, updateExpense, verifyExpenseReceipt, deleteExpense,
   getUsers, getUserProfile, addUser, updateUser, deleteUser,
+  login, logout, getSession, changeOwnPassword, setUserPassword, checkAccountingHealth,
   getMasterData, addMasterItem, updateMasterItem, deleteMasterItem,
   getOverviewMetrics, getOverviewData, getTransactions, getAuditLog, getDynamicNotifications,
   getBackupLogs, getDatabaseStats, resetDatabase, loadDemoData,
-  setActor: (n: string, id?: number) => setActor(n, id),
+  // actor now comes from the signed-in session; kept as a no-op for older renderer code
+  setActor: () => undefined,
 };

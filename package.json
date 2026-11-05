@@ -1,6 +1,6 @@
 {
     "name": "bondhu-fund-desktop",
-    "version": "2.1.0",
+    "version": "2.2.0",
     "description": "Bondhu Fund - offline fund management for member savings groups",
     "main": "dist-electron/main.js",
     "scripts": {
@@ -14,7 +14,8 @@
         "start": "cmd /c \"set ELECTRON_RUN_AS_NODE=&& node_modules\\electron\\dist\\electron.exe .\"",
         "typecheck": "tsc --noEmit && tsc -p tsconfig.electron.json --noEmit",
         "test:db": "tsc -p tsconfig.electron.json && node scripts/db-test.js",
-        "screenshots": "npm run build:all && cross-env ELECTRON_RUN_AS_NODE= electron scripts/capture-screenshots.js"
+        "screenshots": "npm run build:all && cross-env ELECTRON_RUN_AS_NODE= electron scripts/capture-screenshots.js",
+        "test:import": "tsc -p tsconfig.electron.json && node scripts/import-test.js"
     },
     "build": {
         "appId": "org.bondhufund.desktop",
@@ -78,6 +79,7 @@
         "electronVersion": "35.7.5"
     },
     "dependencies": {
+        "exceljs": "^4.4.0",
         "sql.js": "^1.12.0"
     },
     "devDependencies": {
