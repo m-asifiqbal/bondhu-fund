@@ -1,0 +1,75 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  body {
+    @apply bg-slate-100/80 text-slate-900 antialiased overflow-x-hidden selection:bg-[#0f4a3c] selection:text-white;
+  }
+
+  /* Dark mode root styles */
+  .dark body,
+  .dark {
+    @apply bg-[#0b1317] text-slate-100;
+    color-scheme: dark;
+  }
+}
+
+/* Custom UI Component Classes */
+@layer components {
+  /* High contrast card that will NEVER melt down */
+  .card-base {
+    @apply bg-white dark:bg-[#142026] rounded-2xl border border-slate-200/90 dark:border-[#22353f] shadow-[0_2px_8px_rgba(15,74,60,0.04)] dark:shadow-[0_2px_12px_rgba(0,0,0,0.3)] transition-all;
+  }
+
+  /* Form outline input with strong depth and crisp contrast */
+  .form-input {
+    @apply w-full px-3.5 py-2.5 bg-white dark:bg-[#101b21] border border-slate-300 dark:border-[#283d47] rounded-xl text-xs text-slate-900 dark:text-slate-100 placeholder-slate-400 dark:placeholder-slate-500 font-medium focus:outline-none focus:border-[#0f4a3c] dark:focus:border-emerald-500 focus:ring-2 focus:ring-[#0f4a3c]/20 dark:focus:ring-emerald-500/20 shadow-sm transition-all;
+  }
+
+  /* Sleek custom dropdown style */
+  .form-select {
+    @apply w-full px-3.5 py-2.5 bg-white dark:bg-[#101b21] border border-slate-300 dark:border-[#283d47] rounded-xl text-xs font-semibold text-slate-900 dark:text-slate-100 focus:outline-none focus:border-[#0f4a3c] dark:focus:border-emerald-500 focus:ring-2 focus:ring-[#0f4a3c]/20 dark:focus:ring-emerald-500/20 shadow-sm cursor-pointer transition-all;
+  }
+
+  /* Deep, clear form label */
+  .form-label {
+    @apply block text-slate-800 dark:text-slate-200 font-bold text-xs mb-1.5;
+  }
+
+  /* Deep, legible form hint */
+  .form-hint {
+    @apply text-slate-600 dark:text-slate-400 font-medium text-[11px] leading-relaxed mt-1 block;
+  }
+}
+
+/* Custom sleek scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: #f1f5f9;
+}
+.dark ::-webkit-scrollbar-track {
+  background: #0d161a;
+}
+::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+  border-radius: 9999px;
+}
+.dark ::-webkit-scrollbar-thumb {
+  background: #253944;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #94a3b8;
+}
+.dark ::-webkit-scrollbar-thumb:hover {
+  background: #344f5e;
+}
+
+/* Smooth transitions */
+button, a, input, select, textarea {
+  transition: all 0.15s ease-in-out;
+}
+
