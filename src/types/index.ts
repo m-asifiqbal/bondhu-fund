@@ -1,4 +1,4 @@
-export type PaymentStatus = 'Paid' | 'Pending' | 'Overdue';
+﻿export type PaymentStatus = 'Paid' | 'Pending' | 'Overdue';
 export type InvestmentStatus = 'Growing' | 'Review' | 'Sold';
 export type ExpenseStatus = 'Verified' | 'Needs receipt';
 export type UserRole = 'Treasurer' | 'Admin' | 'Auditor' | 'Manager';
@@ -42,7 +42,9 @@ export interface Member {
   avatar_initials: string;
   total_contributed?: number;
   last_payment_date?: string;
-  current_month_status?: PaymentStatus;
+  current_month_status?: PaymentStatus | null;
+  opening_balance?: number;
+  notes?: string;
 }
 
 export interface CollectionRecord {
@@ -61,6 +63,10 @@ export interface CollectionRecord {
   trx_id: string;
   note: string;
   created_at?: string;
+  payment_id?: number | null;
+  monthly_due?: number;
+  member_phone?: string;
+  avatar_initials?: string;
 }
 
 export interface Investment {
@@ -75,6 +81,9 @@ export interface Investment {
   review_date?: string; // e.g. "28 June 2024"
   notes?: string;
   location_details?: string;
+  sold_date?: string | null;
+  sold_amount?: number | null;
+  created_at?: string;
 }
 
 export interface Expense {
@@ -87,6 +96,7 @@ export interface Expense {
   receipt_ref: string;
   status: ExpenseStatus; // "Verified" | "Needs receipt"
   notes?: string;
+  created_at?: string;
 }
 
 export interface AppUser {
@@ -113,7 +123,7 @@ export interface BackupRecord {
   file_name: string;
   file_path: string;
   file_size: number;
-  backup_type: 'Manual' | 'Pre-Restore' | 'Automatic';
+  backup_type: 'Manual' | 'Pre-Restore' | 'Automatic' | 'Restored';
   created_at: string;
 }
 
@@ -125,6 +135,9 @@ export interface AppSettings {
   late_fee_amount: number;
   last_backup_date: string;
   active_user_id: number;
+  fiscal_year_start_month?: number;
+  auto_backup_enabled?: boolean;
+  auto_backup_keep?: number;
 }
 
 export interface OverviewMetrics {
@@ -142,4 +155,72 @@ export interface OverviewMetrics {
   paid_count?: number;
   pending_count?: number;
   overdue_count?: number;
+  cash_in_hand?: number;
+  fund_balance_at_cost?: number;
+}
+
+// ---------------------------------------------------------------------------
+// v1 data-layer types (main-process database). Dates 'YYYY-MM-DD', months 'YYYY-MM'.
+// ---------------------------------------------------------------------------
+export interface MemberStats { total: number; active: number; paid: number; pending: number; overdue: number }
+
+export interface CollectionStats {
+  totalMembers: number; paidCount: number; pendingCount: number; overdueCount: number;
+  collectedAmount: number; lateFeeAmount: number; expectedAmount: number; outstandingAmount: number; percentage: string;
+}
+
+export interface MemberStatement {
+  member: Member;
+  rows: Array<Partial<CollectionRecord> & { payment_month: string; due_date: string; monthly_due: number; status: PaymentStatus }>;
+}
+
+export interface LedgerRow {
+  type: 'collection' | 'expense' | 'investment' | 'sale';
+  date: string; party: string; description: string; method: string; reference: string; credit: number; debit: number;
+}
+
+export interface AuditEntry { id: number; at: string; user_name: string; action: string; entity: string; entity_id: number | null; details: string }
+
+export interface SnapshotFile { fileName: string; filePath: string; size: number; sizeKb: string; createdAt: string }
+
+export interface AppInfo {
+  version: string; dbPath: string; backupsDir: string; sizeKb: string; lastModified: string | null;
+  schemaVersion: number; members: number; collections: number; investments: number; expenses: number;
+  users: number; masterData: number; auditEntries: number;
+}
+
+export interface TrendPoint {
+  month: string; expected: number; collected: number; lateFees: number; rate: number;
+  expenses: number; invested: number; fundBalance: number; cashInHand: number;
+}
+
+export interface OverviewData {
+  month: string;
+  today: string;
+  kpis: {
+    netWorth: number; prevNetWorth: number; fundBalance: number; prevFundBalance: number;
+    cashInHand: number; prevCashInHand: number; lifetimeCollected: number; totalExpenses: number; realizedGain: number;
+    monthCollected: number; prevMonthCollected: number; monthReceived: number; monthExpected: number;
+    collectionRate: number; prevCollectionRate: number; monthLateFees: number; monthExpenses: number; prevMonthExpenses: number;
+    outstanding: number; paid: number; pending: number; overdue: number; dueMembers: number;
+    activeMembers: number; totalMembers: number; newMembersThisMonth: number;
+    invested: number; portfolioValue: number; unrealizedGain: number; investmentCount: number;
+    totalArrears: number; membersInArrears: number;
+  };
+  trend: TrendPoint[];
+  expenseByCategory: Array<{ name: string; value: number; count: number }>;
+  portfolio: Array<{ name: string; invested: number; value: number; count: number }>;
+  investments: Array<{ id: number; name: string; sector: string; invested_amount: number; current_estimated_value: number; status: string; review_date: string | null }>;
+  paymentMethods: Array<{ name: string; count: number; value: number }>;
+  topContributors: Array<{ id: number; name: string; member_code: string; avatar_initials: string; total: number }>;
+  dailyCollections: Array<{ date: string; value: number; count: number }>;
+  arrears: Array<{ id: number; member_code: string; name: string; phone: string; monthly_due: number; avatar_initials: string; months: number; amount: number }>;
+  attention: {
+    overdue: number;
+    reviews: Array<{ id: number; name: string; review_date: string | null }>;
+    receipts: Array<{ id: number; title: string; amount: number; expense_date: string }>;
+    receiptCount: number;
+    lastBackup: string;
+  };
+  recent: Array<{ kind: 'collection' | 'expense' | 'investment' | 'member'; id: number; title: string; sub: string; amount: number; date: string; created_at: string }>;
 }

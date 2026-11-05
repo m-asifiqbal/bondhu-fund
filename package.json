@@ -65,6 +65,7 @@
     "autoprefixer": "^10.4.20",
     "concurrently": "^8.2.2",
     "cross-env": "^7.0.3",
+    "echarts": "^5.5.1",
     "electron": "^29.4.0",
     "electron-builder": "^26.18.0",
     "postcss": "^8.4.47",

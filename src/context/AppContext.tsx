@@ -1,8 +1,9 @@
-import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
+﻿import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
 import { Copy, Check, AlertCircle, CheckCircle2, Info, X } from 'lucide-react';
 import { AppUser, AppNotification, NavTab } from '../types';
 export type { NavTab };
-import { getUsers, getDynamicNotifications } from '../services/db';
+import { getUsers, getDynamicNotifications, setActor, getAppSettings, saveAppSettings } from '../services/db';
+import { formatDate as formatDateUtil, formatMonth as formatMonthUtil, monthKeyToName, currentMonthKey } from '../utils/date';
 import { AppLanguage, translations, formatCurrency as formatCurrencyUtil, toBanglaDigits as toBanglaDigitsUtil } from '../utils/i18n';
 
 interface ToastInfo {
@@ -42,21 +43,31 @@ interface AppContextType {
   t: (key: string, fallback?: string) => string;
   formatCurrency: (amount: number) => string;
   toBanglaDigits: (val: string | number) => string;
+  /** '2024-06-05' -> '05 Jun 2024' (language aware) */
+  formatDate: (iso?: string | null) => string;
+  /** '2024-06' or 'June 2024' -> 'Jun 2024' (language aware) */
+  formatMonth: (month?: string | null) => string;
 }
 
 const AppContext = createContext<AppContextType | undefined>(undefined);
 
 export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [activeTab, setActiveTab] = useState<NavTab>('overview');
-  const [selectedMonth, setSelectedMonth] = useState('June 2024');
-  const [currentUser, setCurrentUser] = useState<AppUser | null>(null);
+  const [selectedMonth, setSelectedMonth] = useState(() => monthKeyToName(currentMonthKey()));
+  const [currentUser, setCurrentUserState] = useState<AppUser | null>(null);
+  const setCurrentUser = (u: AppUser) => {
+    setCurrentUserState(u);
+    saveAppSettings({ active_user_id: u.id }).catch(() => undefined);
+  };
   const [users, setUsers] = useState<AppUser[]>([]);
   const [refreshKey, setRefreshKey] = useState(0);
   const [toasts, setToasts] = useState<ToastInfo[]>([]);
   const [openRecordModal, setOpenRecordModal] = useState(false);
   const [entryCenterInitialTab, setEntryCenterInitialTab] = useState<'money' | 'expense' | 'investment'>('money');
   const [notifications, setNotifications] = useState<AppNotification[]>([]);
-  const [readNotifIds, setReadNotifIds] = useState<Set<string>>(new Set());
+  const [readNotifIds, setReadNotifIds] = useState<Set<string>>(() => {
+    try { return new Set(JSON.parse(localStorage.getItem('bondhu_read_notifs') || '[]')); } catch { return new Set(); }
+  });
   const [memberFilterStatus, setMemberFilterStatus] = useState<string>('All');
   const [selectedMemberIdForPayment, setSelectedMemberIdForPayment] = useState<number | null>(null);
   const [copiedToastId, setCopiedToastId] = useState<number | null>(null);
@@ -137,26 +148,52 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     setToasts(prev => prev.filter(t => t.id !== id));
   };
 
-  useEffect(() => {
-    getUsers().then(list => {
-      setUsers(list);
-      if (list.length > 0 && !currentUser) {
-        const nusrat = list.find(u => u.username === 'nusrat.jahan') || list[0];
-        setCurrentUser(nusrat);
-      }
-    });
+  const formatDate = useCallback((iso?: string | null) => formatDateUtil(iso, language), [language]);
+  const formatMonth = useCallback((month?: string | null) => formatMonthUtil(month, language), [language]);
 
-    getDynamicNotifications().then(notifs => {
-      setNotifications(notifs);
-    });
+  useEffect(() => {
+    (async () => {
+      try {
+        const [list, settings] = await Promise.all([getUsers(), getAppSettings()]);
+        setUsers(list);
+        const active = list.filter(u => u.status === 'Active');
+        const pick = (currentUser && list.find(u => u.id === currentUser.id))
+          || list.find(u => u.id === settings.active_user_id)
+          || active[0] || list[0] || null;
+        if (pick) setCurrentUserState(pick);
+      } catch (e: any) {
+        showToast(`Could not load users: ${e.message}`, 'error');
+      }
+      getDynamicNotifications().then(setNotifications).catch(() => setNotifications([]));
+    })();
   }, [refreshKey]);
 
+  // Every change written to the database is attributed to the active profile (audit log).
+  useEffect(() => {
+    if (currentUser) setActor(`${currentUser.full_name} (${currentUser.role})`).catch(() => undefined);
+  }, [currentUser?.id]);
+
+  // Surface unexpected async errors instead of failing silently.
+  useEffect(() => {
+    const onRejection = (e: PromiseRejectionEvent) => {
+      const msg = e.reason?.message || String(e.reason);
+      showToast(msg, 'error');
+    };
+    window.addEventListener('unhandledrejection', onRejection);
+    return () => window.removeEventListener('unhandledrejection', onRejection);
+  }, []);
+
+  const persistRead = (s: Set<string>) => {
+    try { localStorage.setItem('bondhu_read_notifs', JSON.stringify([...s].slice(-200))); } catch { /* ignore */ }
+    return s;
+  };
+
   const markNotificationRead = (id: string) => {
-    setReadNotifIds(prev => new Set(prev).add(id));
+    setReadNotifIds(prev => persistRead(new Set(prev).add(id)));
   };
 
   const markAllNotificationsRead = () => {
-    setReadNotifIds(new Set(notifications.map(n => n.id)));
+    setReadNotifIds(prev => persistRead(new Set([...prev, ...notifications.map(n => n.id)])));
   };
 
   const unreadNotificationCount = notifications.filter(n => !readNotifIds.has(n.id)).length;
@@ -194,6 +231,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         t,
         formatCurrency,
         toBanglaDigits,
+        formatDate,
+        formatMonth,
       }}
     >
       {children}
