@@ -140,7 +140,7 @@ export const TopBar: React.FC = () => {
             aria-label={t('topbar.search_placeholder', 'Search members or payment...')}
             value={searchTerm}
             onChange={e => setSearchTerm(e.target.value)}
-            className="w-52 2xl:w-64 pl-9 pr-4 py-2 bg-slate-50 dark:bg-[#16252d] rounded-xl border border-slate-300 dark:border-[#2d424e] text-xs text-slate-900 dark:text-slate-100 placeholder-slate-400 dark:placeholder-slate-500 font-medium focus:outline-none focus:ring-2 focus:ring-[#0f4a3c]/20 focus:border-[#0f4a3c] dark:focus:border-emerald-500 shadow-sm"
+            className="w-52 2xl:w-64 h-9 pl-9 pr-4 bg-slate-50 dark:bg-[#16252d] rounded-xl border border-slate-300 dark:border-[#2d424e] text-xs text-slate-900 dark:text-slate-100 placeholder-slate-400 dark:placeholder-slate-500 font-medium focus:outline-none focus:ring-2 focus:ring-[#0f4a3c]/20 focus:border-[#0f4a3c] dark:focus:border-emerald-500 shadow-sm"
           />
         </form>
 
@@ -148,7 +148,7 @@ export const TopBar: React.FC = () => {
         <button
           type="button"
           onClick={toggleLanguage}
-          className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl text-xs font-black ${iconBtn}`}
+          className={`h-9 flex items-center justify-center gap-1.5 px-3 rounded-xl text-xs font-black ${iconBtn}`}
           title={t('shell.toggle_language', 'Switch language (English / বাংলা)')}
         >
           <Globe size={14} className="text-[#0f4a3c] dark:text-emerald-400" />
@@ -160,7 +160,7 @@ export const TopBar: React.FC = () => {
         {/* Refresh */}
         <button
           onClick={handleManualRefresh}
-          className={`flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-bold ${iconBtn}`}
+          className={`h-9 flex items-center justify-center gap-1.5 px-3 rounded-xl text-xs font-bold ${iconBtn}`}
           title={t('shell.refresh_title', 'Reload data')}
         >
           <RotateCw size={14} className={`text-[#0f4a3c] dark:text-emerald-400 ${isRefreshing ? 'animate-spin' : ''}`} />
@@ -314,7 +314,7 @@ export const TopBar: React.FC = () => {
         {/* Backup */}
         <button
           onClick={() => setActiveTab('backup')}
-          className={`flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold ${iconBtn}`}
+          className={`h-9 flex items-center justify-center gap-1.5 px-3 rounded-xl text-xs font-semibold ${iconBtn}`}
           title={t('shell.backup_title', 'Open Backup & Restore')}
         >
           <Database size={14} className="text-[#0f4a3c] dark:text-emerald-400" />
@@ -324,7 +324,7 @@ export const TopBar: React.FC = () => {
         {/* Record payment */}
         <button
           onClick={() => setOpenRecordModal(true)}
-          className="flex items-center gap-1.5 px-4 py-2 bg-slate-900 hover:bg-slate-800 dark:bg-emerald-600 dark:hover:bg-emerald-500 text-white rounded-xl text-xs font-bold shadow-sm transition-all active:scale-[0.98]"
+          className="h-9 flex items-center justify-center gap-1.5 px-4 bg-slate-900 hover:bg-slate-800 dark:bg-emerald-600 dark:hover:bg-emerald-500 text-white rounded-xl text-xs font-bold shadow-sm transition-all active:scale-[0.98]"
         >
           <Plus size={15} strokeWidth={2.5} />
           <span>{t('topbar.record_payment', 'Record payment')}</span>
