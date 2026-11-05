@@ -194,16 +194,16 @@ export const OverviewView: React.FC = () => {
       }],
     };
 
-    const maxDay = Math.max(1, ...data.dailyCollections.map(d => d.value));
     const startM = toMonthKey(data.trend[6]?.month || data.month);
     const heat = {
       ...baseOption(th),
       tooltip: { ...(baseOption(th) as any).tooltip, formatter: (p: any) => `${formatDate(p.value[0])}<br/><b>${money(p.value[1])}</b> · ${digits(p.value[2])} ${language === 'bn' ? 'টি পেমেন্ট' : 'payment(s)'}` },
-      visualMap: { show: false, min: 0, max: maxDay, inRange: { color: th.seq } },
+      // Any day with a payment gets one strong colour (not shaded by amount); the amount is in the tooltip.
+      visualMap: { show: false, type: 'piecewise', dimension: 1, pieces: [{ gt: 0, color: th.dark ? '#34d399' : '#0f7a5c' }], outOfRange: { color: 'transparent' } },
       calendar: {
         top: 28, left: 34, right: 8, bottom: 4, cellSize: ['auto', 14],
         range: [`${startM}-01`, data.today < `${data.month}-31` ? data.today : `${data.month}-28`],
-        itemStyle: { borderColor: th.surface, borderWidth: 2, color: th.dark ? '#1b2a31' : '#f1f5f4' },
+        itemStyle: { borderColor: th.surface, borderWidth: 2, color: th.dark ? '#22343d' : '#e6ecea' },
         splitLine: { show: false }, yearLabel: { show: false },
         dayLabel: { color: th.textMuted, fontSize: 10, firstDay: 6, nameMap: language === 'bn' ? ['র', 'সো', 'ম', 'বু', 'বৃ', 'শু', 'শ'] : ['S', 'M', 'T', 'W', 'T', 'F', 'S'] },
         monthLabel: { color: th.textMuted, fontSize: 10 },
@@ -429,9 +429,8 @@ export const OverviewView: React.FC = () => {
             table={{ headers: [tr('hDate'), tr('hAmount'), tr('hPayments')], rows: [...data.dailyCollections].sort((a, b) => b.date.localeCompare(a.date)).map(d => [formatDate(d.date), money(d.value), digits(d.count)]) }}>
             <EChart option={opts.heat} height={150} ariaLabel={tr('heat')} />
             <div className="flex items-center justify-end gap-1.5 mt-2 text-[10px] text-slate-500 dark:text-slate-400">
-              <span>{language === 'bn' ? 'কম' : 'Less'}</span>
-              {th.seq.map(c => <span key={c} className="w-3 h-3 rounded-sm" style={{ background: c }} />)}
-              <span>{language === 'bn' ? 'বেশি' : 'More'}</span>
+              <span className="w-3 h-3 rounded-sm" style={{ background: th.dark ? '#34d399' : '#0f7a5c' }} /><span>{language === 'bn' ? 'পেমেন্ট এসেছে' : 'Payment received'}</span>
+              <span className="w-3 h-3 rounded-sm ml-3" style={{ background: th.dark ? '#22343d' : '#e6ecea' }} /><span>{language === 'bn' ? 'পেমেন্ট নেই' : 'No payment'}</span>
             </div>
           </ChartCard>
           <ChartCard title={tr('methods')} subtitle={tr('last12')} icon={<Landmark size={15} />}
