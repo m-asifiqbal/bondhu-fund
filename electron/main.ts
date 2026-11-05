@@ -111,10 +111,18 @@ function snapshot(prefix: string) {
 async function start() {
   initPaths();
   const fallbacks = listBackups().map(b => b.filePath); // newest first, used only if main DB is unreadable
-  await store.openDatabase(dbFile, readWasm(), fallbacks);
+  // Start loading the database and the window at the same time (they used to run one after the other).
+  dbReady = store.openDatabase(dbFile, readWasm(), fallbacks);
   registerIpc();
   Menu.setApplicationMenu(null);
   createWindow();
+  try {
+    await dbReady;
+  } catch (e: any) {
+    dialog.showErrorBox('Bondhu Fund', `The database could not be opened.\n\n${e?.message || e}`);
+    app.exit(1);
+    return;
+  }
   // Daily snapshot after the window is up, so it never delays startup.
   setTimeout(dailyAutoBackup, 5000);
 }
@@ -195,8 +203,10 @@ app.on('before-quit', () => {
 // IPC
 // ---------------------------------------------------------------------------
 type Result<T = any> = { ok: true; data: T } | { ok: false; error: string };
+// The window opens while the database loads; IPC calls simply wait until it is ready.
+let dbReady: Promise<void> = Promise.resolve();
 const wrap = async <T>(fn: () => T | Promise<T>): Promise<Result<T>> => {
-  try { return { ok: true, data: await fn() }; } catch (e: any) { return { ok: false, error: e?.message || String(e) }; }
+  try { await dbReady; return { ok: true, data: await fn() }; } catch (e: any) { return { ok: false, error: e?.message || String(e) }; }
 };
 
 function registerIpc() {

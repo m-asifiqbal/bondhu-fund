@@ -15,7 +15,7 @@ import type { OverviewData } from '../types';
 
 // --- small bilingual dictionary for this screen ------------------------------
 const L = {
-  greeting: ['Good morning', 'শুভ সকাল'], afternoon: ['Good afternoon', 'শুভ অপরাহ্ন'], evening: ['Good evening', 'শুভ সন্ধ্যা'],
+  greeting: ['Good morning', 'শুভ সকাল'], afternoon: ['Good afternoon', 'শুভ অপরাহ্ন'], evening: ['Good evening', 'শুভ সন্ধ্যা'], night: ['Good night', 'শুভ রাত্রি'],
   subtitle: ['Financial position of the fund for', 'তহবিলের আর্থিক অবস্থা —'],
   collectedShort: ['Collected', 'আদায়'],
   netWorth: ['Net worth', 'মোট সম্পদ'], cash: ['Cash in hand', 'হাতে নগদ'], collected: ['Collected this month', 'এ মাসে আদায়'],
@@ -48,6 +48,9 @@ const L = {
   members_n: ['members', 'জন সদস্য'], gain: ['gain', 'লাভ'], loss: ['loss', 'ক্ষতি'], noData: ['No data for this period yet.', 'এই সময়ের কোনো তথ্য নেই।'],
 };
 type Key = keyof typeof L;
+
+/** 05–11 morning, 12–16 afternoon, 17–19 evening, 20–04 night. */
+export const greetingKey = (hour: number): Key => (hour >= 5 && hour < 12 ? 'greeting' : hour >= 12 && hour < 17 ? 'afternoon' : hour >= 17 && hour < 20 ? 'evening' : 'night');
 
 export const OverviewView: React.FC = () => {
   const {
@@ -84,8 +87,10 @@ export const OverviewView: React.FC = () => {
   const mLabel = useCallback((k: string) => fmtMonth(k, language as any, true), [language]);
   const money = (v: number) => formatCurrency(Math.round(v || 0));
 
-  const hour = new Date().getHours();
-  const hello = hour < 12 ? tr('greeting') : hour < 17 ? tr('afternoon') : tr('evening');
+  // Greeting follows the local time of day and refreshes while the app stays open.
+  const [hour, setHour] = useState(() => new Date().getHours());
+  useEffect(() => { const id = setInterval(() => setHour(new Date().getHours()), 60_000); return () => clearInterval(id); }, []);
+  const hello = tr(greetingKey(hour));
   const firstName = currentUser?.full_name?.split(' ')[0] || '';
 
   // ---------------------------------------------------------------------------
