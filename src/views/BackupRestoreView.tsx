@@ -11,8 +11,8 @@ import {
   Sparkles,
   AlertTriangle,
   History,
-  X,
 } from 'lucide-react';
+import { Modal } from '../components/common/Modal';
 import { useApp } from '../context/AppContext';
 import {
   performBackup,
@@ -47,6 +47,7 @@ const ConfirmDialog: React.FC<{ state: ConfirmState; onClose: () => void }> = ({
   const canConfirm = !busy && (!state.typeWord || typed.trim() === state.typeWord);
 
   const run = async () => {
+    if (!canConfirm) return;
     setBusy(true);
     try {
       await state.onConfirm();
@@ -57,54 +58,66 @@ const ConfirmDialog: React.FC<{ state: ConfirmState; onClose: () => void }> = ({
   };
 
   return (
-    <div className="fixed inset-0 z-50 bg-slate-950/50 flex items-center justify-center p-4" onMouseDown={() => !busy && onClose()}>
-      <div
-        className="w-full max-w-md bg-white dark:bg-[#15232b] border border-slate-200 dark:border-[#283e4a] rounded-2xl shadow-2xl p-6 text-xs"
-        onMouseDown={e => e.stopPropagation()}
-      >
-        <div className="flex items-start justify-between gap-3 mb-3">
-          <div className="flex items-center gap-2">
-            <AlertTriangle size={18} className={state.danger ? 'text-rose-600' : 'text-amber-600'} />
-            <h3 className="text-sm font-black text-slate-900 dark:text-white">{state.title}</h3>
-          </div>
-          <button onClick={onClose} disabled={busy} className="p-1 text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 rounded-lg">
-            <X size={15} />
-          </button>
-        </div>
-        <div className="text-slate-600 dark:text-slate-300 leading-relaxed space-y-2">{state.body}</div>
-        {state.typeWord && (
-          <div className="mt-4">
-            <label className="form-label">
-              {t('backup.type_to_confirm', 'Type')} <span className="font-mono font-black">{state.typeWord}</span> {t('backup.to_confirm', 'to confirm')}
-            </label>
-            <input autoFocus value={typed} onChange={e => setTyped(e.target.value)} className="form-input font-mono" />
-          </div>
-        )}
-        <div className="flex justify-end gap-2 mt-5">
+    <Modal
+      open
+      onClose={() => !busy && onClose()}
+      locked={busy}
+      size="sm"
+      icon={<AlertTriangle size={18} className={state.danger ? 'text-rose-600' : 'text-amber-600'} />}
+      title={state.title}
+      footer={
+        <div className="flex justify-end gap-2">
           <button
             onClick={onClose}
             disabled={busy}
-            className="px-4 py-2 rounded-xl font-bold bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200"
+            className="px-4 py-2 rounded-xl text-xs font-bold bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 disabled:opacity-50"
           >
             {t('common.cancel', 'Cancel')}
           </button>
           <button
             onClick={run}
             disabled={!canConfirm}
-            className={`px-4 py-2 rounded-xl font-bold text-white disabled:opacity-50 disabled:cursor-not-allowed ${
+            className={`px-4 py-2 rounded-xl text-xs font-bold text-white disabled:opacity-50 disabled:cursor-not-allowed ${
               state.danger ? 'bg-rose-600 hover:bg-rose-700' : 'bg-brand hover:bg-brand-hover dark:bg-emerald-700 dark:hover:bg-emerald-600'
             }`}
           >
-            {busy ? t('common.working', 'Working...') : state.confirmLabel}
+            {busy ? t('finance.working', 'Working…') : state.confirmLabel}
           </button>
         </div>
-      </div>
-    </div>
+      }
+    >
+      <div className="text-xs text-slate-600 dark:text-slate-300 leading-relaxed space-y-2">{state.body}</div>
+      {state.typeWord && (
+        <form className="mt-4" onSubmit={e => { e.preventDefault(); run(); }}>
+          <label className="form-label">
+            {t('finance.backup_type_to_confirm', 'Type {word} to confirm')
+              .split('{word}')
+              .map((part, i, arr) => (
+                <React.Fragment key={i}>
+                  {part}
+                  {i < arr.length - 1 && <span className="font-mono font-black">{state.typeWord}</span>}
+                </React.Fragment>
+              ))}
+          </label>
+          <input
+            autoFocus
+            value={typed}
+            onChange={e => setTyped(e.target.value)}
+            className="form-input font-mono"
+            autoComplete="off"
+            spellCheck={false}
+            aria-label={t('finance.backup_type_aria', 'Confirmation word')}
+          />
+        </form>
+      )}
+    </Modal>
   );
 };
 
 export const BackupRestoreView: React.FC = () => {
-  const { showToast, triggerRefresh, refreshKey, t, formatDate } = useApp();
+  const { showToast, triggerRefresh, refreshKey, t, tv, formatDate, language, toBanglaDigits } = useApp();
+  const n = useCallback((v: number | string) => (language === 'bn' ? toBanglaDigits(v) : String(v)), [language, toBanglaDigits]);
+  const kb = (v: number | string) => `${n(v)} ${t('finance.backup_kb', 'KB')}`;
   const [info, setInfo] = useState<AppInfo | null>(null);
   const [infoError, setInfoError] = useState<string | null>(null);
   const [snapshots, setSnapshots] = useState<SnapshotFile[]>([]);
@@ -126,8 +139,8 @@ export const BackupRestoreView: React.FC = () => {
         timePart = `${pad(d.getHours())}:${pad(d.getMinutes())}`;
       }
     }
-    return `${formatDate(datePart)}${timePart ? ` ${timePart}` : ''}`;
-  }, [formatDate]);
+    return `${formatDate(datePart)}${timePart ? ` ${n(timePart)}` : ''}`;
+  }, [formatDate, n]);
 
   const load = useCallback(async () => {
     try {
@@ -148,12 +161,12 @@ export const BackupRestoreView: React.FC = () => {
     setBusy('backup');
     try {
       const res = await performBackup();
-      if (res.canceled) showToast(t('backup.canceled', 'Backup canceled.'), 'info');
+      if (res.canceled) showToast(t('finance.backup_canceled', 'Backup canceled.'), 'info');
       else if (res.success) {
         setLastSavedPath(res.filePath || null);
-        showToast(`${t('backup.saved_to', 'Backup saved to')} ${res.filePath || ''}`);
+        showToast(`${t('finance.backup_saved_to', 'Backup saved to')} ${res.filePath || ''}`);
         afterChange();
-      } else showToast(res.error || 'Backup failed', 'error');
+      } else showToast(res.error || t('finance.backup_failed', 'Backup failed.'), 'error');
     } catch (e: any) {
       showToast(e.message, 'error');
     } finally {
@@ -162,25 +175,25 @@ export const BackupRestoreView: React.FC = () => {
   };
 
   const askRestoreFromFile = () => setConfirm({
-    title: t('backup.restore_confirm_title', 'Restore from a backup file?'),
-    confirmLabel: t('backup.choose_file', 'Choose file & restore'),
+    title: t('finance.backup_restore_confirm_title', 'Restore from a backup file?'),
+    confirmLabel: t('finance.backup_choose_file', 'Choose file & restore'),
     body: (
       <>
-        <p>{t('backup.restore_confirm_1', 'All current data (members, collections, expenses, investments, settings and users) will be replaced by the contents of the backup file you choose.')}</p>
+        <p>{t('finance.backup_restore_confirm_1', 'All current data (members, collections, expenses, investments, settings and users) will be replaced by the contents of the backup file you choose.')}</p>
         <p className="font-semibold text-slate-800 dark:text-slate-100">
-          {t('backup.restore_confirm_2', 'Your current data is saved first as a PreRestore_ snapshot, so you can undo this from the Local snapshots list.')}
+          {t('finance.backup_restore_confirm_2', 'Your current data is saved first as a PreRestore_ snapshot, so you can undo this from the Local snapshots list.')}
         </p>
-        <p>{t('backup.restore_confirm_3', 'Older backups are checked and upgraded automatically. Invalid files are rejected without changing anything.')}</p>
+        <p>{t('finance.backup_restore_confirm_3', 'Older backups are checked and upgraded automatically. Invalid files are rejected without changing anything.')}</p>
       </>
     ),
     onConfirm: async () => {
       try {
         const res = await performRestore();
-        if (res.canceled) showToast(t('backup.restore_canceled', 'Restore canceled.'), 'info');
+        if (res.canceled) showToast(t('finance.backup_restore_canceled', 'Restore canceled.'), 'info');
         else if (res.success) {
-          showToast(`${t('backup.restored_from', 'Restored from')} "${res.fileName}". ${t('backup.safety_snapshot', 'Safety snapshot')}: ${baseName(res.safetySnapshot)}`);
+          showToast(`${t('finance.backup_restored_from', 'Restored from')} "${res.fileName}". ${t('finance.backup_safety_snapshot', 'Safety snapshot')}: ${baseName(res.safetySnapshot)}`);
           afterChange();
-        } else showToast(res.error || 'Restore failed', 'error');
+        } else showToast(res.error || t('finance.backup_restore_failed', 'Restore failed.'), 'error');
       } catch (e: any) {
         showToast(e.message, 'error');
       }
@@ -188,24 +201,24 @@ export const BackupRestoreView: React.FC = () => {
   });
 
   const askRestoreSnapshot = (s: SnapshotFile) => setConfirm({
-    title: t('backup.restore_snapshot_title', 'Restore this snapshot?'),
-    confirmLabel: t('backup.restore', 'Restore'),
+    title: t('finance.backup_restore_snapshot_title', 'Restore this snapshot?'),
+    confirmLabel: t('finance.backup_restore', 'Restore'),
     body: (
       <>
         <p>
-          {t('backup.restore_snapshot_1', 'Current data will be replaced with')} <span className="font-mono font-bold">{s.fileName}</span> ({formatStamp(s.createdAt)}).
+          {t('finance.backup_restore_snapshot_1', 'Current data will be replaced with')} <span className="font-mono font-bold">{s.fileName}</span> ({formatStamp(s.createdAt)}).
         </p>
         <p className="font-semibold text-slate-800 dark:text-slate-100">
-          {t('backup.restore_confirm_2', 'Your current data is saved first as a PreRestore_ snapshot, so you can undo this from the Local snapshots list.')}
+          {t('finance.backup_restore_confirm_2', 'Your current data is saved first as a PreRestore_ snapshot, so you can undo this from the Local snapshots list.')}
         </p>
       </>
     ),
     onConfirm: async () => {
       const res = await restoreSnapshot(s.fileName);
       if (res.success) {
-        showToast(`${t('backup.restored_from', 'Restored from')} "${res.fileName}". ${t('backup.safety_snapshot', 'Safety snapshot')}: ${baseName(res.safetySnapshot)}`);
+        showToast(`${t('finance.backup_restored_from', 'Restored from')} "${res.fileName}". ${t('finance.backup_safety_snapshot', 'Safety snapshot')}: ${baseName(res.safetySnapshot)}`);
         afterChange();
-      } else showToast(res.error || 'Restore failed', 'error');
+      } else showToast(res.error || t('finance.backup_restore_failed', 'Restore failed.'), 'error');
     },
   });
 
@@ -213,7 +226,7 @@ export const BackupRestoreView: React.FC = () => {
     setBusy('snapshot');
     try {
       const name = await snapshotNow();
-      showToast(`${t('backup.snapshot_created', 'Snapshot created')}: ${name}`);
+      showToast(`${t('finance.backup_snapshot_created', 'Snapshot created')}: ${name}`);
       afterChange();
     } catch (e: any) {
       showToast(e.message, 'error');
@@ -232,20 +245,20 @@ export const BackupRestoreView: React.FC = () => {
   };
 
   const askClearAll = () => setConfirm({
-    title: t('backup.clear_title', 'Clear all business data?'),
-    confirmLabel: t('backup.clear_confirm', 'Clear all data'),
+    title: t('finance.backup_clear_title', 'Clear all business data?'),
+    confirmLabel: t('finance.backup_clear_confirm', 'Clear all data'),
     danger: true,
     typeWord: 'DELETE',
     body: (
       <>
-        <p>{t('backup.clear_body_1', 'This permanently removes all members, collections, expenses and investments.')}</p>
-        <p>{t('backup.clear_body_2', 'Users, settings and master data are kept. Take a backup first if you may need this data again.')}</p>
+        <p>{t('finance.backup_clear_body_1', 'This permanently removes all members, collections, expenses and investments.')}</p>
+        <p>{t('finance.backup_clear_body_2', 'Users, settings and master data are kept. Take a backup first if you may need this data again.')}</p>
       </>
     ),
     onConfirm: async () => {
       try {
         await resetDatabase(true);
-        showToast(t('backup.cleared', 'All business data cleared.'));
+        showToast(t('finance.backup_cleared', 'All business data cleared.'));
         afterChange();
       } catch (e: any) {
         showToast(e.message, 'error');
@@ -254,19 +267,19 @@ export const BackupRestoreView: React.FC = () => {
   });
 
   const askLoadDemo = () => setConfirm({
-    title: t('backup.demo_title', 'Load demo data?'),
-    confirmLabel: t('backup.demo_confirm', 'Load demo data'),
+    title: t('finance.backup_demo_title', 'Load demo data?'),
+    confirmLabel: t('finance.backup_demo_confirm', 'Load demo data'),
     danger: true,
     body: (
       <>
-        <p>{t('backup.demo_body_1', 'Demo data REPLACES all current business data (members, collections, expenses, investments) with sample records for exploring the app.')}</p>
-        <p>{t('backup.demo_body_2', 'Take a backup first if you have real data.')}</p>
+        <p>{t('finance.backup_demo_body_1', 'Demo data REPLACES all current business data (members, collections, expenses, investments) with sample records for exploring the app.')}</p>
+        <p>{t('finance.backup_demo_body_2', 'Take a backup first if you have real data.')}</p>
       </>
     ),
     onConfirm: async () => {
       try {
         await loadDemoData();
-        showToast(t('backup.demo_loaded', 'Demo data loaded.'));
+        showToast(t('finance.backup_demo_loaded', 'Demo data loaded.'));
         afterChange();
       } catch (e: any) {
         showToast(e.message, 'error');
@@ -275,23 +288,23 @@ export const BackupRestoreView: React.FC = () => {
   });
 
   const snapshotKind = (f: string) =>
-    f.startsWith('Auto_') ? { label: t('backup.kind_auto', 'Automatic'), cls: 'bg-blue-100 dark:bg-blue-950 text-blue-800 dark:text-blue-300' }
-    : f.startsWith('PreRestore_') ? { label: t('backup.kind_prerestore', 'Before restore'), cls: 'bg-amber-100 dark:bg-amber-950 text-amber-800 dark:text-amber-300' }
-    : f.startsWith('Manual_') ? { label: t('backup.kind_manual', 'Manual'), cls: 'bg-emerald-100 dark:bg-emerald-950 text-emerald-800 dark:text-emerald-300' }
-    : { label: t('backup.kind_other', 'Other'), cls: 'bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300' };
+    f.startsWith('Auto_') ? { label: t('finance.backup_kind_auto', 'Automatic'), cls: 'bg-blue-100 dark:bg-blue-950 text-blue-800 dark:text-blue-300' }
+    : f.startsWith('PreRestore_') ? { label: t('finance.backup_kind_prerestore', 'Before restore'), cls: 'bg-amber-100 dark:bg-amber-950 text-amber-800 dark:text-amber-300' }
+    : f.startsWith('Manual_') ? { label: t('finance.backup_kind_manual', 'Manual'), cls: 'bg-emerald-100 dark:bg-emerald-950 text-emerald-800 dark:text-emerald-300' }
+    : { label: t('finance.backup_kind_other', 'Other'), cls: 'bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300' };
 
   const stats: Array<[string, React.ReactNode]> = info ? [
-    [t('backup.size', 'File size'), `${info.sizeKb} KB`],
-    [t('backup.schema', 'Schema version'), `v${info.schemaVersion}`],
-    [t('backup.app_version', 'App version'), info.version],
-    [t('backup.last_modified', 'Last modified'), formatStamp(info.lastModified)],
-    [t('nav.members', 'Members'), info.members],
-    [t('nav.collections', 'Collections'), info.collections],
-    [t('nav.investments', 'Investments'), info.investments],
-    [t('nav.expenses', 'Expenses'), info.expenses],
-    [t('backup.users', 'Users'), info.users],
-    [t('backup.master_items', 'Master items'), info.masterData],
-    [t('backup.audit_entries', 'Audit entries'), info.auditEntries],
+    [t('finance.backup_size', 'File size'), kb(info.sizeKb)],
+    [t('finance.backup_schema', 'Schema version'), `v${n(info.schemaVersion)}`],
+    [t('finance.backup_app_version', 'App version'), n(info.version)],
+    [t('finance.backup_last_modified', 'Last modified'), formatStamp(info.lastModified)],
+    [t('finance.backup_members', 'Members'), n(info.members)],
+    [t('finance.backup_collections', 'Collections'), n(info.collections)],
+    [t('finance.inv_list', 'Investments'), n(info.investments)],
+    [t('finance.backup_expenses', 'Expenses'), n(info.expenses)],
+    [t('finance.backup_users', 'Users'), n(info.users)],
+    [t('finance.backup_master_items', 'Master items'), n(info.masterData)],
+    [t('finance.backup_audit_entries', 'Audit entries'), n(info.auditEntries)],
   ] : [];
 
   const btnPrimary = 'flex items-center justify-center gap-2 py-2.5 px-4 bg-brand hover:bg-brand-hover dark:bg-emerald-700 dark:hover:bg-emerald-600 text-white rounded-xl text-xs font-bold shadow-sm transition-all disabled:opacity-50 disabled:cursor-not-allowed';
@@ -300,9 +313,9 @@ export const BackupRestoreView: React.FC = () => {
   return (
     <div className="p-6 lg:p-8 space-y-6 max-w-7xl mx-auto">
       <div>
-        <h1 className="text-2xl font-black text-slate-900 dark:text-white tracking-tight">{t('backup.title', 'Backup & Restore')}</h1>
+        <h1 className="text-2xl font-black text-slate-900 dark:text-white tracking-tight">{t('finance.backup_title', 'Backup & Restore')}</h1>
         <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
-          {t('backup.subtitle', 'Your data is stored only on this computer. Back up regularly to a USB drive or cloud folder.')}
+          {t('finance.backup_subtitle', 'Your data is stored only on this computer. Back up regularly to a USB drive or cloud folder.')}
         </p>
       </div>
 
@@ -313,15 +326,15 @@ export const BackupRestoreView: React.FC = () => {
             <Database size={24} />
           </div>
           <div className="min-w-0 flex-1">
-            <h3 className="text-sm font-bold text-slate-900 dark:text-white">{t('backup.db_file', 'Database file')}</h3>
+            <h3 className="text-sm font-bold text-slate-900 dark:text-white">{t('finance.backup_db_file', 'Database file')}</h3>
             {infoError ? (
               <p className="text-xs text-rose-600 dark:text-rose-400 mt-1">{infoError}</p>
             ) : (
-              <p className="text-xs font-mono text-slate-600 dark:text-slate-400 mt-1 break-all select-text">{info?.dbPath || t('common.loading', 'Loading...')}</p>
+              <p className="text-xs font-mono text-slate-600 dark:text-slate-400 mt-1 break-all select-text">{info?.dbPath || t('common.loading', 'Loading…')}</p>
             )}
             {info && (
               <p className="text-[11px] font-mono text-slate-400 dark:text-slate-500 mt-0.5 break-all select-text">
-                {t('backup.backups_dir', 'Backups folder')}: {info.backupsDir}
+                {t('finance.backup_backups_dir', 'Backups folder')}: {info.backupsDir}
               </p>
             )}
           </div>
@@ -344,25 +357,25 @@ export const BackupRestoreView: React.FC = () => {
           <div>
             <div className="flex items-center gap-2">
               <HardDriveDownload size={18} className="text-brand dark:text-emerald-400" />
-              <h3 className="text-base font-bold text-slate-900 dark:text-white">{t('backup.backup_title', 'Back up')}</h3>
+              <h3 className="text-base font-bold text-slate-900 dark:text-white">{t('finance.backup_backup_title', 'Back up')}</h3>
             </div>
             <p className="text-xs text-slate-600 dark:text-slate-400 mt-1 leading-relaxed">
-              {t('backup.backup_desc', 'Save a complete copy of all data (.db file) to any location you choose.')}
+              {t('finance.backup_backup_desc', 'Save a complete copy of all data (.db file) to any location you choose.')}
             </p>
             {lastSavedPath && (
               <p className="text-[11px] mt-2 text-emerald-700 dark:text-emerald-400 font-mono break-all select-text">
-                {t('backup.saved_to', 'Backup saved to')}: {lastSavedPath}
+                {t('finance.backup_saved_to', 'Backup saved to')}: {lastSavedPath}
               </p>
             )}
           </div>
           <div className="flex flex-wrap gap-2">
             <button onClick={handleBackupNow} disabled={!!busy} className={`${btnPrimary} flex-1`}>
               <HardDriveDownload size={15} />
-              <span>{busy === 'backup' ? t('common.working', 'Working...') : t('backup.backup_now', 'Back up now')}</span>
+              <span>{busy === 'backup' ? t('finance.working', 'Working…') : t('finance.backup_backup_now', 'Back up now')}</span>
             </button>
             <button onClick={handleOpenFolder} className={btnSecondary}>
               <FolderOpen size={15} />
-              <span>{t('backup.open_folder', 'Open backups folder')}</span>
+              <span>{t('finance.backup_open_folder', 'Open backups folder')}</span>
             </button>
           </div>
         </div>
@@ -371,10 +384,10 @@ export const BackupRestoreView: React.FC = () => {
           <div>
             <div className="flex items-center gap-2">
               <Upload size={18} className="text-amber-600 dark:text-amber-400" />
-              <h3 className="text-base font-bold text-slate-900 dark:text-white">{t('backup.restore_title', 'Restore')}</h3>
+              <h3 className="text-base font-bold text-slate-900 dark:text-white">{t('finance.backup_restore_title', 'Restore')}</h3>
             </div>
             <p className="text-xs text-slate-600 dark:text-slate-400 mt-1 leading-relaxed">
-              {t('backup.restore_desc', 'Replace current data with a backup file. Your current data is snapshotted first, so a restore can always be undone.')}
+              {t('finance.backup_restore_desc', 'Replace current data with a backup file. Your current data is snapshotted first, so a restore can always be undone.')}
             </p>
           </div>
           <button
@@ -383,7 +396,7 @@ export const BackupRestoreView: React.FC = () => {
             className="flex items-center justify-center gap-2 py-2.5 bg-amber-600 hover:bg-amber-700 dark:bg-amber-700 dark:hover:bg-amber-600 text-white rounded-xl text-xs font-bold shadow-sm transition-all disabled:opacity-50"
           >
             <Upload size={15} />
-            <span>{t('backup.restore_from_file', 'Restore from file')}</span>
+            <span>{t('finance.backup_restore_from_file', 'Restore from file')}</span>
           </button>
         </div>
       </div>
@@ -394,26 +407,26 @@ export const BackupRestoreView: React.FC = () => {
           <div className="flex items-center gap-2">
             <ShieldCheck size={18} className="text-brand dark:text-emerald-400" />
             <div>
-              <h3 className="text-sm font-bold text-slate-900 dark:text-white">{t('backup.snapshots', 'Local snapshots')}</h3>
+              <h3 className="text-sm font-bold text-slate-900 dark:text-white">{t('finance.backup_snapshots', 'Local snapshots')}</h3>
               <p className="text-[11px] text-slate-500 dark:text-slate-400">
-                {t('backup.snapshots_desc', 'Automatic daily copies, copies taken before each restore, and manual snapshots.')}
+                {t('finance.backup_snapshots_desc', 'Automatic daily copies, copies taken before each restore, and manual snapshots.')}
               </p>
             </div>
           </div>
           <button onClick={handleSnapshotNow} disabled={!!busy} className={btnSecondary}>
             <Camera size={14} />
-            <span>{busy === 'snapshot' ? t('common.working', 'Working...') : t('backup.snapshot_now', 'Create snapshot now')}</span>
+            <span>{busy === 'snapshot' ? t('finance.working', 'Working…') : t('finance.backup_snapshot_now', 'Create snapshot now')}</span>
           </button>
         </div>
         <div className="overflow-x-auto">
           <table className="w-full text-xs">
             <thead className="bg-slate-50 dark:bg-slate-900/40 text-[10px] uppercase tracking-wide text-slate-500 dark:text-slate-400">
               <tr>
-                <th className="text-left px-5 py-2 font-bold">{t('backup.file', 'File')}</th>
-                <th className="text-left px-3 py-2 font-bold">{t('backup.type', 'Type')}</th>
-                <th className="text-left px-3 py-2 font-bold">{t('backup.created', 'Created')}</th>
-                <th className="text-right px-3 py-2 font-bold">{t('backup.size', 'File size')}</th>
-                <th className="px-5 py-2" />
+                <th className="text-left px-5 py-2 font-bold">{t('finance.backup_file', 'File')}</th>
+                <th className="text-left px-3 py-2 font-bold">{t('finance.backup_type', 'Type')}</th>
+                <th className="text-left px-3 py-2 font-bold">{t('finance.backup_created', 'Created')}</th>
+                <th className="text-right px-3 py-2 font-bold">{t('finance.backup_size', 'File size')}</th>
+                <th className="px-5 py-2"><span className="sr-only">{t('common.actions', 'Actions')}</span></th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
@@ -424,7 +437,7 @@ export const BackupRestoreView: React.FC = () => {
                     <td className="px-5 py-2.5 font-mono font-semibold text-slate-900 dark:text-white break-all">{s.fileName}</td>
                     <td className="px-3 py-2.5"><span className={`px-2 py-0.5 rounded text-[10px] font-bold ${k.cls}`}>{k.label}</span></td>
                     <td className="px-3 py-2.5 text-slate-600 dark:text-slate-300 whitespace-nowrap">{formatStamp(s.createdAt)}</td>
-                    <td className="px-3 py-2.5 text-right text-slate-600 dark:text-slate-300 whitespace-nowrap">{s.sizeKb} KB</td>
+                    <td className="px-3 py-2.5 text-right text-slate-600 dark:text-slate-300 whitespace-nowrap">{kb(s.sizeKb)}</td>
                     <td className="px-5 py-2.5 text-right">
                       <button
                         onClick={() => askRestoreSnapshot(s)}
@@ -432,7 +445,7 @@ export const BackupRestoreView: React.FC = () => {
                         className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-bold text-amber-700 dark:text-amber-400 hover:bg-amber-50 dark:hover:bg-amber-950/40 border border-amber-200 dark:border-amber-800 disabled:opacity-50"
                       >
                         <RotateCcw size={12} />
-                        {t('backup.restore', 'Restore')}
+                        {t('finance.backup_restore', 'Restore')}
                       </button>
                     </td>
                   </tr>
@@ -441,7 +454,7 @@ export const BackupRestoreView: React.FC = () => {
               {snapshots.length === 0 && (
                 <tr>
                   <td colSpan={5} className="text-center py-8 text-slate-400 dark:text-slate-500">
-                    {t('backup.no_snapshots', 'No snapshots yet. Automatic snapshots are created daily when enabled in Settings.')}
+                    {t('finance.backup_no_snapshots', 'No snapshots yet. Automatic snapshots are created daily when enabled in Settings.')}
                   </td>
                 </tr>
               )}
@@ -455,7 +468,7 @@ export const BackupRestoreView: React.FC = () => {
         <div className="lg:col-span-2 card-base p-6">
           <div className="flex items-center gap-2 mb-3">
             <History size={18} className="text-brand dark:text-emerald-400" />
-            <h3 className="text-sm font-bold text-slate-900 dark:text-white">{t('backup.history', 'Backup history')}</h3>
+            <h3 className="text-sm font-bold text-slate-900 dark:text-white">{t('finance.backup_history', 'Backup history')}</h3>
           </div>
           <div className="divide-y divide-slate-100 dark:divide-slate-800 text-xs max-h-[360px] overflow-y-auto">
             {backupLogs.map(log => (
@@ -464,7 +477,7 @@ export const BackupRestoreView: React.FC = () => {
                   <div className="flex items-center gap-2">
                     <span className="font-bold text-slate-900 dark:text-white font-mono truncate">{log.file_name}</span>
                     <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 shrink-0">
-                      {log.backup_type}
+                      {tv(log.backup_type)}
                     </span>
                   </div>
                   <span className="text-[11px] text-slate-500 dark:text-slate-400 font-mono mt-0.5 block truncate" title={log.file_path}>
@@ -472,14 +485,14 @@ export const BackupRestoreView: React.FC = () => {
                   </span>
                 </div>
                 <div className="text-right shrink-0">
-                  <span className="text-slate-800 dark:text-slate-200 font-bold block">{(log.file_size / 1024).toFixed(1)} KB</span>
+                  <span className="text-slate-800 dark:text-slate-200 font-bold block">{kb((log.file_size / 1024).toFixed(1))}</span>
                   <span className="text-[10px] text-slate-400 dark:text-slate-500">{formatStamp(log.created_at)}</span>
                 </div>
               </div>
             ))}
             {backupLogs.length === 0 && (
               <div className="text-center py-8 text-slate-400 dark:text-slate-500">
-                {t('backup.no_history', 'No backups yet. Click "Back up now" to create your first backup.')}
+                {t('finance.backup_no_history', 'No backups yet. Click "Back up now" to create your first backup.')}
               </div>
             )}
           </div>
@@ -489,11 +502,11 @@ export const BackupRestoreView: React.FC = () => {
         <div className="card-base p-6 border-rose-200 dark:border-rose-900/60 space-y-4">
           <div className="flex items-center gap-2">
             <AlertTriangle size={18} className="text-rose-600" />
-            <h3 className="text-sm font-bold text-rose-700 dark:text-rose-400">{t('backup.danger_zone', 'Danger zone')}</h3>
+            <h3 className="text-sm font-bold text-rose-700 dark:text-rose-400">{t('finance.backup_danger_zone', 'Danger zone')}</h3>
           </div>
           <div>
             <p className="text-xs text-slate-600 dark:text-slate-400 leading-relaxed">
-              {t('backup.clear_desc', 'Remove all members, collections, expenses and investments. Users, settings and master data are kept.')}
+              {t('finance.backup_clear_desc', 'Remove all members, collections, expenses and investments. Users, settings and master data are kept.')}
             </p>
             <button
               onClick={askClearAll}
@@ -501,16 +514,16 @@ export const BackupRestoreView: React.FC = () => {
               className="mt-2 w-full flex items-center justify-center gap-2 py-2.5 bg-rose-600 hover:bg-rose-700 text-white rounded-xl text-xs font-bold disabled:opacity-50"
             >
               <Trash2 size={14} />
-              <span>{t('backup.clear_all', 'Clear all business data')}</span>
+              <span>{t('finance.backup_clear_all', 'Clear all business data')}</span>
             </button>
           </div>
           <div className="pt-4 border-t border-slate-200 dark:border-slate-800">
             <p className="text-xs text-slate-600 dark:text-slate-400 leading-relaxed">
-              {t('backup.demo_desc', 'Replace business data with sample records to try the app.')}
+              {t('finance.backup_demo_desc', 'Replace business data with sample records to try the app.')}
             </p>
             <button onClick={askLoadDemo} disabled={!!busy} className={`${btnSecondary} mt-2 w-full`}>
               <Sparkles size={14} />
-              <span>{t('backup.load_demo', 'Load demo data')}</span>
+              <span>{t('finance.backup_load_demo', 'Load demo data')}</span>
             </button>
           </div>
         </div>

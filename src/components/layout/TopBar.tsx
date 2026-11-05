@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useCallback, useMemo } from 'react';
 import {
   Search,
   Bell,
@@ -15,12 +15,27 @@ import {
   Maximize2,
   Minimize2,
   AlertTriangle,
-  Receipt,
-  Users,
 } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
-import { getAppSettings } from '../../services/db';
-import type { AppNotification } from '../../types';
+import { ProfileMenu, UserAvatar, useOutsideClose } from './Sidebar';
+import type { AppNotification, NavTab } from '../../types';
+
+const TAB_KEYS: Record<NavTab, [string, string]> = {
+  overview: ['nav.overview', 'Overview'],
+  members: ['nav.members', 'Members'],
+  collections: ['nav.collections', 'Collections'],
+  investments: ['nav.investments', 'Investments'],
+  expenses: ['nav.expenses', 'Expenses'],
+  entry: ['nav.entry', 'Entry Center'],
+  master: ['nav.master', 'Master Data'],
+  users: ['nav.users', 'Users & Roles'],
+  backup: ['nav.backup', 'Backup & Restore'],
+  reports: ['nav.reports', 'Reports & Export'],
+  settings: ['nav.settings', 'Settings'],
+  profile: ['nav.profile', 'My profile'],
+};
+
+const iconBtn = 'bg-slate-50 hover:bg-slate-100 dark:bg-[#16252d] dark:hover:bg-[#1d303b] border border-slate-300 dark:border-[#2d424e] text-slate-700 dark:text-slate-200 shadow-sm transition-all';
 
 export const TopBar: React.FC = () => {
   const {
@@ -39,110 +54,79 @@ export const TopBar: React.FC = () => {
     language,
     toggleLanguage,
     t,
-    refreshKey,
+    tv,
+    orgName,
+    currentUser,
+    profileUserId,
+    toBanglaDigits,
+    formatDate,
   } = useApp();
+
+  const num = (n: number) => (language === 'bn' ? toBanglaDigits(n) : String(n));
 
   const [searchTerm, setSearchTerm] = useState('');
   const [showNotificationMenu, setShowNotificationMenu] = useState(false);
+  const [showProfileMenu, setShowProfileMenu] = useState(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [notifFilter, setNotifFilter] = useState<'all' | 'warning' | 'info'>('all');
   const [isNotifExpanded, setIsNotifExpanded] = useState(false);
 
   const notificationRef = useRef<HTMLDivElement>(null);
-  const [orgName, setOrgName] = useState('');
+  const profileRef = useRef<HTMLDivElement>(null);
+  const closeNotif = useCallback(() => setShowNotificationMenu(false), []);
+  const closeProfile = useCallback(() => setShowProfileMenu(false), []);
+  useOutsideClose(notificationRef, showNotificationMenu, closeNotif);
+  useOutsideClose(profileRef, showProfileMenu, closeProfile);
 
-  // Organization name comes from settings (no hardcoded name); reload whenever data changes.
-  useEffect(() => {
-    let alive = true;
-    getAppSettings()
-      .then(s => { if (alive) setOrgName(s.organization_name || ''); })
-      .catch(() => { if (alive) setOrgName(''); });
-    return () => { alive = false; };
-  }, [refreshKey]);
-
-  // Close notification popover when clicking outside
-  useEffect(() => {
-    const handleClickOutside = (e: MouseEvent) => {
-      if (
-        notificationRef.current &&
-        !notificationRef.current.contains(e.target as Node)
-      ) {
-        setShowNotificationMenu(false);
-      }
-    };
-
-    if (showNotificationMenu) {
-      document.addEventListener('mousedown', handleClickOutside);
+  const breadcrumbTitle = (() => {
+    if (activeTab === 'profile' && profileUserId != null && profileUserId !== currentUser?.id) {
+      return t('shell.user_profile', 'User profile');
     }
-    return () => {
-      document.removeEventListener('mousedown', handleClickOutside);
-    };
-  }, [showNotificationMenu]);
-
-  const getBreadcrumbTitle = () => {
-    switch (activeTab) {
-      case 'overview': return t('nav.overview');
-      case 'members': return t('nav.members');
-      case 'collections': return t('nav.collections');
-      case 'investments': return t('nav.investments');
-      case 'expenses': return t('nav.expenses');
-      case 'entry': return t('nav.entry');
-      case 'master': return t('nav.master');
-      case 'users': return t('nav.users');
-      case 'backup': return t('nav.backup');
-      case 'reports': return t('nav.reports');
-      case 'settings': return t('nav.settings');
-      default: return t('nav.overview');
-    }
-  };
+    const [key, en] = TAB_KEYS[activeTab] || TAB_KEYS.overview;
+    return t(key, en);
+  })();
 
   const handleSearchSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (searchTerm.trim()) {
       setActiveTab('members');
-      showToast(
-        language === 'bn'
-          ? `সদস্য অনুসন্ধান: "${searchTerm}"`
-          : `Searching for member: "${searchTerm}"`
-      );
+      showToast(`${t('shell.searching_member', 'Searching for member')}: "${searchTerm.trim()}"`, 'info');
     }
   };
 
   const handleManualRefresh = () => {
     setIsRefreshing(true);
     triggerRefresh();
-    showToast(t('topbar.refreshed', language === 'bn' ? 'ডাটা রিফ্রেশ সম্পন্ন' : 'Data refreshed'), 'info');
+    showToast(t('shell.refreshed', 'Data refreshed'), 'info');
     setTimeout(() => setIsRefreshing(false), 700);
   };
 
   const handleNotificationClick = (n: AppNotification) => {
     markNotificationRead(n.id);
-    if (n.targetFilter) {
-      setMemberFilterStatus(n.targetFilter);
-    }
+    if (n.targetFilter) setMemberFilterStatus(n.targetFilter);
     setActiveTab(n.targetTab);
     setShowNotificationMenu(false);
   };
 
-  const filteredNotifs = (notifications || []).filter((n) => {
+  const filteredNotifs = useMemo(() => (notifications || []).filter(n => {
     if (notifFilter === 'warning') return n.type === 'warning';
     if (notifFilter === 'info') return n.type === 'info' || n.type === 'success';
     return true;
-  });
+  }), [notifications, notifFilter]);
 
   return (
     <header className="no-print h-16 bg-white dark:bg-[#111e24] border-b border-slate-200 dark:border-[#223640] px-4 lg:px-6 xl:px-8 gap-3 flex items-center justify-between shrink-0 select-none shadow-sm transition-colors z-40 relative">
-      {/* Breadcrumb with i18n */}
+      {/* Breadcrumb */}
       <div className="flex items-center gap-2 text-xs font-semibold text-slate-500 dark:text-slate-400 min-w-0">
         <span
           onClick={() => setActiveTab('overview')}
-          title={orgName || t('nav.workspace')}
+          title={orgName}
           className="hover:text-slate-900 dark:hover:text-white cursor-pointer transition-colors truncate max-w-[220px]"
         >
-          {orgName || t('nav.workspace')}
+          {orgName}
         </span>
         <span className="text-slate-300 dark:text-slate-600 shrink-0">&rsaquo;</span>
-        <span className="text-slate-900 dark:text-white font-bold truncate">{getBreadcrumbTitle()}</span>
+        <span className="text-slate-900 dark:text-white font-bold truncate">{breadcrumbTitle}</span>
       </div>
 
       {/* Right Navigation Controls */}
@@ -152,87 +136,86 @@ export const TopBar: React.FC = () => {
           <Search size={14} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400 dark:text-slate-500" />
           <input
             type="text"
-            placeholder={t('topbar.search_placeholder')}
+            placeholder={t('topbar.search_placeholder', 'Search members or payment...')}
+            aria-label={t('topbar.search_placeholder', 'Search members or payment...')}
             value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
+            onChange={e => setSearchTerm(e.target.value)}
             className="w-52 2xl:w-64 pl-9 pr-4 py-2 bg-slate-50 dark:bg-[#16252d] rounded-xl border border-slate-300 dark:border-[#2d424e] text-xs text-slate-900 dark:text-slate-100 placeholder-slate-400 dark:placeholder-slate-500 font-medium focus:outline-none focus:ring-2 focus:ring-[#0f4a3c]/20 focus:border-[#0f4a3c] dark:focus:border-emerald-500 shadow-sm"
           />
         </form>
 
-        {/* Bangla / English Language Switcher Toggle */}
+        {/* Language */}
         <button
           type="button"
           onClick={toggleLanguage}
-          className="flex items-center gap-1.5 px-2.5 py-1.5 bg-slate-50 hover:bg-slate-100 dark:bg-[#16252d] dark:hover:bg-[#1d303b] text-slate-700 dark:text-slate-200 border border-slate-300 dark:border-[#2d424e] rounded-xl text-xs font-black shadow-sm transition-all"
-          title="Toggle Language (English / বাংলা)"
+          className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl text-xs font-black ${iconBtn}`}
+          title={t('shell.toggle_language', 'Switch language (English / বাংলা)')}
         >
           <Globe size={14} className="text-[#0f4a3c] dark:text-emerald-400" />
-          <span className="text-[11px] uppercase tracking-wider font-extrabold">
-            {language === 'en' ? 'বাংলা' : 'ENG'}
-          </span>
+          <span className="text-[11px] uppercase tracking-wider font-extrabold">{language === 'en' ? 'বাংলা' : 'ENG'}</span>
         </button>
 
-        {/* Live Refresh Button */}
+        {/* Refresh */}
         <button
           onClick={handleManualRefresh}
-          className="flex items-center gap-1.5 px-3 py-2 bg-slate-50 hover:bg-slate-100 dark:bg-[#16252d] dark:hover:bg-[#1d303b] text-slate-700 dark:text-slate-200 border border-slate-300 dark:border-[#2d424e] rounded-xl text-xs font-bold shadow-sm transition-all"
-          title={t('topbar.refresh_title', language === 'bn' ? 'ডাটা রিফ্রেশ করুন' : 'Reload data')}
+          className={`flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-bold ${iconBtn}`}
+          title={t('shell.refresh_title', 'Reload data')}
         >
           <RotateCw size={14} className={`text-[#0f4a3c] dark:text-emerald-400 ${isRefreshing ? 'animate-spin' : ''}`} />
-          <span className="hidden 2xl:inline">{t('topbar.refresh')}</span>
+          <span className="hidden 2xl:inline">{t('topbar.refresh', 'Refresh')}</span>
         </button>
 
-        {/* Night Mode Toggle */}
+        {/* Theme */}
         <button
           onClick={toggleDarkMode}
-          className="w-9 h-9 rounded-xl bg-slate-50 hover:bg-slate-100 dark:bg-[#16252d] dark:hover:bg-[#1d303b] border border-slate-300 dark:border-[#2d424e] flex items-center justify-center text-slate-700 dark:text-amber-400 shadow-sm transition-all"
-          title={isDarkMode ? 'Switch to Light Mode' : 'Switch to Night Mode'}
+          className={`w-9 h-9 rounded-xl flex items-center justify-center dark:text-amber-400 ${iconBtn}`}
+          title={isDarkMode ? t('shell.light_mode', 'Switch to light mode') : t('shell.dark_mode', 'Switch to night mode')}
+          aria-label={isDarkMode ? t('shell.light_mode', 'Switch to light mode') : t('shell.dark_mode', 'Switch to night mode')}
         >
           {isDarkMode ? <Sun size={15} /> : <Moon size={15} className="text-slate-600" />}
         </button>
 
-        {/* Expandable Notification Center with Outside-Click Close */}
+        {/* Notifications */}
         <div className="relative" ref={notificationRef}>
           <button
-            onClick={() => setShowNotificationMenu(!showNotificationMenu)}
+            onClick={() => setShowNotificationMenu(v => !v)}
             className={`w-9 h-9 rounded-xl border flex items-center justify-center text-slate-700 dark:text-slate-200 shadow-sm relative transition-all ${
               showNotificationMenu
                 ? 'bg-emerald-50 dark:bg-emerald-950/60 border-emerald-500 text-emerald-700 dark:text-emerald-300 ring-2 ring-emerald-500/20'
                 : 'bg-slate-50 hover:bg-slate-100 dark:bg-[#16252d] dark:hover:bg-[#1d303b] border-slate-300 dark:border-[#2d424e]'
             }`}
-            title={t('topbar.notifications')}
+            title={t('topbar.notifications', 'System Notifications')}
+            aria-label={t('topbar.notifications', 'System Notifications')}
           >
             <Bell size={16} />
             {unreadNotificationCount > 0 && (
-              <span className="min-w-4 h-4 px-1 rounded-full bg-emerald-600 text-white text-[9px] font-bold absolute -top-1 -right-1 flex items-center justify-center ring-2 ring-white dark:ring-[#111e24]">
-                {unreadNotificationCount}
+              <span className="min-w-[18px] h-[18px] px-1 rounded-full bg-emerald-600 text-white text-[10px] leading-none font-bold absolute -top-1.5 -right-1.5 flex items-center justify-center ring-2 ring-white dark:ring-[#111e24] tabular-nums">
+                {unreadNotificationCount > 9 ? `${num(9)}+` : num(unreadNotificationCount)}
               </span>
             )}
           </button>
 
-          {/* Expanded Notification Popover Menu */}
           {showNotificationMenu && (
             <div
               className={`absolute right-0 top-12 ${
                 isNotifExpanded ? 'w-[480px] sm:w-[540px]' : 'w-[360px] sm:w-[410px]'
-              } bg-white dark:bg-[#15232b] border border-slate-200 dark:border-[#283e4a] rounded-2xl shadow-2xl p-4 z-50 text-xs animate-in fade-in zoom-in-95 duration-150`}
+              } bg-white dark:bg-[#15232b] border border-slate-200 dark:border-[#283e4a] rounded-2xl shadow-2xl p-4 z-50 text-xs animate-pop`}
             >
-              {/* Header */}
               <div className="flex items-center justify-between pb-3 border-b border-slate-100 dark:border-slate-800 font-bold text-slate-800 dark:text-slate-100">
                 <div className="flex items-center gap-2">
-                  <span className="text-sm font-black">{t('topbar.notifications')}</span>
+                  <span className="text-sm font-black">{t('topbar.notifications', 'System Notifications')}</span>
                   {unreadNotificationCount > 0 && (
                     <span className="text-[10px] bg-emerald-100 dark:bg-emerald-950/60 text-emerald-800 dark:text-emerald-300 px-2 py-0.5 rounded-full font-bold">
-                      {unreadNotificationCount} {language === 'bn' ? 'টি নতুন' : 'New'}
+                      {num(unreadNotificationCount)} {t('shell.new', 'New')}
                     </span>
                   )}
                 </div>
 
                 <div className="flex items-center gap-2">
                   <button
-                    onClick={() => setIsNotifExpanded(!isNotifExpanded)}
+                    onClick={() => setIsNotifExpanded(v => !v)}
                     className="p-1 text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 rounded-lg"
-                    title={isNotifExpanded ? 'Compact Window' : 'Expand Window'}
+                    title={isNotifExpanded ? t('shell.compact', 'Compact window') : t('shell.expand_window', 'Expand window')}
                   >
                     {isNotifExpanded ? <Minimize2 size={13} /> : <Maximize2 size={13} />}
                   </button>
@@ -241,64 +224,44 @@ export const TopBar: React.FC = () => {
                     <button
                       onClick={markAllNotificationsRead}
                       className="text-[11px] text-[#0f4a3c] dark:text-emerald-400 hover:underline font-semibold flex items-center gap-1"
-                      title={t('topbar.mark_all_read')}
+                      title={t('topbar.mark_all_read', 'Mark all read')}
                     >
                       <CheckCheck size={13} />
-                      <span className="hidden sm:inline">{t('topbar.mark_all_read')}</span>
+                      <span className="hidden sm:inline">{t('topbar.mark_all_read', 'Mark all read')}</span>
                     </button>
                   )}
 
                   <button
-                    onClick={() => setShowNotificationMenu(false)}
+                    onClick={closeNotif}
                     className="p-1 text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800"
-                    title="Close"
+                    title={t('common.close', 'Close')}
+                    aria-label={t('common.close', 'Close')}
                   >
                     <X size={15} />
                   </button>
                 </div>
               </div>
 
-              {/* Filter Tabs */}
               <div className="flex items-center gap-1 pt-2.5 pb-2 text-[11px]">
-                <button
-                  onClick={() => setNotifFilter('all')}
-                  className={`px-2.5 py-1 rounded-lg font-bold transition-colors ${
-                    notifFilter === 'all'
-                      ? 'bg-slate-900 dark:bg-white text-white dark:text-slate-900'
-                      : 'text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800'
-                  }`}
-                >
-                  {language === 'bn' ? 'সকল' : 'All'} ({(notifications || []).length})
-                </button>
-                <button
-                  onClick={() => setNotifFilter('warning')}
-                  className={`px-2.5 py-1 rounded-lg font-bold transition-colors ${
-                    notifFilter === 'warning'
-                      ? 'bg-amber-600 text-white'
-                      : 'text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800'
-                  }`}
-                >
-                  {language === 'bn' ? 'বকেয়া ও ভাউচার' : 'Attention'}
-                </button>
-                <button
-                  onClick={() => setNotifFilter('info')}
-                  className={`px-2.5 py-1 rounded-lg font-bold transition-colors ${
-                    notifFilter === 'info'
-                      ? 'bg-emerald-600 text-white'
-                      : 'text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800'
-                  }`}
-                >
-                  {language === 'bn' ? 'আপডেট' : 'Updates'}
-                </button>
+                {([
+                  ['all', `${t('common.all', 'All')} (${num((notifications || []).length)})`, 'bg-slate-900 dark:bg-white text-white dark:text-slate-900'],
+                  ['warning', t('shell.attention', 'Attention'), 'bg-amber-600 text-white'],
+                  ['info', t('shell.updates', 'Updates'), 'bg-emerald-600 text-white'],
+                ] as const).map(([key, label, activeCls]) => (
+                  <button
+                    key={key}
+                    onClick={() => setNotifFilter(key)}
+                    className={`px-2.5 py-1 rounded-lg font-bold transition-colors ${
+                      notifFilter === key ? activeCls : 'text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800'
+                    }`}
+                  >
+                    {label}
+                  </button>
+                ))}
               </div>
 
-              {/* Notifications List (Expanded Height) */}
-              <div
-                className={`space-y-2.5 mt-1 overflow-y-auto pr-1 ${
-                  isNotifExpanded ? 'max-h-[460px]' : 'max-h-[340px]'
-                }`}
-              >
-                {filteredNotifs.map((n) => (
+              <div className={`space-y-2.5 mt-1 overflow-y-auto pr-1 ${isNotifExpanded ? 'max-h-[460px]' : 'max-h-[340px]'}`}>
+                {filteredNotifs.map(n => (
                   <div
                     key={n.id}
                     onClick={() => handleNotificationClick(n)}
@@ -312,8 +275,8 @@ export const TopBar: React.FC = () => {
                         : 'bg-[#e6f3ee] dark:bg-emerald-950/20 border-emerald-300 dark:border-emerald-800/50 shadow-sm'
                     }`}
                   >
-                    <div className="flex items-center justify-between mb-1">
-                      <div className="flex items-center gap-1.5 font-bold text-slate-900 dark:text-slate-100">
+                    <div className="flex items-center justify-between gap-2 mb-1">
+                      <div className="flex items-center gap-1.5 font-bold text-slate-900 dark:text-slate-100 min-w-0">
                         {n.type === 'warning' ? (
                           <AlertTriangle size={13} className="text-amber-600 shrink-0" />
                         ) : (
@@ -321,14 +284,10 @@ export const TopBar: React.FC = () => {
                         )}
                         <span>{n.title}</span>
                       </div>
-                      <span className="text-[10px] text-slate-400 dark:text-slate-500 font-mono">
-                        {n.createdAt}
-                      </span>
+                      <span className="text-[10px] text-slate-400 dark:text-slate-500 shrink-0">{formatDate(n.createdAt)}</span>
                     </div>
 
-                    <p className="text-[11px] text-slate-600 dark:text-slate-300 leading-relaxed mb-2">
-                      {n.message}
-                    </p>
+                    <p className="text-[11px] text-slate-600 dark:text-slate-300 leading-relaxed mb-2">{n.message}</p>
 
                     <div className="flex items-center justify-between text-[11px] font-bold text-[#0f4a3c] dark:text-emerald-400">
                       <span className="flex items-center gap-1 hover:underline">
@@ -336,42 +295,54 @@ export const TopBar: React.FC = () => {
                         <ArrowRight size={12} />
                       </span>
                       {!n.isRead && (
-                        <span className="text-[10px] bg-emerald-600 text-white px-1.5 py-0.2 rounded-md font-bold">
-                          {language === 'bn' ? 'নতুন' : 'Unread'}
-                        </span>
+                        <span className="text-[10px] bg-emerald-600 text-white px-1.5 rounded-md font-bold">{t('shell.unread', 'Unread')}</span>
                       )}
                     </div>
                   </div>
                 ))}
 
                 {filteredNotifs.length === 0 && (
-                  <div className="text-center py-8 text-slate-400">
-                    {t('topbar.no_notifications')}
-                  </div>
+                  <div className="text-center py-8 text-slate-400">{t('topbar.no_notifications', 'No new notifications. Everything is in order.')}</div>
                 )}
               </div>
             </div>
           )}
         </div>
 
-        {/* Database Backup Quick Access */}
+        {/* Backup */}
         <button
           onClick={() => setActiveTab('backup')}
-          className="flex items-center gap-1.5 px-3 py-2 bg-slate-50 hover:bg-slate-100 dark:bg-[#16252d] dark:hover:bg-[#1d303b] text-slate-700 dark:text-slate-200 border border-slate-300 dark:border-[#2d424e] rounded-xl text-xs font-semibold shadow-sm transition-all"
-          title="Open Database Backup & Restore Center"
+          className={`flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold ${iconBtn}`}
+          title={t('shell.backup_title', 'Open Backup & Restore')}
         >
           <Database size={14} className="text-[#0f4a3c] dark:text-emerald-400" />
-          <span className="hidden 2xl:inline">{t('topbar.backup')}</span>
+          <span className="hidden 2xl:inline">{t('topbar.backup', 'Backup')}</span>
         </button>
 
-        {/* Global Record Payment Action Button */}
+        {/* Record payment */}
         <button
           onClick={() => setOpenRecordModal(true)}
           className="flex items-center gap-1.5 px-4 py-2 bg-slate-900 hover:bg-slate-800 dark:bg-emerald-600 dark:hover:bg-emerald-500 text-white rounded-xl text-xs font-bold shadow-sm transition-all active:scale-[0.98]"
         >
           <Plus size={15} strokeWidth={2.5} />
-          <span>{t('topbar.record_payment')}</span>
+          <span>{t('topbar.record_payment', 'Record payment')}</span>
         </button>
+
+        {/* Profile */}
+        <div className="relative" ref={profileRef}>
+          <button
+            type="button"
+            onClick={() => setShowProfileMenu(v => !v)}
+            title={currentUser ? `${currentUser.full_name} · ${tv(currentUser.role)}` : t('nav.profile', 'My profile')}
+            aria-label={t('shell.profile_menu', 'Profile & switch user')}
+            aria-haspopup="menu"
+            aria-expanded={showProfileMenu}
+            className={`rounded-xl p-0.5 transition-all ring-2 ${showProfileMenu ? 'ring-emerald-500' : 'ring-transparent hover:ring-slate-300 dark:hover:ring-slate-600'}`}
+          >
+            <UserAvatar user={currentUser} className="w-8 h-8 rounded-[10px]" />
+          </button>
+          {showProfileMenu && <ProfileMenu onClose={closeProfile} className="absolute right-0 top-12 w-64" />}
+        </div>
       </div>
     </header>
   );

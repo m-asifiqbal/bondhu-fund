@@ -53,6 +53,7 @@ export interface CollectionRecord {
   id: number;
   member_id: number;
   member_name?: string;
+  member_name_bn?: string | null;
   member_code?: string;
   payment_month: string; // e.g. "June 2024" or "2024-06"
   due_date: string; // e.g. "05 Jun"
@@ -228,9 +229,9 @@ export interface OverviewData {
   portfolio: Array<{ name: string; invested: number; value: number; count: number }>;
   investments: Array<{ id: number; name: string; sector: string; invested_amount: number; current_estimated_value: number; status: string; review_date: string | null }>;
   paymentMethods: Array<{ name: string; count: number; value: number }>;
-  topContributors: Array<{ id: number; name: string; member_code: string; avatar_initials: string; total: number }>;
+  topContributors: Array<{ id: number; name: string; name_bn?: string | null; member_code: string; avatar_initials: string; total: number }>;
   dailyCollections: Array<{ date: string; value: number; count: number }>;
-  arrears: Array<{ id: number; member_code: string; name: string; phone: string; monthly_due: number; avatar_initials: string; months: number; amount: number }>;
+  arrears: Array<{ id: number; member_code: string; name: string; name_bn?: string | null; phone: string; monthly_due: number; avatar_initials: string; months: number; amount: number }>;
   attention: {
     overdue: number;
     reviews: Array<{ id: number; name: string; review_date: string | null }>;

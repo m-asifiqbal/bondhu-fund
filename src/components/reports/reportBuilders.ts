@@ -9,9 +9,11 @@ import {
   getExpenses, getInvestments, getAuditLog,
 } from '../../services/db';
 import { addMonths, currentMonthKey, fiscalYearRange, toMonthKey, todayISO } from '../../utils/date';
+import { toBanglaDigits } from '../../utils/i18n';
 
 export type ReportId = 'cashbook' | 'collections' | 'fiscal' | 'member' | 'defaulters' | 'expenses' | 'investments' | 'audit';
-export type CellKind = 'text' | 'money' | 'date' | 'month' | 'number' | 'status' | 'datetime' | 'percent';
+/** tv = translated data value (category/method/sector); name = member/person name (Bangla variant if known). */
+export type CellKind = 'text' | 'tv' | 'name' | 'money' | 'date' | 'month' | 'number' | 'status' | 'datetime' | 'percent';
 
 export interface ColumnDef {
   key: string;
@@ -98,9 +100,9 @@ async function cashbook(p: ReportParams): Promise<ReportData> {
     columns: [
       { key: 'date', label: 'Date', bn: 'তারিখ', kind: 'date', default: true },
       { key: 'type', label: 'Type', bn: 'ধরন', kind: 'status', default: true },
-      { key: 'party', label: 'Party', bn: 'পক্ষ', default: true },
+      { key: 'party', label: 'Party', bn: 'পক্ষ', kind: 'name', default: true },
       { key: 'description', label: 'Description', bn: 'বিবরণ', default: true },
-      { key: 'method', label: 'Method', bn: 'মাধ্যম', default: false },
+      { key: 'method', label: 'Method', bn: 'মাধ্যম', kind: 'tv', default: false },
       { key: 'reference', label: 'Reference', bn: 'রেফারেন্স', default: true },
       { key: 'credit', label: 'Credit', bn: 'জমা', kind: 'money', default: true, total: true },
       { key: 'debit', label: 'Debit', bn: 'খরচ', kind: 'money', default: true, total: true },
@@ -117,7 +119,7 @@ async function collections(p: ReportParams): Promise<ReportData> {
   return {
     columns: [
       { key: 'member_code', label: 'Member ID', bn: 'সদস্য আইডি', default: true },
-      { key: 'member_name', label: 'Member name', bn: 'সদস্যের নাম', default: true },
+      { key: 'member_name', label: 'Member name', bn: 'সদস্যের নাম', kind: 'name', default: true },
       { key: 'member_phone', label: 'Phone', bn: 'ফোন', default: false },
       { key: 'monthly_due', label: 'Monthly due', bn: 'মাসিক চাঁদা', kind: 'money', default: true, total: true },
       { key: 'due_date', label: 'Due date', bn: 'নির্ধারিত তারিখ', kind: 'date', default: false },
@@ -126,7 +128,7 @@ async function collections(p: ReportParams): Promise<ReportData> {
       { key: 'late_fee', label: 'Late fee', bn: 'বিলম্ব ফি', kind: 'money', default: true, total: true },
       { key: 'total_amount', label: 'Total', bn: 'মোট', kind: 'money', default: true, total: true },
       { key: 'status', label: 'Status', bn: 'অবস্থা', kind: 'status', default: true },
-      { key: 'payment_method', label: 'Method', bn: 'মাধ্যম', default: true },
+      { key: 'payment_method', label: 'Method', bn: 'মাধ্যম', kind: 'tv', default: true },
       { key: 'trx_id', label: 'TRX ID', bn: 'ট্রানজেকশন আইডি', default: true },
       { key: 'note', label: 'Note', bn: 'নোট', default: false },
     ],
@@ -211,7 +213,7 @@ async function fiscal(p: ReportParams): Promise<ReportData> {
       title: 'Member-wise contribution', bn: 'সদস্যভিত্তিক চাঁদা',
       columns: [
         { key: 'member_code', label: 'Member ID', bn: 'সদস্য আইডি' },
-        { key: 'name', label: 'Member name', bn: 'সদস্যের নাম' },
+        { key: 'name', label: 'Member name', bn: 'সদস্যের নাম', kind: 'name' },
         { key: 'status', label: 'Status', bn: 'অবস্থা', kind: 'status' },
         { key: 'monthly_due', label: 'Monthly due', bn: 'মাসিক চাঁদা', kind: 'money' },
         { key: 'months_due', label: 'Months due', bn: 'দেয় মাস', kind: 'number', total: true },
@@ -231,7 +233,7 @@ async function fiscal(p: ReportParams): Promise<ReportData> {
       { label: 'Net cash flow', bn: 'নিট নগদ প্রবাহ', value: tot('net'), kind: 'money', tone: 'brand' },
       { label: 'Member arrears', bn: 'সদস্য বকেয়া', value: sum(memberRows, 'arrears'), kind: 'money', tone: 'bad' },
     ],
-    periodLabel: `${fy.label} (${p.fmtDate(fy.start)} – ${p.fmtDate(fy.end)})`,
+    periodLabel: `${p.bn ? toBanglaDigits(fy.label.replace('FY', 'অর্থবছর')) : fy.label} (${p.fmtDate(fy.start)} – ${p.fmtDate(fy.end)})`,
     fileTag: fy.label.replace(/\s+/g, ''),
   };
 }
@@ -251,6 +253,7 @@ async function member(p: ReportParams): Promise<ReportData> {
   const overdue = rows.filter(r => r.status === 'Overdue');
   const m = st.member;
   const opening = Number(m.opening_balance) || 0;
+  const memberLabel = `${p.bn ? toBanglaDigits(m.member_code) : m.member_code} · ${p.bn && m.name_bn ? m.name_bn : m.name}`;
   return {
     columns: [
       { key: 'payment_month', label: 'Month', bn: 'মাস', kind: 'month', default: true },
@@ -261,22 +264,22 @@ async function member(p: ReportParams): Promise<ReportData> {
       { key: 'late_fee', label: 'Late fee', bn: 'বিলম্ব ফি', kind: 'money', default: true, total: true },
       { key: 'total_amount', label: 'Total', bn: 'মোট', kind: 'money', default: true, total: true },
       { key: 'status', label: 'Status', bn: 'অবস্থা', kind: 'status', default: true },
-      { key: 'payment_method', label: 'Method', bn: 'মাধ্যম', default: true },
+      { key: 'payment_method', label: 'Method', bn: 'মাধ্যম', kind: 'tv', default: true },
       { key: 'trx_id', label: 'TRX ID', bn: 'ট্রানজেকশন আইডি', default: false },
       { key: 'note', label: 'Note', bn: 'নোট', default: false },
     ],
     rows,
     summary: [
-      { label: 'Member', bn: 'সদস্য', value: `${m.member_code} · ${m.name}` },
+      { label: 'Member', bn: 'সদস্য', value: memberLabel },
       { label: 'Joined', bn: 'যোগদান', value: m.join_date, kind: 'date' },
       { label: 'Opening balance', bn: 'প্রারম্ভিক জমা', value: opening, kind: 'money' },
-      { label: 'Months paid', bn: 'পরিশোধিত মাস', value: `${paidRows.length} / ${rows.length}` },
+      { label: 'Months paid', bn: 'পরিশোধিত মাস', value: p.bn ? toBanglaDigits(`${paidRows.length} / ${rows.length}`) : `${paidRows.length} / ${rows.length}` },
       { label: 'Contributions', bn: 'চাঁদা', value: sum(paidRows, 'contribution_amount'), kind: 'money', tone: 'good' },
       { label: 'Late fees', bn: 'বিলম্ব ফি', value: sum(paidRows, 'late_fee'), kind: 'money' },
       { label: 'Lifetime contributed', bn: 'মোট অবদান', value: opening + sum(paidRows, 'contribution_amount'), kind: 'money', tone: 'brand' },
-      { label: `Arrears (${overdue.length} mo)`, bn: `বকেয়া (${overdue.length} মাস)`, value: sum(overdue, 'monthly_due'), kind: 'money', tone: 'bad' },
+      { label: `Arrears (${overdue.length} mo)`, bn: `বকেয়া (${toBanglaDigits(overdue.length)} মাস)`, value: sum(overdue, 'monthly_due'), kind: 'money', tone: 'bad' },
     ],
-    periodLabel: `${m.member_code} · ${m.name}`,
+    periodLabel: memberLabel,
     fileTag: m.member_code || String(m.id),
   };
 }
@@ -288,7 +291,7 @@ async function defaulters(p: ReportParams): Promise<ReportData> {
   return {
     columns: [
       { key: 'member_code', label: 'Member ID', bn: 'সদস্য আইডি', default: true },
-      { key: 'name', label: 'Member name', bn: 'সদস্যের নাম', default: true },
+      { key: 'name', label: 'Member name', bn: 'সদস্যের নাম', kind: 'name', default: true },
       { key: 'phone', label: 'Phone', bn: 'ফোন', default: true },
       { key: 'monthly_due', label: 'Monthly due', bn: 'মাসিক চাঁদা', kind: 'money', default: true },
       { key: 'months', label: 'Unpaid months', bn: 'অপরিশোধিত মাস', kind: 'number', default: true, total: true },
@@ -322,8 +325,8 @@ async function expenses(p: ReportParams): Promise<ReportData> {
     columns: [
       { key: 'expense_date', label: 'Date', bn: 'তারিখ', kind: 'date', default: true },
       { key: 'title', label: 'Title', bn: 'শিরোনাম', default: true },
-      { key: 'category', label: 'Category', bn: 'ক্যাটাগরি', default: true },
-      { key: 'payee', label: 'Paid to', bn: 'প্রাপক', default: true },
+      { key: 'category', label: 'Category', bn: 'ক্যাটাগরি', kind: 'tv', default: true },
+      { key: 'payee', label: 'Paid to', bn: 'প্রাপক', kind: 'name', default: true },
       { key: 'receipt_ref', label: 'Receipt ref', bn: 'রসিদ নং', default: true },
       { key: 'status', label: 'Status', bn: 'অবস্থা', kind: 'status', default: true },
       { key: 'notes', label: 'Notes', bn: 'নোট', default: false },
@@ -333,7 +336,7 @@ async function expenses(p: ReportParams): Promise<ReportData> {
     extra: catRows.length ? [{
       title: 'Category subtotals', bn: 'ক্যাটাগরিভিত্তিক মোট',
       columns: [
-        { key: 'category', label: 'Category', bn: 'ক্যাটাগরি' },
+        { key: 'category', label: 'Category', bn: 'ক্যাটাগরি', kind: 'tv' },
         { key: 'count', label: 'Entries', bn: 'এন্ট্রি', kind: 'number', total: true },
         { key: 'share', label: 'Share %', bn: 'অংশ %', kind: 'percent' },
         { key: 'amount', label: 'Amount', bn: 'পরিমাণ', kind: 'money', total: true },
@@ -344,7 +347,7 @@ async function expenses(p: ReportParams): Promise<ReportData> {
       { label: 'Total expenses', bn: 'মোট খরচ', value: total, kind: 'money', tone: 'bad' },
       { label: 'Entries', bn: 'এন্ট্রি', value: rows.length, kind: 'number' },
       { label: 'Verified', bn: 'যাচাইকৃত', value: total - sum(needs, 'amount'), kind: 'money', tone: 'good' },
-      { label: `Needs receipt (${needs.length})`, bn: `রসিদ প্রয়োজন (${needs.length})`, value: sum(needs, 'amount'), kind: 'money' },
+      { label: `Needs receipt (${needs.length})`, bn: `রসিদ প্রয়োজন (${toBanglaDigits(needs.length)})`, value: sum(needs, 'amount'), kind: 'money' },
       { label: 'Categories', bn: 'ক্যাটাগরি', value: catRows.length, kind: 'number' },
     ],
     periodLabel: rangeLabel(p), fileTag: rangeTag(p),
@@ -372,7 +375,7 @@ async function investments(p: ReportParams): Promise<ReportData> {
   return {
     columns: [
       { key: 'name', label: 'Asset', bn: 'সম্পদ', default: true },
-      { key: 'sector', label: 'Sector', bn: 'খাত', default: true },
+      { key: 'sector', label: 'Sector', bn: 'খাত', kind: 'tv', default: true },
       { key: 'purchase_date', label: 'Purchased', bn: 'ক্রয়ের তারিখ', kind: 'date', default: true },
       { key: 'status', label: 'Status', bn: 'অবস্থা', kind: 'status', default: true },
       { key: 'invested_amount', label: 'Cost', bn: 'ক্রয়মূল্য', kind: 'money', default: true, total: true },
@@ -387,10 +390,10 @@ async function investments(p: ReportParams): Promise<ReportData> {
     ],
     rows,
     summary: [
-      { label: `Active assets (${active.length})`, bn: `সক্রিয় সম্পদ (${active.length})`, value: sum(active, 'invested_amount'), kind: 'money' },
+      { label: `Active assets (${active.length})`, bn: `সক্রিয় সম্পদ (${toBanglaDigits(active.length)})`, value: sum(active, 'invested_amount'), kind: 'money' },
       { label: 'Current value', bn: 'বর্তমান মূল্য', value: sum(active, 'value'), kind: 'money', tone: 'brand' },
       { label: 'Unrealized gain', bn: 'অনর্জিত লাভ', value: sum(active, 'unrealized_gain'), kind: 'money', tone: sum(active, 'unrealized_gain') >= 0 ? 'good' : 'bad' },
-      { label: `Sold (${sold.length})`, bn: `বিক্রিত (${sold.length})`, value: sum(sold, 'value'), kind: 'money' },
+      { label: `Sold (${sold.length})`, bn: `বিক্রিত (${toBanglaDigits(sold.length)})`, value: sum(sold, 'value'), kind: 'money' },
       { label: 'Realized gain', bn: 'অর্জিত লাভ', value: sum(sold, 'realized_gain'), kind: 'money', tone: sum(sold, 'realized_gain') >= 0 ? 'good' : 'bad' },
     ],
     periodLabel: p.fmtDate(todayISO()), fileTag: todayISO(),
@@ -409,7 +412,7 @@ async function audit(p: ReportParams): Promise<ReportData> {
   return {
     columns: [
       { key: 'at', label: 'Timestamp', bn: 'সময়', kind: 'datetime', default: true },
-      { key: 'user_name', label: 'User', bn: 'ব্যবহারকারী', default: true },
+      { key: 'user_name', label: 'User', bn: 'ব্যবহারকারী', kind: 'name', default: true },
       { key: 'action', label: 'Action', bn: 'কার্যক্রম', default: true },
       { key: 'entity', label: 'Entity', bn: 'বিষয়', default: true },
       { key: 'entity_id', label: 'Record ID', bn: 'রেকর্ড আইডি', default: false },

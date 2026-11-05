@@ -58,7 +58,7 @@ export const setActor = (name: string, id?: number) => call<void>('setActor', na
 export const getNextMemberCode = (extra?: Set<string> | string[]) => call<string>('getNextMemberCode', extra ? [...extra] : undefined);
 export const getMembers = (search = '', status = 'All', page = 1, limit = 10, month?: string, startDate?: string, endDate?: string, sortBy = 'newest') =>
   call<{ members: Member[]; total: number; stats: MemberStats }>('getMembers', search, status, page, limit, month, startDate, endDate, sortBy);
-export const getAllMembersLite = () => call<Pick<Member, 'id' | 'member_code' | 'name' | 'phone' | 'monthly_due' | 'status' | 'avatar_initials'>[]>('getAllMembersLite');
+export const getAllMembersLite = () => call<Pick<Member, 'id' | 'member_code' | 'name' | 'name_bn' | 'phone' | 'monthly_due' | 'status' | 'avatar_initials'>[]>('getAllMembersLite');
 export const addMember = (d: Partial<Member>) => call<number>('addMember', d);
 export const updateMember = (id: number, d: Partial<Member>) => call<void>('updateMember', id, d);
 export const deleteMember = (id: number) => call<void>('deleteMember', id);

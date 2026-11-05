@@ -1,14 +1,17 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import {
   Plus, Upload, Search, ChevronLeft, ChevronRight, X, UserPlus, Edit2, Trash2, Receipt, FileSpreadsheet, Users,
-  CheckCircle2, Clock, AlertTriangle,
+  CheckCircle2, Clock, AlertTriangle, UserMinus,
 } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 import {
-  getMembers, addMember, updateMember, deleteMember, getMemberStatement, bulkAddMembers, getNextMemberCode, getAppSettings,
+  getMembers, addMember, updateMember, deleteMember, getMemberStatement, bulkAddMembers, getNextMemberCode,
 } from '../services/db';
 import { Member, MemberStats, MemberStatement, PaymentStatus } from '../types';
 import { todayISO } from '../utils/date';
+import { SearchableSelect, SelectOption } from '../components/common/SearchableSelect';
+import { DatePicker } from '../components/common/DatePicker';
+import { Modal } from '../components/common/Modal';
 
 const PAGE_SIZE = 10;
 const EMPTY_STATS: MemberStats = { total: 0, active: 0, paid: 0, pending: 0, overdue: 0 };
@@ -16,6 +19,7 @@ const EMPTY_STATS: MemberStats = { total: 0, active: 0, paid: 0, pending: 0, ove
 interface MemberForm {
   member_code: string;
   name: string;
+  name_bn: string;
   phone: string;
   email: string;
   designation: string;
@@ -27,19 +31,27 @@ interface MemberForm {
 }
 
 const blankForm = (due: number): MemberForm => ({
-  member_code: '', name: '', phone: '', email: '', designation: 'Member', status: 'Active',
+  member_code: '', name: '', name_bn: '', phone: '', email: '', designation: 'Member', status: 'Active',
   monthly_due: due, join_date: todayISO(), opening_balance: 0, notes: '',
 });
 
+/** Fill {placeholders} in a translated template. */
+const fill = (s: string, vars: Record<string, string | number>) => s.replace(/\{(\w+)\}/g, (_, k) => String(vars[k] ?? ''));
+
 const btnPrimary = 'flex items-center justify-center gap-1.5 px-4 py-2 bg-[#0f4a3c] hover:bg-[#145c4b] dark:bg-emerald-700 dark:hover:bg-emerald-600 text-white rounded-xl text-xs font-bold shadow-md transition-all disabled:opacity-50';
 const btnSecondary = 'flex items-center justify-center gap-1.5 px-4 py-2 bg-white dark:bg-[#16252d] border border-slate-300 dark:border-[#283e4a] rounded-xl text-xs font-bold text-slate-700 dark:text-slate-200 shadow-sm hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors disabled:opacity-50';
+const btnDanger = 'flex items-center justify-center gap-1.5 px-4 py-2 bg-rose-600 hover:bg-rose-700 dark:bg-rose-700 dark:hover:bg-rose-600 text-white rounded-xl text-xs font-bold shadow-md transition-all disabled:opacity-50';
 const iconBtn = 'inline-flex items-center justify-center w-8 h-8 rounded-lg border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 hover:text-slate-900 dark:hover:text-white transition-colors';
 
 export const MembersView: React.FC = () => {
   const {
     showToast, refreshKey, triggerRefresh, memberFilterStatus, setMemberFilterStatus, setOpenRecordModal,
-    setSelectedMemberIdForPayment, selectedMonth, t, formatCurrency, formatDate, formatMonth,
+    setSelectedMemberIdForPayment, selectedMonth, t, tv, bnName, language, toBanglaDigits, settings,
+    formatCurrency, formatDate, formatMonth,
   } = useApp();
+  const bn = language === 'bn';
+  const n = (v: string | number) => (bn ? toBanglaDigits(v) : String(v));
+  const defaultDue = Number(settings?.default_monthly_due) || 0;
 
   const [members, setMembers] = useState<Member[]>([]);
   const [totalCount, setTotalCount] = useState(0);
@@ -51,13 +63,17 @@ export const MembersView: React.FC = () => {
   const [startDate, setStartDate] = useState('');
   const [endDate, setEndDate] = useState('');
   const [sortBy, setSortBy] = useState('newest');
-  const [defaultDue, setDefaultDue] = useState(0);
 
   // Add / edit modal
   const [formOpen, setFormOpen] = useState(false);
   const [editingId, setEditingId] = useState<number | null>(null);
   const [form, setForm] = useState<MemberForm>(blankForm(0));
   const [saving, setSaving] = useState(false);
+
+  // Delete confirmation / deactivate offer
+  const [confirmDelete, setConfirmDelete] = useState<Member | null>(null);
+  const [offerInactive, setOfferInactive] = useState<{ member: Member; message: string } | null>(null);
+  const [busy, setBusy] = useState(false);
 
   // Statement panel
   const [statement, setStatement] = useState<MemberStatement | null>(null);
@@ -71,15 +87,11 @@ export const MembersView: React.FC = () => {
 
   // Debounce the search box.
   useEffect(() => {
-    const h = setTimeout(() => { setSearch(searchInput.trim()); setPage(1); }, 300);
+    const h = setTimeout(() => { setSearch(searchInput.trim()); setPage(1); }, 250);
     return () => clearTimeout(h);
   }, [searchInput]);
 
   useEffect(() => { setPage(1); }, [memberFilterStatus]);
-
-  useEffect(() => {
-    getAppSettings().then(s => setDefaultDue(Number(s.default_monthly_due) || 0)).catch(() => undefined);
-  }, [refreshKey]);
 
   useEffect(() => {
     let alive = true;
@@ -110,6 +122,27 @@ export const MembersView: React.FC = () => {
     return () => { alive = false; };
   }, [statementId, refreshKey]);
 
+  const statusOptions = useMemo<SelectOption[]>(
+    () => ['Paid', 'Pending', 'Overdue', 'Active', 'Inactive'].map(s => ({ value: s, label: tv(s) })),
+    [tv],
+  );
+  const memberStatusOptions = useMemo<SelectOption[]>(
+    () => ['Active', 'Inactive'].map(s => ({ value: s, label: tv(s) })),
+    [tv],
+  );
+  const sortOptions = useMemo<SelectOption[]>(() => [
+    { value: 'newest', label: t('members.sort_newest', 'Newest first') },
+    { value: 'oldest', label: t('members.sort_oldest', 'Oldest first') },
+    { value: 'name_asc', label: t('members.sort_name_asc', 'Name: A to Z') },
+    { value: 'name_desc', label: t('members.sort_name_desc', 'Name: Z to A') },
+    { value: 'code_asc', label: t('members.sort_code_asc', 'Member ID') },
+    { value: 'due_high', label: t('members.sort_due_high', 'Due: high to low') },
+    { value: 'due_low', label: t('members.sort_due_low', 'Due: low to high') },
+    { value: 'contributed_high', label: t('members.sort_contributed_high', 'Most contributed') },
+    { value: 'contributed_low', label: t('members.sort_contributed_low', 'Least contributed') },
+    { value: 'join_desc', label: t('members.sort_join_desc', 'Recently joined') },
+  ], [t]);
+
   const totalPages = Math.max(1, Math.ceil(totalCount / PAGE_SIZE));
   const hasFilters = !!(searchInput || memberFilterStatus !== 'All' || startDate || endDate || sortBy !== 'newest');
 
@@ -136,6 +169,7 @@ export const MembersView: React.FC = () => {
     setForm({
       member_code: m.member_code,
       name: m.name,
+      name_bn: m.name_bn || '',
       phone: m.phone || '',
       email: m.email || '',
       designation: m.designation || 'Member',
@@ -160,6 +194,7 @@ export const MembersView: React.FC = () => {
 
     const payload: Partial<Member> = {
       name: form.name.trim(),
+      name_bn: form.name_bn.trim() || null,
       phone: form.phone.trim(),
       email: form.email.trim(),
       designation: form.designation.trim() || 'Member',
@@ -176,7 +211,7 @@ export const MembersView: React.FC = () => {
         showToast(t('members.updated', 'Member updated.'));
       } else {
         await addMember({ ...payload, member_code: form.member_code.trim() || undefined });
-        showToast(`${t('members.added', 'Member added')}: ${payload.name}`);
+        showToast(`${t('members.added', 'Member added')}: ${bnName(payload.name, payload.name_bn)}`);
       }
       setFormOpen(false);
       triggerRefresh();
@@ -187,26 +222,39 @@ export const MembersView: React.FC = () => {
     }
   };
 
-  const handleDelete = async (m: Member) => {
-    if (!window.confirm(`${t('members.confirm_delete', 'Delete member')} ${m.name} (${m.member_code})?`)) return;
+  const handleDelete = async () => {
+    const m = confirmDelete;
+    if (!m || busy) return;
+    setBusy(true);
     try {
       await deleteMember(m.id);
-      showToast(`${t('members.deleted', 'Member deleted')}: ${m.name}`);
+      showToast(`${t('members.deleted', 'Member deleted')}: ${bnName(m.name, m.name_bn)}`);
       if (statementId === m.id) { setStatementId(null); setStatement(null); }
+      setConfirmDelete(null);
       triggerRefresh();
     } catch (err: any) {
+      setConfirmDelete(null);
       // Members with payments cannot be deleted: offer to deactivate instead.
-      if (m.status === 'Active' && window.confirm(`${err.message}\n\n${t('members.offer_inactive', 'Set this member to Inactive now?')}`)) {
-        try {
-          await updateMember(m.id, { status: 'Inactive' });
-          showToast(`${m.name}: ${t('members.set_inactive_done', 'set to Inactive.')}`);
-          triggerRefresh();
-        } catch (e2: any) {
-          showToast(e2.message, 'error');
-        }
-      } else {
-        showToast(err.message, 'error');
-      }
+      if (m.status === 'Active') setOfferInactive({ member: m, message: err.message });
+      else showToast(err.message, 'error');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const handleSetInactive = async () => {
+    if (!offerInactive || busy) return;
+    const m = offerInactive.member;
+    setBusy(true);
+    try {
+      await updateMember(m.id, { status: 'Inactive' });
+      showToast(`${bnName(m.name, m.name_bn)}: ${t('members.set_inactive_done', 'set to Inactive.')}`);
+      setOfferInactive(null);
+      triggerRefresh();
+    } catch (e2: any) {
+      showToast(e2.message, 'error');
+    } finally {
+      setBusy(false);
     }
   };
 
@@ -216,7 +264,7 @@ export const MembersView: React.FC = () => {
   };
 
   /** CSV columns: Name, Phone, Email, Monthly Due, Join Date (YYYY-MM-DD). A header row is skipped. */
-  const parsedImport = csvText
+  const parsedImport = useMemo(() => csvText
     .split(/\r?\n/)
     .map(l => l.trim())
     .filter(Boolean)
@@ -229,7 +277,7 @@ export const MembersView: React.FC = () => {
       email: email || '',
       monthly_due: due && !isNaN(Number(due)) ? Number(due) : undefined,
       join_date: join && /^\d{4}-\d{2}-\d{2}$/.test(join) ? join : undefined,
-    }));
+    })), [csvText]);
 
   const handleBulkImport = async () => {
     if (importing) return;
@@ -237,7 +285,7 @@ export const MembersView: React.FC = () => {
     setImporting(true);
     try {
       const count = await bulkAddMembers(parsedImport);
-      showToast(`${t('members.imported', 'Members imported')}: ${count}`);
+      showToast(`${t('members.imported', 'Members imported')}: ${n(count)}`);
       setShowImportModal(false);
       setCsvText('');
       triggerRefresh();
@@ -252,24 +300,24 @@ export const MembersView: React.FC = () => {
     const base = 'inline-block px-2.5 py-0.5 rounded-full text-[11px] font-bold border whitespace-nowrap';
     switch (status) {
       case 'Paid':
-        return <span className={`${base} bg-emerald-100 dark:bg-emerald-950 text-emerald-800 dark:text-emerald-300 border-emerald-200 dark:border-emerald-800`}>{t('status.paid', 'Paid')}</span>;
+        return <span className={`${base} bg-emerald-100 dark:bg-emerald-950 text-emerald-800 dark:text-emerald-300 border-emerald-200 dark:border-emerald-800`}>{tv('Paid')}</span>;
       case 'Pending':
-        return <span className={`${base} bg-amber-100 dark:bg-amber-950 text-amber-800 dark:text-amber-300 border-amber-200 dark:border-amber-800`}>{t('status.pending', 'Pending')}</span>;
+        return <span className={`${base} bg-amber-100 dark:bg-amber-950 text-amber-800 dark:text-amber-300 border-amber-200 dark:border-amber-800`}>{tv('Pending')}</span>;
       case 'Overdue':
-        return <span className={`${base} bg-rose-100 dark:bg-rose-950 text-rose-800 dark:text-rose-300 border-rose-200 dark:border-rose-800`}>{t('status.overdue', 'Overdue')}</span>;
+        return <span className={`${base} bg-rose-100 dark:bg-rose-950 text-rose-800 dark:text-rose-300 border-rose-200 dark:border-rose-800`}>{tv('Overdue')}</span>;
       default:
         return <span className={`${base} bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400 border-slate-200 dark:border-slate-700`}>—</span>;
     }
   };
 
   const kpis = [
-    { label: t('members.kpi_total', 'Total members'), value: stats.total, sub: `${stats.active} ${t('members.kpi_active', 'active')}`, icon: <Users size={18} />, tone: 'text-slate-900 dark:text-white', iconTone: 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300' },
-    { label: t('members.kpi_paid', 'Paid'), value: stats.paid, sub: formatMonth(selectedMonth), icon: <CheckCircle2 size={18} />, tone: 'text-emerald-700 dark:text-emerald-400', iconTone: 'bg-emerald-50 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-400' },
-    { label: t('members.kpi_pending', 'Pending'), value: stats.pending, sub: formatMonth(selectedMonth), icon: <Clock size={18} />, tone: 'text-amber-700 dark:text-amber-400', iconTone: 'bg-amber-50 dark:bg-amber-950/60 text-amber-700 dark:text-amber-400' },
-    { label: t('members.kpi_overdue', 'Overdue'), value: stats.overdue, sub: formatMonth(selectedMonth), icon: <AlertTriangle size={18} />, tone: 'text-rose-700 dark:text-rose-400', iconTone: 'bg-rose-50 dark:bg-rose-950/60 text-rose-700 dark:text-rose-400' },
+    { id: 'total', label: t('members.kpi_total', 'Total members'), value: stats.total, sub: `${n(stats.active)} ${t('members.kpi_active', 'active')}`, icon: <Users size={18} />, tone: 'text-slate-900 dark:text-white', iconTone: 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300' },
+    { id: 'paid', label: tv('Paid'), value: stats.paid, sub: formatMonth(selectedMonth), icon: <CheckCircle2 size={18} />, tone: 'text-emerald-700 dark:text-emerald-400', iconTone: 'bg-emerald-50 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-400' },
+    { id: 'pending', label: tv('Pending'), value: stats.pending, sub: formatMonth(selectedMonth), icon: <Clock size={18} />, tone: 'text-amber-700 dark:text-amber-400', iconTone: 'bg-amber-50 dark:bg-amber-950/60 text-amber-700 dark:text-amber-400' },
+    { id: 'overdue', label: tv('Overdue'), value: stats.overdue, sub: formatMonth(selectedMonth), icon: <AlertTriangle size={18} />, tone: 'text-rose-700 dark:text-rose-400', iconTone: 'bg-rose-50 dark:bg-rose-950/60 text-rose-700 dark:text-rose-400' },
   ];
 
-  const statementTotals = statement
+  const statementTotals = useMemo(() => (statement
     ? statement.rows.reduce(
         (acc, r) => {
           if (r.status === 'Paid') acc.paid += Number(r.total_amount ?? r.contribution_amount ?? 0);
@@ -278,21 +326,10 @@ export const MembersView: React.FC = () => {
         },
         { paid: 0, owed: 0, owedMonths: 0 },
       )
-    : null;
+    : null), [statement]);
 
-  const modalShell = (title: React.ReactNode, onClose: () => void, children: React.ReactNode, width = 'max-w-lg') => (
-    <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4">
-      <div className={`card-base w-full ${width} max-h-[95vh] flex flex-col overflow-hidden animate-in fade-in zoom-in-95 duration-150`}>
-        <div className="px-6 py-4 bg-slate-50 dark:bg-[#121f26] border-b border-slate-200 dark:border-slate-800 flex items-center justify-between shrink-0">
-          <h3 className="text-base font-bold text-slate-900 dark:text-white flex items-center gap-2">{title}</h3>
-          <button type="button" onClick={onClose} className="text-slate-400 hover:text-slate-700 dark:hover:text-white">
-            <X size={18} />
-          </button>
-        </div>
-        <div className="overflow-y-auto">{children}</div>
-      </div>
-    </div>
-  );
+  /** Name in the other script, shown as a secondary line. */
+  const otherName = (m: { name: string; name_bn?: string | null }) => (bn ? (m.name_bn ? m.name : '') : m.name_bn || '');
 
   return (
     <div className="p-4 md:p-6 xl:p-8 space-y-6 max-w-7xl mx-auto">
@@ -319,10 +356,10 @@ export const MembersView: React.FC = () => {
       {/* KPIs */}
       <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
         {kpis.map(k => (
-          <div key={k.label} className="card-base p-5 flex items-center justify-between gap-3">
+          <div key={k.id} className="card-base p-5 flex items-center justify-between gap-3">
             <div className="min-w-0">
               <div className="text-xs text-slate-600 dark:text-slate-400 font-bold">{k.label}</div>
-              <div className={`text-2xl font-black mt-1 ${k.tone}`}>{k.value}</div>
+              <div className={`text-2xl font-black mt-1 ${k.tone}`}>{n(k.value)}</div>
               <div className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5 truncate">{k.sub}</div>
             </div>
             <div className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 ${k.iconTone}`}>{k.icon}</div>
@@ -333,41 +370,40 @@ export const MembersView: React.FC = () => {
       {/* Filters */}
       <div className="card-base p-4">
         <div className="flex flex-wrap items-center gap-3">
-          <div className="relative flex-1 min-w-[220px]">
+          <div className="relative flex-1 min-w-[240px]">
             <Search size={15} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400 dark:text-slate-500" />
             <input
               type="text"
               placeholder={t('members.search_ph', 'Search by name, phone, or member ID')}
+              aria-label={t('members.search_ph', 'Search by name, phone, or member ID')}
               value={searchInput}
               onChange={e => setSearchInput(e.target.value)}
               className="form-input pl-9"
             />
           </div>
-          <select value={memberFilterStatus} onChange={e => setMemberFilterStatus(e.target.value)} className="form-select w-40">
-            <option value="All">{t('members.f_all', 'All statuses')}</option>
-            <option value="Paid">{t('status.paid', 'Paid')}</option>
-            <option value="Pending">{t('status.pending', 'Pending')}</option>
-            <option value="Overdue">{t('status.overdue', 'Overdue')}</option>
-            <option value="Active">{t('members.active', 'Active')}</option>
-            <option value="Inactive">{t('members.inactive', 'Inactive')}</option>
-          </select>
-          <select value={sortBy} onChange={e => { setSortBy(e.target.value); setPage(1); }} className="form-select w-48">
-            <option value="newest">{t('sort.newest', 'Newest first')}</option>
-            <option value="oldest">{t('sort.oldest', 'Oldest first')}</option>
-            <option value="name_asc">{t('sort.name_asc', 'Name: A to Z')}</option>
-            <option value="name_desc">{t('sort.name_desc', 'Name: Z to A')}</option>
-            <option value="code_asc">{t('sort.code_asc', 'Member ID')}</option>
-            <option value="due_high">{t('sort.due_high', 'Due: high to low')}</option>
-            <option value="due_low">{t('sort.due_low', 'Due: low to high')}</option>
-            <option value="contributed_high">{t('sort.contributed_high', 'Most contributed')}</option>
-            <option value="contributed_low">{t('sort.contributed_low', 'Least contributed')}</option>
-            <option value="join_desc">{t('sort.join_desc', 'Recently joined')}</option>
-          </select>
+          <SearchableSelect
+            size="sm"
+            clearable
+            className="min-w-[180px]"
+            options={statusOptions}
+            value={memberFilterStatus === 'All' ? '' : memberFilterStatus}
+            onChange={v => setMemberFilterStatus(v ? String(v) : 'All')}
+            placeholder={t('members.f_all', 'All statuses')}
+          />
+          <SearchableSelect
+            size="sm"
+            className="min-w-[200px]"
+            options={sortOptions}
+            value={sortBy}
+            onChange={v => { setSortBy(String(v || 'newest')); setPage(1); }}
+          />
           <div className="flex flex-wrap items-center gap-2 text-xs">
             <span className="text-slate-600 dark:text-slate-300 font-bold text-[11px]">{t('members.joined_from', 'Joined from')}</span>
-            <input type="date" value={startDate} onChange={e => { setStartDate(e.target.value); setPage(1); }} className="form-input w-auto" />
-            <span className="text-slate-600 dark:text-slate-300 font-bold text-[11px]">{t('common.to', 'to')}</span>
-            <input type="date" value={endDate} min={startDate || undefined} onChange={e => { setEndDate(e.target.value); setPage(1); }} className="form-input w-auto" />
+            <DatePicker size="sm" className="min-w-[150px]" value={startDate} max={endDate || undefined}
+              onChange={v => { setStartDate(v); setPage(1); }} />
+            <span className="text-slate-600 dark:text-slate-300 font-bold text-[11px]">{t('members.to', 'to')}</span>
+            <DatePicker size="sm" className="min-w-[150px]" value={endDate} min={startDate || undefined}
+              onChange={v => { setEndDate(v); setPage(1); }} />
           </div>
           {hasFilters && (
             <button type="button" onClick={resetFilters} className="px-3 py-2 text-xs text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white underline font-bold">
@@ -401,55 +437,64 @@ export const MembersView: React.FC = () => {
                     </td>
                   </tr>
                 ) : (
-                  members.map(m => (
-                    <tr
-                      key={m.id}
-                      onClick={() => setStatementId(m.id)}
-                      className={`cursor-pointer transition-colors ${statementId === m.id ? 'bg-emerald-50/70 dark:bg-emerald-950/30' : 'hover:bg-slate-50/80 dark:hover:bg-[#1a2b34]'}`}
-                    >
-                      <td className="py-3 px-4">
-                        <div className="flex items-center gap-3">
-                          <div className="w-8 h-8 rounded-full bg-[#e2ede7] dark:bg-emerald-950/60 text-[#0f4a3c] dark:text-emerald-400 font-bold text-xs flex items-center justify-center shrink-0 border border-[#c3ded0] dark:border-emerald-800">
-                            {m.avatar_initials}
+                  members.map(m => {
+                    const other = otherName(m);
+                    return (
+                      <tr
+                        key={m.id}
+                        onClick={() => setStatementId(m.id)}
+                        className={`cursor-pointer transition-colors ${statementId === m.id ? 'bg-emerald-50/70 dark:bg-emerald-950/30' : 'hover:bg-slate-50/80 dark:hover:bg-[#1a2b34]'}`}
+                      >
+                        <td className="py-3 px-4">
+                          <div className="flex items-center gap-3">
+                            <div className="w-8 h-8 rounded-full bg-[#e2ede7] dark:bg-emerald-950/60 text-[#0f4a3c] dark:text-emerald-400 font-bold text-xs flex items-center justify-center shrink-0 border border-[#c3ded0] dark:border-emerald-800">
+                              {m.avatar_initials}
+                            </div>
+                            <div className="min-w-0">
+                              <span className="font-bold text-slate-900 dark:text-white flex items-center gap-1.5">
+                                <span className="truncate" title={other || undefined}>{bnName(m.name, m.name_bn)}</span>
+                                {m.status === 'Inactive' && (
+                                  <span className="px-1.5 py-0.5 rounded text-[9px] font-bold uppercase bg-slate-200 dark:bg-slate-700 text-slate-600 dark:text-slate-300">
+                                    {tv('Inactive')}
+                                  </span>
+                                )}
+                              </span>
+                              <span className="text-[11px] text-slate-500 dark:text-slate-400 font-normal">
+                                {[other, m.phone].filter(Boolean).join(' · ') || '—'}
+                              </span>
+                            </div>
                           </div>
-                          <div className="min-w-0">
-                            <span className="font-bold text-slate-900 dark:text-white flex items-center gap-1.5">
-                              <span className="truncate">{m.name}</span>
-                              {m.status === 'Inactive' && (
-                                <span className="px-1.5 py-0.5 rounded text-[9px] font-bold uppercase bg-slate-200 dark:bg-slate-700 text-slate-600 dark:text-slate-300">
-                                  {t('members.inactive', 'Inactive')}
-                                </span>
-                              )}
-                            </span>
-                            <span className="text-[11px] text-slate-500 dark:text-slate-400 font-normal">{m.phone || '—'}</span>
-                          </div>
-                        </div>
-                      </td>
-                      <td className="py-3 px-4 font-mono font-bold text-slate-700 dark:text-slate-300">{m.member_code}</td>
-                      <td className="py-3 px-4 font-black text-slate-900 dark:text-white whitespace-nowrap">{formatCurrency(m.monthly_due)}</td>
-                      <td className="py-3 px-4 text-slate-600 dark:text-slate-400 whitespace-nowrap">{formatDate(m.last_payment_date)}</td>
-                      <td className="py-3 px-4">{statusBadge(m.current_month_status)}</td>
-                      <td className="py-3 px-4 font-black text-emerald-800 dark:text-emerald-400 whitespace-nowrap">{formatCurrency(m.total_contributed || 0)}</td>
-                      <td className="py-3 px-4" onClick={e => e.stopPropagation()}>
-                        <div className="flex items-center justify-end gap-1.5">
-                          {m.status === 'Active' && (
-                            <button type="button" onClick={() => recordFor(m.id)} className={`${iconBtn} text-[#0f4a3c] dark:text-emerald-400`} title={t('members.record_payment', 'Record payment')}>
-                              <Receipt size={14} />
+                        </td>
+                        <td className="py-3 px-4 font-mono font-bold text-slate-700 dark:text-slate-300">{m.member_code}</td>
+                        <td className="py-3 px-4 font-black text-slate-900 dark:text-white whitespace-nowrap">{formatCurrency(m.monthly_due)}</td>
+                        <td className="py-3 px-4 text-slate-600 dark:text-slate-400 whitespace-nowrap">{formatDate(m.last_payment_date)}</td>
+                        <td className="py-3 px-4">{statusBadge(m.current_month_status)}</td>
+                        <td className="py-3 px-4 font-black text-emerald-800 dark:text-emerald-400 whitespace-nowrap">{formatCurrency(m.total_contributed || 0)}</td>
+                        <td className="py-3 px-4" onClick={e => e.stopPropagation()}>
+                          <div className="flex items-center justify-end gap-1.5">
+                            {m.status === 'Active' && (
+                              <button type="button" onClick={() => recordFor(m.id)} className={`${iconBtn} text-[#0f4a3c] dark:text-emerald-400`}
+                                title={t('members.record_payment', 'Record payment')} aria-label={t('members.record_payment', 'Record payment')}>
+                                <Receipt size={14} />
+                              </button>
+                            )}
+                            <button type="button" onClick={() => setStatementId(m.id)} className={iconBtn}
+                              title={t('members.statement', 'Statement')} aria-label={t('members.statement', 'Statement')}>
+                              <FileSpreadsheet size={14} />
                             </button>
-                          )}
-                          <button type="button" onClick={() => setStatementId(m.id)} className={iconBtn} title={t('members.statement', 'Statement')}>
-                            <FileSpreadsheet size={14} />
-                          </button>
-                          <button type="button" onClick={() => openEdit(m)} className={iconBtn} title={t('common.edit', 'Edit')}>
-                            <Edit2 size={14} />
-                          </button>
-                          <button type="button" onClick={() => handleDelete(m)} className={`${iconBtn} text-rose-600 dark:text-rose-400 hover:text-rose-700`} title={t('common.delete', 'Delete')}>
-                            <Trash2 size={14} />
-                          </button>
-                        </div>
-                      </td>
-                    </tr>
-                  ))
+                            <button type="button" onClick={() => openEdit(m)} className={iconBtn}
+                              title={t('common.edit', 'Edit')} aria-label={t('common.edit', 'Edit')}>
+                              <Edit2 size={14} />
+                            </button>
+                            <button type="button" onClick={() => setConfirmDelete(m)} className={`${iconBtn} text-rose-600 dark:text-rose-400 hover:text-rose-700`}
+                              title={t('common.delete', 'Delete')} aria-label={t('common.delete', 'Delete')}>
+                              <Trash2 size={14} />
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })
                 )}
               </tbody>
             </table>
@@ -460,7 +505,9 @@ export const MembersView: React.FC = () => {
             <span className="font-medium">
               {totalCount === 0
                 ? t('members.none', 'No members')
-                : `${(page - 1) * PAGE_SIZE + 1}–${Math.min(page * PAGE_SIZE, totalCount)} ${t('common.of', 'of')} ${totalCount}`}
+                : fill(t('members.range', '{from}–{to} of {total}'), {
+                    from: n((page - 1) * PAGE_SIZE + 1), to: n(Math.min(page * PAGE_SIZE, totalCount)), total: n(totalCount),
+                  })}
             </span>
             <div className="flex items-center gap-2">
               <button
@@ -472,7 +519,7 @@ export const MembersView: React.FC = () => {
                 <ChevronLeft size={14} />
                 <span>{t('common.previous', 'Previous')}</span>
               </button>
-              <span className="px-2 font-bold text-slate-800 dark:text-slate-200">{page} / {totalPages}</span>
+              <span className="px-2 font-bold text-slate-800 dark:text-slate-200">{n(page)} / {n(totalPages)}</span>
               <button
                 type="button"
                 onClick={() => setPage(p => Math.min(totalPages, p + 1))}
@@ -491,16 +538,18 @@ export const MembersView: React.FC = () => {
           <div className="card-base overflow-hidden min-w-0 flex flex-col xl:max-h-[calc(100vh-12rem)]">
             <div className="px-5 py-4 bg-slate-50 dark:bg-[#121f26] border-b border-slate-200 dark:border-slate-800 flex items-start justify-between gap-3">
               <div className="min-w-0">
-                <h3 className="text-sm font-bold text-slate-900 dark:text-white truncate">
-                  {statement?.member.name ?? t('common.loading', 'Loading...')}
+                <h3 className="text-sm font-bold text-slate-900 dark:text-white truncate" title={statement ? otherName(statement.member) || undefined : undefined}>
+                  {statement ? bnName(statement.member.name, statement.member.name_bn) : t('common.loading', 'Loading...')}
                 </h3>
                 {statement && (
                   <p className="text-[11px] text-slate-500 dark:text-slate-400">
-                    {statement.member.member_code} · {t('members.joined', 'Joined')} {formatDate(statement.member.join_date)} · {statement.member.status === 'Active' ? t('members.active', 'Active') : t('members.inactive', 'Inactive')}
+                    {statement.member.member_code} · {t('members.joined', 'Joined')} {formatDate(statement.member.join_date)} · {tv(statement.member.status)}
                   </p>
                 )}
               </div>
-              <button type="button" onClick={() => { setStatementId(null); setStatement(null); }} className="text-slate-400 hover:text-slate-700 dark:hover:text-white shrink-0">
+              <button type="button" onClick={() => { setStatementId(null); setStatement(null); }}
+                className="text-slate-400 hover:text-slate-700 dark:hover:text-white shrink-0"
+                title={t('members.close_statement', 'Close statement')} aria-label={t('members.close_statement', 'Close statement')}>
                 <X size={16} />
               </button>
             </div>
@@ -516,7 +565,7 @@ export const MembersView: React.FC = () => {
                   <div className="font-black text-emerald-700 dark:text-emerald-400">{formatCurrency(statementTotals.paid)}</div>
                 </div>
                 <div>
-                  <div className="text-slate-500 dark:text-slate-400">{t('members.unpaid', 'Unpaid')} ({statementTotals.owedMonths})</div>
+                  <div className="text-slate-500 dark:text-slate-400">{t('members.unpaid', 'Unpaid')} ({n(statementTotals.owedMonths)})</div>
                   <div className="font-black text-rose-700 dark:text-rose-400">{formatCurrency(statementTotals.owed)}</div>
                 </div>
               </div>
@@ -543,12 +592,12 @@ export const MembersView: React.FC = () => {
                         <td className="py-2.5 px-4 font-bold text-slate-900 dark:text-white whitespace-nowrap">{formatMonth(r.payment_month)}</td>
                         <td className="py-2.5 px-4 text-slate-600 dark:text-slate-400 whitespace-nowrap">
                           {r.status === 'Paid' ? formatDate(r.payment_date) : `${t('members.due', 'Due')} ${formatDate(r.due_date)}`}
-                          {r.status === 'Paid' && r.payment_method && <span className="block text-[10px] text-slate-400">{r.payment_method}</span>}
+                          {r.status === 'Paid' && r.payment_method && <span className="block text-[10px] text-slate-400">{tv(r.payment_method)}</span>}
                         </td>
                         <td className="py-2.5 px-4 text-right font-bold whitespace-nowrap">
                           {formatCurrency(Number(r.status === 'Paid' ? (r.total_amount ?? r.contribution_amount) : r.monthly_due) || 0)}
                           {r.status === 'Paid' && Number(r.late_fee) > 0 && (
-                            <span className="block text-[10px] text-amber-600 dark:text-amber-400 font-medium">+{formatCurrency(Number(r.late_fee))} {t('payment.late_fee', 'Late Fee')}</span>
+                            <span className="block text-[10px] text-amber-600 dark:text-amber-400 font-medium">+{formatCurrency(Number(r.late_fee))} {t('members.late_fee', 'Late fee')}</span>
                           )}
                         </td>
                         <td className="py-2.5 px-4 text-right">{statusBadge(r.status)}</td>
@@ -572,13 +621,26 @@ export const MembersView: React.FC = () => {
       </div>
 
       {/* Add / Edit member modal */}
-      {formOpen && modalShell(
-        <>
-          {editingId != null ? <Edit2 size={18} className="text-[#0f4a3c] dark:text-emerald-400" /> : <UserPlus size={18} className="text-[#0f4a3c] dark:text-emerald-400" />}
-          <span>{editingId != null ? t('members.edit_title', 'Edit member') : t('members.add_title', 'Add new member')}</span>
-        </>,
-        () => !saving && setFormOpen(false),
-        <form onSubmit={handleFormSubmit} className="p-6 space-y-4 text-xs" noValidate>
+      <Modal
+        open={formOpen}
+        onClose={() => !saving && setFormOpen(false)}
+        locked={saving}
+        size="lg"
+        icon={editingId != null ? <Edit2 size={18} /> : <UserPlus size={18} />}
+        title={editingId != null ? t('members.edit_title', 'Edit member') : t('members.add_title', 'Add new member')}
+        subtitle={editingId != null ? form.member_code : t('members.add_subtitle', 'Dues start from the join month.')}
+        footer={
+          <>
+            <button type="button" onClick={() => setFormOpen(false)} disabled={saving} className={btnSecondary}>
+              {t('common.cancel', 'Cancel')}
+            </button>
+            <button type="submit" form="member-form" disabled={saving} className={btnPrimary}>
+              {saving ? t('common.saving', 'Saving...') : editingId != null ? t('common.save_changes', 'Save changes') : t('members.save', 'Save member')}
+            </button>
+          </>
+        }
+      >
+        <form id="member-form" onSubmit={handleFormSubmit} className="space-y-4 text-xs" noValidate>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div>
               <label className="form-label">{t('common.member_id', 'Member ID')}</label>
@@ -596,6 +658,12 @@ export const MembersView: React.FC = () => {
               <input type="text" value={form.name} onChange={e => setField('name', e.target.value)} className="form-input" required autoFocus />
             </div>
             <div>
+              <label className="form-label">{t('members.name_bn', 'Name (Bangla)')}</label>
+              <input type="text" lang="bn" value={form.name_bn} onChange={e => setField('name_bn', e.target.value)} className="form-input"
+                placeholder={t('members.name_bn_ph', 'Optional, e.g. রফিক হাসান')} />
+              <p className="form-hint">{t('members.name_bn_hint', 'Shown when the app is in Bangla.')}</p>
+            </div>
+            <div>
               <label className="form-label">{t('members.phone', 'Mobile phone')}</label>
               <input type="tel" value={form.phone} onChange={e => setField('phone', e.target.value)} className="form-input" />
             </div>
@@ -608,11 +676,12 @@ export const MembersView: React.FC = () => {
               <input type="text" value={form.designation} onChange={e => setField('designation', e.target.value)} className="form-input" />
             </div>
             <div>
-              <label className="form-label">{t('common.status', 'Status')}</label>
-              <select value={form.status} onChange={e => setField('status', e.target.value as MemberForm['status'])} className="form-select">
-                <option value="Active">{t('members.active', 'Active')}</option>
-                <option value="Inactive">{t('members.inactive', 'Inactive')}</option>
-              </select>
+              <SearchableSelect
+                label={t('common.status', 'Status')}
+                options={memberStatusOptions}
+                value={form.status}
+                onChange={v => setField('status', (v || 'Active') as MemberForm['status'])}
+              />
             </div>
             <div>
               <label className="form-label">{t('common.monthly_due', 'Monthly due')} <span className="text-rose-500">*</span></label>
@@ -625,9 +694,14 @@ export const MembersView: React.FC = () => {
                 required
               />
             </div>
-            <div>
-              <label className="form-label">{t('members.join_date', 'Join date')} <span className="text-rose-500">*</span></label>
-              <input type="date" value={form.join_date} onChange={e => setField('join_date', e.target.value)} className="form-input" required />
+            <div className="sm:col-span-2">
+              <DatePicker
+                label={t('members.join_date', 'Join date')}
+                required
+                clearable={false}
+                value={form.join_date}
+                onChange={v => setField('join_date', v)}
+              />
               <p className="form-hint">{t('members.join_hint', 'Dues are counted from this month.')}</p>
             </div>
           </div>
@@ -646,36 +720,94 @@ export const MembersView: React.FC = () => {
             <label className="form-label">{t('members.notes', 'Notes')}</label>
             <textarea rows={2} value={form.notes} onChange={e => setField('notes', e.target.value)} className="form-input" />
           </div>
-          <div className="flex items-center justify-end gap-3 pt-3 border-t border-slate-200 dark:border-slate-800">
-            <button type="button" onClick={() => setFormOpen(false)} disabled={saving} className={btnSecondary}>
-              {t('common.cancel', 'Cancel')}
+        </form>
+      </Modal>
+
+      {/* Delete confirmation */}
+      <Modal
+        open={!!confirmDelete}
+        onClose={() => !busy && setConfirmDelete(null)}
+        locked={busy}
+        size="sm"
+        icon={<Trash2 size={18} />}
+        title={t('members.delete_title', 'Delete member?')}
+        footer={
+          <>
+            <button type="button" onClick={() => setConfirmDelete(null)} disabled={busy} className={btnSecondary}>{t('common.cancel', 'Cancel')}</button>
+            <button type="button" onClick={handleDelete} disabled={busy} className={btnDanger}>
+              {busy ? t('members.deleting', 'Deleting…') : t('common.delete', 'Delete')}
             </button>
-            <button type="submit" disabled={saving} className={btnPrimary}>
-              {saving ? t('common.saving', 'Saving...') : editingId != null ? t('common.save_changes', 'Save changes') : t('members.save', 'Save member')}
+          </>
+        }
+      >
+        {confirmDelete && (
+          <p className="text-xs text-slate-600 dark:text-slate-300 leading-relaxed">
+            {fill(t('members.delete_body', 'Delete {name} ({code})? This cannot be undone.'), {
+              name: bnName(confirmDelete.name, confirmDelete.name_bn), code: confirmDelete.member_code,
+            })}
+          </p>
+        )}
+      </Modal>
+
+      {/* Offer to deactivate when deletion is blocked */}
+      <Modal
+        open={!!offerInactive}
+        onClose={() => !busy && setOfferInactive(null)}
+        locked={busy}
+        size="sm"
+        icon={<UserMinus size={18} />}
+        title={t('members.cannot_delete', 'Member cannot be deleted')}
+        footer={
+          <>
+            <button type="button" onClick={() => setOfferInactive(null)} disabled={busy} className={btnSecondary}>{t('common.cancel', 'Cancel')}</button>
+            <button type="button" onClick={handleSetInactive} disabled={busy} className={btnPrimary}>
+              {busy ? t('common.saving', 'Saving...') : t('members.set_inactive', 'Set Inactive')}
             </button>
+          </>
+        }
+      >
+        {offerInactive && (
+          <div className="space-y-2 text-xs text-slate-600 dark:text-slate-300 leading-relaxed">
+            <p className="text-rose-700 dark:text-rose-300">{offerInactive.message}</p>
+            <p>{t('members.offer_inactive', 'Set this member to Inactive now?')}</p>
           </div>
-        </form>,
-        'max-w-2xl',
-      )}
+        )}
+      </Modal>
 
       {/* Bulk import modal */}
-      {showImportModal && modalShell(
-        <>
-          <FileSpreadsheet size={18} className="text-[#0f4a3c] dark:text-emerald-400" />
-          <span>{t('members.import_title', 'Import members (CSV)')}</span>
-        </>,
-        () => !importing && setShowImportModal(false),
-        <div className="p-6 space-y-4 text-xs">
+      <Modal
+        open={showImportModal}
+        onClose={() => !importing && setShowImportModal(false)}
+        locked={importing}
+        size="lg"
+        icon={<FileSpreadsheet size={18} />}
+        title={t('members.import_title', 'Import members (CSV)')}
+        footer={
+          <div className="flex flex-wrap items-center justify-between gap-2 w-full">
+            <span className="text-xs text-slate-500 dark:text-slate-400">{n(parsedImport.length)} {t('members.rows_ready', 'row(s) ready')}</span>
+            <div className="flex items-center gap-2">
+              <button type="button" onClick={() => setShowImportModal(false)} disabled={importing} className={btnSecondary}>
+                {t('common.cancel', 'Cancel')}
+              </button>
+              <button type="button" onClick={handleBulkImport} disabled={importing || parsedImport.length === 0} className={btnPrimary}>
+                {importing ? t('common.saving', 'Saving...') : t('members.import_btn', 'Import members')}
+              </button>
+            </div>
+          </div>
+        }
+      >
+        <div className="space-y-4 text-xs">
           <p className="text-[11px] text-slate-500 dark:text-slate-400 leading-relaxed">
             {t('members.import_help', 'Paste one member per line. Columns:')}{' '}
-            <span className="font-mono font-bold">Name, Phone, Email, Monthly Due, Join Date (YYYY-MM-DD)</span>.{' '}
+            <span className="font-mono font-bold">{t('members.import_cols', 'Name, Phone, Email, Monthly Due, Join Date (YYYY-MM-DD)')}</span>.{' '}
             {t('members.import_help2', 'Only the name is required; a blank due uses the default from Settings and a blank join date uses today.')}
           </p>
           <textarea
             rows={8}
             value={csvText}
             onChange={e => setCsvText(e.target.value)}
-            placeholder={'Name, Phone, Email, Monthly Due, Join Date'}
+            placeholder={t('members.import_ph', 'Name, Phone, Email, Monthly Due, Join Date')}
+            aria-label={t('members.import_title', 'Import members (CSV)')}
             className="w-full p-3 font-mono text-[11px] bg-slate-50 dark:bg-[#101b21] border border-slate-300 dark:border-[#283d47] rounded-xl text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-[#0f4a3c]"
           />
           {parsedImport.length > 0 && (
@@ -704,19 +836,8 @@ export const MembersView: React.FC = () => {
               </table>
             </div>
           )}
-          <div className="flex items-center justify-between gap-2 pt-2 border-t border-slate-200 dark:border-slate-800">
-            <span className="text-slate-500 dark:text-slate-400">{parsedImport.length} {t('members.rows_ready', 'row(s) ready')}</span>
-            <div className="flex items-center gap-2">
-              <button type="button" onClick={() => setShowImportModal(false)} disabled={importing} className={btnSecondary}>
-                {t('common.cancel', 'Cancel')}
-              </button>
-              <button type="button" onClick={handleBulkImport} disabled={importing || parsedImport.length === 0} className={btnPrimary}>
-                {importing ? t('common.saving', 'Saving...') : t('members.import_btn', 'Import members')}
-              </button>
-            </div>
-          </div>
-        </div>,
-      )}
+        </div>
+      </Modal>
     </div>
   );
 };

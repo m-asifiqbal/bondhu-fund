@@ -6,6 +6,7 @@ import {
 } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 import { MonthPicker } from '../components/common/MonthPicker';
+import { Modal } from '../components/common/Modal';
 import { EChart, ChartCard, chartTheme, baseOption, valueAxis, categoryAxis } from '../components/charts/EChart';
 import { getOverviewData, loadDemoData, saveTextFile, savePdf, toCsv } from '../services/db';
 import { formatMonth as fmtMonth, toMonthKey } from '../utils/date';
@@ -36,6 +37,12 @@ const L = {
   emptyBody: ['Your database is empty. Add members to start tracking dues, or restore an existing backup.', 'ডাটাবেস খালি। সদস্য যোগ করুন অথবা ব্যাকআপ রিস্টোর করুন।'],
   addMember: ['Add first member', 'প্রথম সদস্য যোগ করুন'], restore: ['Restore a backup', 'ব্যাকআপ রিস্টোর'], demo: ['Explore with demo data', 'ডেমো ডেটা দেখুন'],
   export: ['Export CSV', 'CSV এক্সপোর্ট'], pdf: ['Save PDF', 'PDF সংরক্ষণ'], rate: ['collection rate', 'আদায় হার'],
+  refresh: ['Refresh', 'রিফ্রেশ'], saved: ['Saved', 'সংরক্ষিত হয়েছে'], demoTitle: ['Load demo data?', 'ডেমো ডেটা লোড করবেন?'],
+  demoBody: ['This fills the app with sample members, payments, expenses and investments so you can explore. You can clear it later from Backup & Restore.', 'অ্যাপটি ঘুরে দেখার জন্য নমুনা সদস্য, পেমেন্ট, খরচ ও বিনিয়োগ যোগ হবে। পরে ব্যাকআপ ও রিস্টোর থেকে এগুলো মুছে ফেলা যাবে।'],
+  demoLoad: ['Load demo data', 'ডেমো ডেটা লোড করুন'], demoLoaded: ['Demo data loaded', 'ডেমো ডেটা লোড হয়েছে'], cancel: ['Cancel', 'বাতিল'],
+  hMonth: ['Month', 'মাস'], hRate: ['Rate', 'হার'], hStatus: ['Status', 'অবস্থা'], hIn: ['In', 'আয়'], hSector: ['Sector', 'খাত'], hGain: ['Gain', 'লাভ'],
+  hCategory: ['Category', 'খাত'], hAmount: ['Amount', 'পরিমাণ'], hEntries: ['Entries', 'এন্ট্রি'], hDate: ['Date', 'তারিখ'], hPayments: ['Payments', 'পেমেন্ট'],
+  hMethod: ['Method', 'মাধ্যম'], hMember: ['Member', 'সদস্য'], hTotal: ['Total', 'মোট'], paidFor: ['paid for', 'পরিশোধ করেছেন —'], joined: ['joined', 'যোগ দিয়েছেন'],
   members_n: ['members', 'জন সদস্য'], gain: ['gain', 'লাভ'], loss: ['loss', 'ক্ষতি'], noData: ['No data for this period yet.', 'এই সময়ের কোনো তথ্য নেই।'],
 };
 type Key = keyof typeof L;
@@ -43,12 +50,14 @@ type Key = keyof typeof L;
 export const OverviewView: React.FC = () => {
   const {
     selectedMonth, setSelectedMonth, isDarkMode, language, formatCurrency, formatDate, currentUser, refreshKey,
-    triggerRefresh, showToast, setActiveTab, setMemberFilterStatus, setOpenRecordModal, setSelectedMemberIdForPayment,
+    triggerRefresh, showToast, setActiveTab, tv, setMemberFilterStatus, setOpenRecordModal, setSelectedMemberIdForPayment,
+    bnName,
   } = useApp();
   const tr = useCallback((k: Key) => L[k][language === 'bn' ? 1 : 0], [language]);
   const [data, setData] = useState<OverviewData | null>(null);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
+  const [demoOpen, setDemoOpen] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -152,7 +161,7 @@ export const OverviewView: React.FC = () => {
       ],
     };
 
-    const sectors = data.portfolio.map(p => p.name);
+    const sectors = data.portfolio.map(p => tv(p.name));
     const portfolio = {
       ...baseOption(th),
       color: [th.cat[0], th.cat[2]],
@@ -168,7 +177,7 @@ export const OverviewView: React.FC = () => {
     };
 
     // fold categories beyond 7 into "Other" (never generate a 9th hue)
-    const cats = data.expenseByCategory.slice(0, 7).map(c => ({ name: c.name, value: c.value }));
+    const cats = data.expenseByCategory.slice(0, 7).map(c => ({ name: tv(c.name), value: c.value }));
     const rest = data.expenseByCategory.slice(7).reduce((a, c) => a + c.value, 0);
     if (rest > 0) cats.push({ name: language === 'bn' ? 'অন্যান্য' : 'Other', value: rest });
     const expenseDonut = {
@@ -207,7 +216,7 @@ export const OverviewView: React.FC = () => {
       grid: { left: 8, right: 56, top: 4, bottom: 4, containLabel: true },
       tooltip: { ...(baseOption(th) as any).tooltip, trigger: 'item', formatter: (p: any) => `${p.name}<br/><b>${money(p.value)}</b>` },
       xAxis: { ...valueAxis(th, compact), show: false },
-      yAxis: { ...categoryAxis(th, topC.map(c => c.name)), axisLine: { show: false } },
+      yAxis: { ...categoryAxis(th, topC.map(c => bnName(c.name, c.name_bn))), axisLine: { show: false } },
       series: [{ type: 'bar', barMaxWidth: 12, itemStyle: { borderRadius: [0, 4, 4, 0] },
         label: { show: true, position: 'right', color: th.textMuted, fontSize: 11, formatter: (p: any) => compact(p.value) },
         data: topC.map(c => c.total) }],
@@ -219,14 +228,16 @@ export const OverviewView: React.FC = () => {
       grid: { left: 8, right: 56, top: 4, bottom: 4, containLabel: true },
       tooltip: { ...(baseOption(th) as any).tooltip, trigger: 'item', formatter: (p: any) => `${p.name}<br/><b>${money(p.value)}</b> · ${digits(data.paymentMethods[p.dataIndex]?.count ?? 0)}×` },
       xAxis: { ...valueAxis(th, compact), show: false },
-      yAxis: { ...categoryAxis(th, data.paymentMethods.map(m => m.name)), inverse: true, axisLine: { show: false } },
+      yAxis: { ...categoryAxis(th, data.paymentMethods.map(m => tv(m.name))), inverse: true, axisLine: { show: false } },
       series: [{ type: 'bar', barMaxWidth: 12, colorBy: 'data', itemStyle: { borderRadius: [0, 4, 4, 0] },
         label: { show: true, position: 'right', color: th.textMuted, fontSize: 11, formatter: (p: any) => compact(p.value) },
         data: data.paymentMethods.map(m => m.value) }],
     };
 
     return { expectedVsCollected, statusDonut, growth, flow, portfolio, expenseDonut, heat, top, methods };
-  }, [data, th, language]);
+    // money/compact/mLabel/tr/digits/formatDate all derive from `language`; tv also tracks master data.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [data, th, language, tv]);
 
   // ---------------------------------------------------------------------------
   // Actions
@@ -239,19 +250,30 @@ export const OverviewView: React.FC = () => {
         data.trend.map(p => [p.month, p.expected, p.collected, p.lateFees, p.rate, p.expenses, p.invested, Math.round(p.fundBalance), Math.round(p.cashInHand)]),
       );
       const r = await saveTextFile(`BondhuFund_Overview_${data.month}.csv`, csv);
-      if (!r.canceled) showToast(`Saved ${r.filePath}`);
+      if (!r.canceled) showToast(`${tr('saved')}: ${r.filePath}`);
     } catch (e: any) { showToast(e.message, 'error'); }
   };
   const exportPdf = async () => {
-    try { const r = await savePdf(`BondhuFund_Overview_${data?.month}.pdf`); if (!r.canceled) showToast(`Saved ${r.filePath}`); }
+    try { const r = await savePdf(`BondhuFund_Overview_${data?.month}.pdf`); if (!r.canceled) showToast(`${tr('saved')}: ${r.filePath}`); }
     catch (e: any) { showToast(e.message, 'error'); }
   };
   const startDemo = async () => {
-    if (!window.confirm('Load demo data? This fills the app with sample members, payments, expenses and investments so you can explore. You can clear it later from Backup & Restore.')) return;
     setBusy(true);
-    try { await loadDemoData(); showToast('Demo data loaded'); triggerRefresh(); }
+    try { await loadDemoData(); setDemoOpen(false); showToast(tr('demoLoaded')); triggerRefresh(); }
     catch (e: any) { showToast(e.message, 'error'); }
     finally { setBusy(false); }
+  };
+  // Server titles are English templates: "<name> paid YYYY-MM" / "<name> joined".
+  const recentTitle = (r: { kind: string; title: string }) => {
+    if (r.kind === 'collection') {
+      const m = r.title.match(/^(.*) paid (\d{4}-\d{2})$/);
+      return m ? `${m[1]} ${tr('paidFor')} ${mLabel(m[2])}` : r.title;
+    }
+    if (r.kind === 'member') {
+      const m = r.title.match(/^(.*) joined$/);
+      return m ? `${m[1]} ${tr('joined')}` : r.title;
+    }
+    return r.title;
   };
   const goCollections = (status: string) => { setMemberFilterStatus(status); setActiveTab('collections'); };
 
@@ -280,9 +302,16 @@ export const OverviewView: React.FC = () => {
           <div className="mt-7 grid grid-cols-1 sm:grid-cols-3 gap-3">
             <button onClick={() => setActiveTab('members')} className="flex flex-col items-center gap-2 p-4 rounded-2xl bg-brand text-white hover:bg-brand-hover font-bold text-sm"><UserPlus size={20} />{tr('addMember')}</button>
             <button onClick={() => setActiveTab('backup')} className="flex flex-col items-center gap-2 p-4 rounded-2xl border border-slate-300 dark:border-[#283e4a] text-slate-800 dark:text-slate-100 hover:bg-slate-50 dark:hover:bg-slate-800 font-bold text-sm"><DatabaseBackup size={20} />{tr('restore')}</button>
-            <button disabled={busy} onClick={startDemo} className="flex flex-col items-center gap-2 p-4 rounded-2xl border border-slate-300 dark:border-[#283e4a] text-slate-800 dark:text-slate-100 hover:bg-slate-50 dark:hover:bg-slate-800 font-bold text-sm disabled:opacity-50"><Sparkles size={20} />{tr('demo')}</button>
+            <button disabled={busy} onClick={() => setDemoOpen(true)} className="flex flex-col items-center gap-2 p-4 rounded-2xl border border-slate-300 dark:border-[#283e4a] text-slate-800 dark:text-slate-100 hover:bg-slate-50 dark:hover:bg-slate-800 font-bold text-sm disabled:opacity-50"><Sparkles size={20} />{tr('demo')}</button>
           </div>
         </div>
+        <Modal open={demoOpen} onClose={() => setDemoOpen(false)} size="sm" locked={busy} icon={<Sparkles size={18} />} title={tr('demoTitle')}
+          footer={<div className="flex flex-wrap justify-end gap-2">
+            <button disabled={busy} onClick={() => setDemoOpen(false)} className="px-4 py-2.5 rounded-xl border border-slate-300 dark:border-[#283e4a] text-xs font-bold text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800 disabled:opacity-50">{tr('cancel')}</button>
+            <button disabled={busy} onClick={startDemo} className="flex items-center gap-1.5 px-4 py-2.5 rounded-xl bg-brand hover:bg-brand-hover text-white text-xs font-bold disabled:opacity-50">{busy ? <RefreshCw size={14} className="animate-spin" /> : <Sparkles size={14} />}{tr('demoLoad')}</button>
+          </div>}>
+          <p className="text-sm text-slate-600 dark:text-slate-300">{tr('demoBody')}</p>
+        </Modal>
       </div>
     );
   }
@@ -299,7 +328,7 @@ export const OverviewView: React.FC = () => {
         </div>
         <div className="flex flex-wrap items-center gap-2 no-print">
           <MonthPicker value={selectedMonth} onChange={setSelectedMonth} />
-          <button onClick={load} title="Refresh" className="p-2.5 rounded-xl border border-slate-300 dark:border-[#283e4a] bg-white dark:bg-[#16252d] text-slate-600 dark:text-slate-300 hover:text-brand"><RefreshCw size={15} className={loading ? 'animate-spin' : ''} /></button>
+          <button onClick={load} title={tr('refresh')} aria-label={tr('refresh')} className="p-2.5 rounded-xl border border-slate-300 dark:border-[#283e4a] bg-white dark:bg-[#16252d] text-slate-600 dark:text-slate-300 hover:text-brand"><RefreshCw size={15} className={loading ? 'animate-spin' : ''} /></button>
           <button onClick={exportCsv} className="flex items-center gap-1.5 px-3.5 py-2.5 bg-white dark:bg-[#16252d] border border-slate-300 dark:border-[#283e4a] rounded-xl text-xs font-bold text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800"><Download size={14} />{tr('export')}</button>
           <button onClick={exportPdf} className="flex items-center gap-1.5 px-3.5 py-2.5 bg-brand hover:bg-brand-hover rounded-xl text-xs font-bold text-white"><Printer size={14} />{tr('pdf')}</button>
         </div>
@@ -326,13 +355,13 @@ export const OverviewView: React.FC = () => {
         <div className="grid grid-cols-1 xl:grid-cols-3 gap-4">
           <ChartCard className="xl:col-span-2" title={tr('expVsColl')} subtitle={tr('last12')} icon={<Activity size={15} />}
             empty={data.trend.every(p => !p.expected && !p.collected)} emptyText={tr('noData')}
-            table={{ headers: ['Month', 'Expected', 'Collected', 'Rate'], rows: data.trend.map(p => [mLabel(p.month), money(p.expected), money(p.collected), `${digits(p.rate)}%`]) }}>
-            <EChart option={opts.expectedVsCollected} height={280} ariaLabel="Expected versus collected dues, last 12 months" />
+            table={{ headers: [tr('hMonth'), tr('expected'), tr('collectedShort'), tr('hRate')], rows: data.trend.map(p => [mLabel(p.month), money(p.expected), money(p.collected), `${digits(p.rate)}%`]) }}>
+            <EChart option={opts.expectedVsCollected} height={280} ariaLabel={tr('expVsColl')} />
           </ChartCard>
           <ChartCard title={tr('status')} subtitle={fmtMonth(data.month, language as any, false)} icon={<PieIcon size={15} />}
             empty={k.dueMembers === 0} emptyText={tr('noData')}
-            table={{ headers: ['Status', 'Members'], rows: [[tr('paid'), digits(k.paid)], [tr('pending'), digits(k.pending)], [tr('overdue'), digits(k.overdue)]] }}>
-            <EChart option={opts.statusDonut} height={280} ariaLabel="Dues status for selected month"
+            table={{ headers: [tr('hStatus'), tr('members')], rows: [[tr('paid'), digits(k.paid)], [tr('pending'), digits(k.pending)], [tr('overdue'), digits(k.overdue)]] }}>
+            <EChart option={opts.statusDonut} height={280} ariaLabel={tr('status')}
               onClick={(p: any) => p?.data?.filter && goCollections(p.data.filter)} />
           </ChartCard>
         </div>
@@ -342,13 +371,13 @@ export const OverviewView: React.FC = () => {
       <Section icon={<TrendingUp size={15} />} title={tr('fund')}>
         <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
           <ChartCard title={tr('balance')} subtitle={tr('last12')} icon={<Wallet size={15} />}
-            table={{ headers: ['Month', 'Fund balance', 'Cash in hand'], rows: data.trend.map(p => [mLabel(p.month), money(p.fundBalance), money(p.cashInHand)]) }}>
-            <EChart option={opts.growth} height={280} ariaLabel="Fund balance and cash in hand over 12 months" />
+            table={{ headers: [tr('hMonth'), tr('balance'), tr('cashLine')], rows: data.trend.map(p => [mLabel(p.month), money(p.fundBalance), money(p.cashInHand)]) }}>
+            <EChart option={opts.growth} height={280} ariaLabel={tr('balance')} />
           </ChartCard>
           <ChartCard title={tr('flow')} subtitle={tr('last12')} icon={<ArrowDownLeft size={15} />}
             empty={data.trend.every(p => !p.collected && !p.expenses && !p.invested)} emptyText={tr('noData')}
-            table={{ headers: ['Month', 'In', 'Expenses', 'Investments'], rows: data.trend.map(p => [mLabel(p.month), money(p.collected + p.lateFees), money(p.expenses), money(p.invested)]) }}>
-            <EChart option={opts.flow} height={280} ariaLabel="Monthly money in versus money out" />
+            table={{ headers: [tr('hMonth'), tr('hIn'), tr('outExp'), tr('outInv')], rows: data.trend.map(p => [mLabel(p.month), money(p.collected + p.lateFees), money(p.expenses), money(p.invested)]) }}>
+            <EChart option={opts.flow} height={280} ariaLabel={tr('flow')} />
           </ChartCard>
         </div>
       </Section>
@@ -358,13 +387,13 @@ export const OverviewView: React.FC = () => {
         <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
           <ChartCard title={tr('bySector')} subtitle={`${digits(k.investmentCount)} ${language === 'bn' ? 'টি সক্রিয় বিনিয়োগ' : 'active investments'}`} icon={<Building2 size={15} />}
             empty={data.portfolio.length === 0} emptyText={tr('noData')}
-            table={{ headers: ['Sector', 'Cost', 'Est. value', 'Gain'], rows: data.portfolio.map(p => [p.name, money(p.invested), money(p.value), money(p.value - p.invested)]) }}>
-            <EChart option={opts.portfolio} height={Math.max(200, 60 + data.portfolio.length * 46)} ariaLabel="Investment cost versus estimated value by sector" />
+            table={{ headers: [tr('hSector'), tr('cost'), tr('value'), tr('hGain')], rows: data.portfolio.map(p => [tv(p.name), money(p.invested), money(p.value), money(p.value - p.invested)]) }}>
+            <EChart option={opts.portfolio} height={Math.max(200, 60 + data.portfolio.length * 46)} ariaLabel={tr('bySector')} />
           </ChartCard>
           <ChartCard title={tr('byCategory')} subtitle={tr('last12')} icon={<Receipt size={15} />}
             empty={data.expenseByCategory.length === 0} emptyText={tr('noData')}
-            table={{ headers: ['Category', 'Amount', 'Entries'], rows: data.expenseByCategory.map(c => [c.name, money(c.value), digits(c.count)]) }}>
-            <EChart option={opts.expenseDonut} height={260} ariaLabel="Expenses by category, last 12 months" />
+            table={{ headers: [tr('hCategory'), tr('hAmount'), tr('hEntries')], rows: data.expenseByCategory.map(c => [tv(c.name), money(c.value), digits(c.count)]) }}>
+            <EChart option={opts.expenseDonut} height={260} ariaLabel={tr('byCategory')} />
           </ChartCard>
         </div>
       </Section>
@@ -374,8 +403,8 @@ export const OverviewView: React.FC = () => {
         <div className="grid grid-cols-1 xl:grid-cols-3 gap-4">
           <ChartCard className="xl:col-span-2" title={tr('heat')} subtitle={tr('heatSub')} icon={<CalendarDays size={15} />}
             empty={data.dailyCollections.length === 0} emptyText={tr('noData')}
-            table={{ headers: ['Date', 'Amount', 'Payments'], rows: [...data.dailyCollections].sort((a, b) => b.date.localeCompare(a.date)).map(d => [formatDate(d.date), money(d.value), digits(d.count)]) }}>
-            <EChart option={opts.heat} height={150} ariaLabel="Calendar of daily collections" />
+            table={{ headers: [tr('hDate'), tr('hAmount'), tr('hPayments')], rows: [...data.dailyCollections].sort((a, b) => b.date.localeCompare(a.date)).map(d => [formatDate(d.date), money(d.value), digits(d.count)]) }}>
+            <EChart option={opts.heat} height={150} ariaLabel={tr('heat')} />
             <div className="flex items-center justify-end gap-1.5 mt-2 text-[10px] text-slate-500 dark:text-slate-400">
               <span>{language === 'bn' ? 'কম' : 'Less'}</span>
               {th.seq.map(c => <span key={c} className="w-3 h-3 rounded-sm" style={{ background: c }} />)}
@@ -384,13 +413,13 @@ export const OverviewView: React.FC = () => {
           </ChartCard>
           <ChartCard title={tr('methods')} subtitle={tr('last12')} icon={<Landmark size={15} />}
             empty={data.paymentMethods.length === 0} emptyText={tr('noData')}
-            table={{ headers: ['Method', 'Amount', 'Payments'], rows: data.paymentMethods.map(m => [m.name, money(m.value), digits(m.count)]) }}>
-            <EChart option={opts.methods} height={Math.max(150, 30 + data.paymentMethods.length * 34)} ariaLabel="Collections by payment method" />
+            table={{ headers: [tr('hMethod'), tr('hAmount'), tr('hPayments')], rows: data.paymentMethods.map(m => [tv(m.name), money(m.value), digits(m.count)]) }}>
+            <EChart option={opts.methods} height={Math.max(150, 30 + data.paymentMethods.length * 34)} ariaLabel={tr('methods')} />
           </ChartCard>
           <ChartCard title={tr('top')} subtitle={language === 'bn' ? 'আজীবন অবদান' : 'Lifetime contribution'} icon={<Users size={15} />}
             empty={data.topContributors.length === 0} emptyText={tr('noData')}
-            table={{ headers: ['Member', 'Total'], rows: data.topContributors.map(c => [`${c.name} (${c.member_code})`, money(c.total)]) }}>
-            <EChart option={opts.top} height={Math.max(180, 20 + data.topContributors.length * 30)} ariaLabel="Top contributors" />
+            table={{ headers: [tr('hMember'), tr('hTotal')], rows: data.topContributors.map(c => [`${bnName(c.name, c.name_bn)} (${digits(c.member_code)})`, money(c.total)]) }}>
+            <EChart option={opts.top} height={Math.max(180, 20 + data.topContributors.length * 30)} ariaLabel={tr('top')} />
           </ChartCard>
           <section className="card-base p-5 xl:col-span-2 min-w-0">
             <div className="flex items-center justify-between mb-3">
@@ -409,12 +438,12 @@ export const OverviewView: React.FC = () => {
                     <th className="py-2" />
                   </tr></thead>
                   <tbody>
-                    {data.arrears.map(a => (
+                    {data.arrears.slice(0, 8).map(a => (
                       <tr key={a.id} className="border-b border-slate-100 dark:border-[#1b2c34] last:border-0">
                         <td className="py-2">
                           <div className="flex items-center gap-2.5">
                             <span className="w-7 h-7 rounded-full bg-rose-50 dark:bg-rose-950/50 text-rose-700 dark:text-rose-300 flex items-center justify-center text-[10px] font-black">{a.avatar_initials}</span>
-                            <div><div className="font-bold text-slate-800 dark:text-slate-100">{a.name}</div><div className="text-[10px] text-slate-500">{a.member_code}{a.phone ? ` · ${a.phone}` : ''}</div></div>
+                            <div><div className="font-bold text-slate-800 dark:text-slate-100">{bnName(a.name, a.name_bn)}</div><div className="text-[10px] text-slate-500">{digits(a.member_code)}{a.phone ? ` · ${digits(a.phone)}` : ''}</div></div>
                           </div>
                         </td>
                         <td className="py-2 text-right tabular-nums font-bold text-slate-700 dark:text-slate-200">{digits(a.months)}</td>
@@ -462,8 +491,8 @@ export const OverviewView: React.FC = () => {
                     {r.kind === 'collection' ? <ArrowDownLeft size={14} /> : r.kind === 'member' ? <UserPlus size={14} /> : <ArrowUpRight size={14} />}
                   </span>
                   <div className="min-w-0 flex-1">
-                    <div className="text-xs font-bold text-slate-800 dark:text-slate-100 truncate">{r.kind === 'collection' ? r.title.replace(/(\d{4}-\d{2})$/, m => mLabel(m)) : r.title}</div>
-                    <div className="text-[10px] text-slate-500 dark:text-slate-400 truncate">{r.sub} · {formatDate(r.date)}</div>
+                    <div className="text-xs font-bold text-slate-800 dark:text-slate-100 truncate">{recentTitle(r)}</div>
+                    <div className="text-[10px] text-slate-500 dark:text-slate-400 truncate">{r.kind === 'member' ? digits(r.sub) : tv(r.sub)} · {formatDate(r.date)}</div>
                   </div>
                   {r.amount !== 0 && <span className={`text-xs font-black tabular-nums ${r.amount > 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-slate-700 dark:text-slate-200'}`}>{r.amount > 0 ? '+' : '−'}{money(Math.abs(r.amount))}</span>}
                 </li>

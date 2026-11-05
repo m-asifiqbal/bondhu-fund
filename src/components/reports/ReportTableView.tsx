@@ -1,11 +1,6 @@
-import React from 'react';
+import React, { useMemo } from 'react';
 import type { CellKind, ColumnDef } from './reportBuilders';
 
-const STATUS_BN: Record<string, string> = {
-  Paid: 'পরিশোধিত', Pending: 'বাকি', Overdue: 'মেয়াদোত্তীর্ণ', Verified: 'যাচাইকৃত', 'Needs receipt': 'রসিদ প্রয়োজন',
-  Growing: 'বর্ধনশীল', Review: 'পর্যালোচনা', Sold: 'বিক্রিত', Active: 'সক্রিয়', Inactive: 'নিষ্ক্রিয়',
-  collection: 'সংগ্রহ', expense: 'খরচ', investment: 'বিনিয়োগ', sale: 'বিক্রয়',
-};
 const STATUS_EN: Record<string, string> = { collection: 'Collection', expense: 'Expense', investment: 'Investment', sale: 'Sale' };
 
 const STATUS_TONE: Record<string, string> = {
@@ -29,6 +24,10 @@ export interface Formatters {
   formatDate: (iso?: string | null) => string;
   formatMonth: (key?: string | null) => string;
   toBanglaDigits: (v: string | number) => string;
+  /** Translate a data value (status, category, method, sector, ledger type). */
+  tv: (v?: string | null) => string;
+  /** Member/person name in the current language (falls back to the given name). */
+  memberName: (name: string) => string;
 }
 
 export function formatCell(v: any, kind: CellKind | undefined, f: Formatters): React.ReactNode {
@@ -48,10 +47,12 @@ export function formatCell(v: any, kind: CellKind | undefined, f: Formatters): R
       const s = String(v);
       return (
         <span className={`inline-block px-2 py-0.5 rounded-md border text-[10px] font-bold whitespace-nowrap ${STATUS_TONE[s] || 'bg-slate-50 text-slate-600 border-slate-200 dark:bg-slate-800 dark:text-slate-300 dark:border-slate-700'}`}>
-          {f.bn ? STATUS_BN[s] || s : STATUS_EN[s] || s}
+          {f.bn ? f.tv(s) : STATUS_EN[s] || s}
         </span>
       );
     }
+    case 'tv': return f.tv(String(v));
+    case 'name': return f.memberName(String(v));
     default: return String(v);
   }
 }
@@ -72,7 +73,7 @@ interface Props {
 }
 
 export const ReportTableView: React.FC<Props> = ({ columns, rows, f, totalLabel }) => {
-  const totals = totalsFor(columns, rows);
+  const totals = useMemo(() => totalsFor(columns, rows), [columns, rows]);
   const hasTotals = columns.some(c => c.total) && rows.length > 0;
   return (
     <div className="overflow-x-auto rounded-xl border border-slate-200 dark:border-[#22353f] report-table-wrap">
@@ -90,10 +91,10 @@ export const ReportTableView: React.FC<Props> = ({ columns, rows, f, totalLabel 
         <tbody className="divide-y divide-slate-100 dark:divide-[#1d2e36]">
           {rows.map((r, i) => (
             <tr key={i} className="hover:bg-slate-50/70 dark:hover:bg-[#1a2b34] text-slate-800 dark:text-slate-200">
-              <td className="px-3 py-2 text-slate-400">{f.bn ? f.toBanglaDigits(i + 1) : i + 1}</td>
+              <td className="px-3 py-3 text-slate-400">{f.bn ? f.toBanglaDigits(i + 1) : i + 1}</td>
               {columns.map(c => (
                 <td key={c.key}
-                  className={`px-3 py-2 ${isNumeric(c.kind) ? 'text-right tabular-nums whitespace-nowrap' : c.kind === 'date' || c.kind === 'month' || c.kind === 'datetime' ? 'whitespace-nowrap' : ''} ${c.kind === 'money' && Number(r[c.key]) < 0 ? 'text-rose-600 dark:text-rose-400' : ''}`}>
+                  className={`px-3 py-3 ${isNumeric(c.kind) ? 'text-right tabular-nums whitespace-nowrap' : c.kind === 'date' || c.kind === 'month' || c.kind === 'datetime' ? 'whitespace-nowrap' : ''} ${c.kind === 'money' && Number(r[c.key]) < 0 ? 'text-rose-600 dark:text-rose-400' : ''}`}>
                   {formatCell(r[c.key], c.kind, f)}
                 </td>
               ))}

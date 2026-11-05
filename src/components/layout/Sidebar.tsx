@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useMemo } from 'react';
 import {
   LayoutDashboard,
   Receipt,
@@ -15,21 +15,124 @@ import {
   Check,
   PanelLeftClose,
   PanelLeftOpen,
+  UserCircle2,
+  UsersRound,
 } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
-import { NavTab } from '../../types';
+import { AppUser, NavTab } from '../../types';
 
 const COLLAPSE_KEY = 'bondhu_sidebar_collapsed';
 const NARROW_QUERY = '(max-width: 1279px)';
 
+/** User photo, or initials on a brand gradient. Size/shape via className. */
+export const UserAvatar: React.FC<{
+  user?: Pick<AppUser, 'avatar' | 'avatar_initials' | 'full_name'> | null;
+  className?: string;
+  textClass?: string;
+}> = ({ user, className = 'w-8 h-8 rounded-lg', textClass = 'text-xs' }) =>
+  user?.avatar ? (
+    <img src={user.avatar} alt={user.full_name} draggable={false} className={`${className} object-cover shrink-0 bg-slate-100 dark:bg-slate-800`} />
+  ) : (
+    <div className={`${className} ${textClass} shrink-0 bg-gradient-to-br from-emerald-600 to-teal-800 text-white font-bold flex items-center justify-center select-none`}>
+      {user?.avatar_initials || '?'}
+    </div>
+  );
+
+/** Shared popover: my profile + profile switcher (used by Sidebar and TopBar). */
+export const ProfileMenu: React.FC<{ onClose: () => void; className?: string }> = ({ onClose, className = '' }) => {
+  const { currentUser, users, setCurrentUser, openProfile, setActiveTab, showToast, t, tv } = useApp();
+  const activeUsers = useMemo(() => users.filter(u => u.status === 'Active'), [users]);
+
+  return (
+    <div className={`bg-white dark:bg-[#16252d] border border-slate-200 dark:border-[#283e4a] rounded-2xl shadow-2xl p-2 z-50 text-xs animate-pop ${className}`}>
+      {currentUser && (
+        <div className="flex items-center gap-3 px-2 py-2.5 mb-1 border-b border-slate-100 dark:border-slate-800">
+          <UserAvatar user={currentUser} className="w-10 h-10 rounded-xl" textClass="text-sm" />
+          <div className="min-w-0">
+            <div className="font-bold text-slate-900 dark:text-white truncate" title={currentUser.full_name}>{currentUser.full_name}</div>
+            <div className="text-[11px] text-slate-500 dark:text-slate-400 truncate">{tv(currentUser.role)}{currentUser.designation ? ` · ${currentUser.designation}` : ''}</div>
+          </div>
+        </div>
+      )}
+      <button
+        type="button"
+        onClick={() => { openProfile(); onClose(); }}
+        className="w-full flex items-center gap-2.5 px-2.5 py-2 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 text-left font-semibold text-slate-800 dark:text-slate-200"
+      >
+        <UserCircle2 size={15} className="text-brand dark:text-emerald-400" />
+        {t('nav.profile', 'My profile')}
+      </button>
+      <button
+        type="button"
+        onClick={() => { setActiveTab('users'); onClose(); }}
+        className="w-full flex items-center gap-2.5 px-2.5 py-2 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 text-left font-semibold text-slate-800 dark:text-slate-200"
+      >
+        <UsersRound size={15} className="text-brand dark:text-emerald-400" />
+        {t('shell.manage_users', 'Manage users')}
+      </button>
+
+      <div className="px-2.5 pt-2.5 pb-1 mt-1 border-t border-slate-100 dark:border-slate-800 font-bold text-slate-400 dark:text-slate-500 text-[10px] uppercase tracking-wider">
+        {t('shell.switch_profile', 'Switch profile')}
+      </div>
+      <div className="max-h-64 overflow-y-auto">
+        {activeUsers.map(u => {
+          const isCurrent = currentUser?.id === u.id;
+          return (
+            <button
+              key={u.id}
+              type="button"
+              onClick={() => {
+                if (!isCurrent) {
+                  setCurrentUser(u);
+                  showToast(`${t('shell.switched_to', 'Active profile')}: ${u.full_name} (${tv(u.role)})`);
+                }
+                onClose();
+              }}
+              className={`w-full flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-left transition-colors ${isCurrent ? 'bg-emerald-50 dark:bg-emerald-950/40' : 'hover:bg-slate-100 dark:hover:bg-slate-800'}`}
+            >
+              <UserAvatar user={u} className="w-7 h-7 rounded-lg" textClass="text-[10px]" />
+              <span className="flex-1 min-w-0">
+                <span className="block font-semibold text-slate-800 dark:text-slate-200 truncate">{u.full_name}</span>
+                <span className="block text-[10px] text-slate-400 dark:text-slate-500">{tv(u.role)}</span>
+              </span>
+              {isCurrent && <Check size={14} className="text-emerald-600 dark:text-emerald-400 shrink-0" />}
+            </button>
+          );
+        })}
+        {activeUsers.length === 0 && (
+          <div className="px-2.5 py-3 text-slate-400 dark:text-slate-500">{t('shell.no_active_users', 'No active profiles.')}</div>
+        )}
+      </div>
+    </div>
+  );
+};
+
+/** Close a popover when clicking outside the given element. */
+export function useOutsideClose(ref: React.RefObject<HTMLElement>, open: boolean, close: () => void) {
+  useEffect(() => {
+    if (!open) return;
+    const onDown = (e: MouseEvent) => { if (ref.current && !ref.current.contains(e.target as Node)) close(); };
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') close(); };
+    document.addEventListener('mousedown', onDown);
+    document.addEventListener('keydown', onKey);
+    return () => { document.removeEventListener('mousedown', onDown); document.removeEventListener('keydown', onKey); };
+  }, [open, ref, close]);
+}
+
+const orgInitials = (name?: string) => {
+  const words = (name || '').trim().split(/\s+/).filter(w => /^[A-Za-z0-9]/.test(w));
+  if (!words.length) return 'BF';
+  return (words.length > 1 ? words[0][0] + words[1][0] : words[0].slice(0, 2)).toUpperCase();
+};
+
 interface NavSection {
-  titleEn: string;
-  titleBn: string;
-  items: { id: NavTab; labelKey: string; defaultEn: string; defaultBn: string; icon: any }[];
+  key: string;
+  title: string;
+  items: { id: NavTab; label: string; icon: any }[];
 }
 
 export const Sidebar: React.FC = () => {
-  const { activeTab, setActiveTab, currentUser, users, setCurrentUser, showToast, language, t } = useApp();
+  const { activeTab, setActiveTab, currentUser, t, tv, settings, orgName } = useApp();
   const [showUserMenu, setShowUserMenu] = useState(false);
   // Collapsible icon rail: below 1280px it auto-collapses; on wide screens the user's choice is remembered.
   const [isNarrow, setIsNarrow] = useState(() => !!window.matchMedia && window.matchMedia(NARROW_QUERY).matches);
@@ -56,55 +159,44 @@ export const Sidebar: React.FC = () => {
       try { localStorage.setItem(COLLAPSE_KEY, String(next)); } catch { /* storage unavailable */ }
     }
   };
+
   const userMenuRef = useRef<HTMLDivElement>(null);
+  const closeMenu = React.useCallback(() => setShowUserMenu(false), []);
+  useOutsideClose(userMenuRef, showUserMenu, closeMenu);
 
-  // Close user switcher dropdown on outside click
-  useEffect(() => {
-    const handleClickOutside = (e: MouseEvent) => {
-      if (userMenuRef.current && !userMenuRef.current.contains(e.target as Node)) {
-        setShowUserMenu(false);
-      }
-    };
-
-    if (showUserMenu) {
-      document.addEventListener('mousedown', handleClickOutside);
-    }
-    return () => {
-      document.removeEventListener('mousedown', handleClickOutside);
-    };
-  }, [showUserMenu]);
-
-  const navSections: NavSection[] = [
+  const navSections: NavSection[] = useMemo(() => [
     {
-      titleEn: 'PLATFORM',
-      titleBn: 'মূল প্ল্যাটফর্ম',
+      key: 'platform',
+      title: t('shell.section_platform', 'Platform'),
       items: [
-        { id: 'overview', labelKey: 'nav.overview', defaultEn: 'Overview', defaultBn: 'সারসংক্ষেপ', icon: LayoutDashboard },
-        { id: 'collections', labelKey: 'nav.collections', defaultEn: 'Collections', defaultBn: 'মাসিক চাঁদা', icon: Banknote },
-        { id: 'members', labelKey: 'nav.members', defaultEn: 'Members', defaultBn: 'সদস্যবৃন্দ', icon: Users },
-        { id: 'expenses', labelKey: 'nav.expenses', defaultEn: 'Operating Expenses', defaultBn: 'পরিচালনা ব্যয়', icon: Receipt },
-        { id: 'entry', labelKey: 'nav.entry', defaultEn: 'Entry Center', defaultBn: 'তথ্য এন্ট্রি', icon: PlusCircle },
+        { id: 'overview', label: t('nav.overview', 'Overview'), icon: LayoutDashboard },
+        { id: 'collections', label: t('nav.collections', 'Collections'), icon: Banknote },
+        { id: 'members', label: t('nav.members', 'Members'), icon: Users },
+        { id: 'expenses', label: t('nav.expenses', 'Operating Expenses'), icon: Receipt },
+        { id: 'entry', label: t('nav.entry', 'Entry Center'), icon: PlusCircle },
       ],
     },
     {
-      titleEn: 'PORTFOLIO',
-      titleBn: 'পোর্টফোলিও',
+      key: 'portfolio',
+      title: t('shell.section_portfolio', 'Portfolio'),
       items: [
-        { id: 'investments', labelKey: 'nav.investments', defaultEn: 'Investments', defaultBn: 'বিনিয়োগ পোর্টফোলিও', icon: TrendingUp },
-        { id: 'reports', labelKey: 'nav.reports', defaultEn: 'Reports & Export', defaultBn: 'রিপোর্ট ও রপ্তানি', icon: FileSpreadsheet },
+        { id: 'investments', label: t('nav.investments', 'Investments'), icon: TrendingUp },
+        { id: 'reports', label: t('nav.reports', 'Reports & Export'), icon: FileSpreadsheet },
       ],
     },
     {
-      titleEn: 'ADMINISTRATION',
-      titleBn: 'প্রশাসন ও সিস্টেম',
+      key: 'admin',
+      title: t('shell.section_admin', 'Administration'),
       items: [
-        { id: 'master', labelKey: 'nav.master', defaultEn: 'Master Data', defaultBn: 'মাস্টার ডাটা', icon: Database },
-        { id: 'users', labelKey: 'nav.users', defaultEn: 'User Creation', defaultBn: 'ব্যবহারকারী তৈরি', icon: UserCheck },
-        { id: 'backup', labelKey: 'nav.backup', defaultEn: 'Backup & Restore', defaultBn: 'ব্যাকআপ ও রিস্টোর', icon: HardDriveDownload },
-        { id: 'settings', labelKey: 'nav.settings', defaultEn: 'Settings', defaultBn: 'সেটিংস', icon: Settings },
+        { id: 'master', label: t('nav.master', 'Master Data'), icon: Database },
+        { id: 'users', label: t('nav.users', 'Users & Roles'), icon: UserCheck },
+        { id: 'backup', label: t('nav.backup', 'Backup & Restore'), icon: HardDriveDownload },
+        { id: 'settings', label: t('nav.settings', 'Settings'), icon: Settings },
       ],
     },
-  ];
+  ], [t]);
+
+  const logo = settings?.org_logo;
 
   return (
     <aside
@@ -112,132 +204,117 @@ export const Sidebar: React.FC = () => {
         } no-print bg-white dark:bg-[#101b21] text-slate-700 dark:text-slate-300 flex flex-col justify-between shrink-0 h-screen select-none border-r border-slate-200/90 dark:border-[#22353f] transition-all duration-200`}
     >
       {/* Top Branding & Collapse */}
-      <div>
-        <div className={`p-4 flex items-center ${isCollapsed ? 'flex-col gap-2' : 'justify-between'} border-b border-slate-100 dark:border-slate-800/80`}>
-          <div className="flex items-center gap-3 overflow-hidden">
-            <div className="w-9 h-9 rounded-xl bg-slate-900 dark:bg-emerald-600 text-white flex items-center justify-center font-black text-xs tracking-wide shadow-sm shrink-0">
-              BF
-            </div>
+      <div className="min-h-0 flex flex-col">
+        <div className={`p-4 flex items-center ${isCollapsed ? 'flex-col gap-2' : 'justify-between gap-2'} border-b border-slate-100 dark:border-slate-800/80`}>
+          <button
+            type="button"
+            onClick={() => setActiveTab('overview')}
+            title={orgName}
+            className="flex items-center gap-3 min-w-0 text-left"
+          >
+            {logo ? (
+              <img
+                src={logo}
+                alt={orgName}
+                draggable={false}
+                className="w-10 h-10 rounded-xl object-contain bg-white dark:bg-slate-100/95 p-1 ring-1 ring-slate-200 dark:ring-slate-700 shrink-0"
+              />
+            ) : (
+              <div className="w-9 h-9 rounded-xl bg-slate-900 dark:bg-emerald-600 text-white flex items-center justify-center font-black text-xs tracking-wide shadow-sm shrink-0">
+                {orgInitials(settings?.organization_name)}
+              </div>
+            )}
             {!isCollapsed && (
-              <div className="flex flex-col truncate">
-                <span className="text-sm font-black text-slate-900 dark:text-white tracking-tight truncate">
-                  {language === 'bn' ? 'বন্ধু ফান্ড' : 'Bondhu Fund'}
+              <div className="flex flex-col min-w-0">
+                <span className="text-sm font-black text-slate-900 dark:text-white tracking-tight leading-tight line-clamp-2 break-words">
+                  {orgName}
                 </span>
-                <span className="text-[10px] font-semibold text-slate-400 dark:text-slate-500 uppercase tracking-wider">
-                  {language === 'bn' ? 'সঞ্চয় তহবিল ব্যবস্থাপনা' : t('app.tagline', 'Savings fund manager')}
+                <span className="text-[10px] font-semibold text-slate-400 dark:text-slate-500 uppercase tracking-wider truncate">
+                  {t('shell.tagline', 'Savings fund manager')}
                 </span>
               </div>
             )}
-          </div>
+          </button>
           <button
             onClick={toggleCollapsed}
-            className="text-slate-400 hover:text-slate-700 dark:hover:text-white p-1 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
-            title={isCollapsed ? t('sidebar.expand', 'Expand sidebar') : t('sidebar.collapse', 'Collapse sidebar')}
-            aria-label={isCollapsed ? t('sidebar.expand', 'Expand sidebar') : t('sidebar.collapse', 'Collapse sidebar')}
+            className="text-slate-400 hover:text-slate-700 dark:hover:text-white p-1 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors shrink-0"
+            title={isCollapsed ? t('shell.expand', 'Expand sidebar') : t('shell.collapse', 'Collapse sidebar')}
+            aria-label={isCollapsed ? t('shell.expand', 'Expand sidebar') : t('shell.collapse', 'Collapse sidebar')}
           >
             {isCollapsed ? <PanelLeftOpen size={16} /> : <PanelLeftClose size={16} />}
           </button>
         </div>
 
         {/* Categorized Nav Sections */}
-        <nav className="p-3 space-y-4 overflow-y-auto max-h-[calc(100vh-140px)]">
+        <nav className="p-3 space-y-4 overflow-y-auto max-h-[calc(100vh-150px)]">
           {navSections.map(section => (
-              <div key={section.titleEn} className="space-y-1">
-                {!isCollapsed && (
-                  <div className="px-3 pb-1 text-[10px] font-bold text-slate-400 dark:text-slate-500 tracking-wider uppercase">
-                    {language === 'bn' ? section.titleBn : section.titleEn}
-                  </div>
-                )}
-                {section.items.map(item => {
-                  const Icon = item.icon;
-                  const isActive = activeTab === item.id;
-                  const label = language === 'bn' ? item.defaultBn : item.defaultEn;
-
-                  return (
-                    <button
-                      key={item.id}
-                      onClick={() => setActiveTab(item.id)}
-                      title={isCollapsed ? label : undefined}
-                      className={`w-full flex items-center ${isCollapsed ? 'justify-center px-2' : 'gap-3 px-3'
-                        } py-2 rounded-xl text-xs font-semibold transition-all ${isActive
-                          ? 'bg-slate-100 dark:bg-slate-800 text-slate-900 dark:text-white font-bold shadow-xs'
-                          : 'text-slate-600 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-800/60 hover:text-slate-900 dark:hover:text-white'
-                        }`}
-                    >
-                      <Icon
-                        size={16}
-                        strokeWidth={isActive ? 2.3 : 1.9}
-                        className={isActive ? 'text-slate-900 dark:text-white' : 'text-slate-500 dark:text-slate-400 shrink-0'}
-                      />
-                      {!isCollapsed && <span className="truncate">{label}</span>}
-                    </button>
-                  );
-                })}
-              </div>
-          ))}
-            </nav>
-      </div>
-
-        {/* Bottom User Profile */}
-        <div className="p-3 border-t border-slate-100 dark:border-slate-800 relative" ref={userMenuRef}>
-          <div
-            onClick={() => setShowUserMenu(!showUserMenu)}
-            className={`flex items-center ${isCollapsed ? 'justify-center p-2' : 'justify-between p-2'
-              } rounded-xl hover:bg-slate-100 dark:hover:bg-slate-800/80 cursor-pointer transition-colors border border-transparent hover:border-slate-200 dark:hover:border-slate-700`}
-          >
-            <div className="flex items-center gap-3 overflow-hidden">
-              <div className="w-8 h-8 rounded-lg bg-slate-900 dark:bg-slate-800 text-white font-bold text-xs flex items-center justify-center shrink-0">
-                {currentUser?.avatar_initials || '?'}
-              </div>
+            <div key={section.key} className="space-y-1">
               {!isCollapsed && (
-                <div className="flex flex-col text-left truncate">
-                  <span className="text-xs font-bold text-slate-900 dark:text-white truncate">
-                    {currentUser?.full_name || '—'}
-                  </span>
-                  <span className="text-[10px] text-slate-400 dark:text-slate-500 capitalize">
-                    {currentUser?.role || ''}
-                  </span>
+                <div className="px-3 pb-1 text-[10px] font-bold text-slate-400 dark:text-slate-500 tracking-wider uppercase">
+                  {section.title}
                 </div>
               )}
+              {section.items.map(item => {
+                const Icon = item.icon;
+                const isActive = activeTab === item.id;
+                return (
+                  <button
+                    key={item.id}
+                    onClick={() => setActiveTab(item.id)}
+                    title={isCollapsed ? item.label : undefined}
+                    className={`w-full flex items-center ${isCollapsed ? 'justify-center px-2' : 'gap-3 px-3'
+                      } py-2 rounded-xl text-xs font-semibold transition-all ${isActive
+                        ? 'bg-slate-100 dark:bg-slate-800 text-slate-900 dark:text-white font-bold shadow-xs'
+                        : 'text-slate-600 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-800/60 hover:text-slate-900 dark:hover:text-white'
+                      }`}
+                  >
+                    <Icon
+                      size={16}
+                      strokeWidth={isActive ? 2.3 : 1.9}
+                      className={isActive ? 'text-slate-900 dark:text-white shrink-0' : 'text-slate-500 dark:text-slate-400 shrink-0'}
+                    />
+                    {!isCollapsed && <span className="truncate">{item.label}</span>}
+                  </button>
+                );
+              })}
             </div>
-            {!isCollapsed && (
-              <ChevronsUpDown size={15} className="text-slate-400 shrink-0" />
-            )}
-          </div>
+          ))}
+        </nav>
+      </div>
 
-          {/* User Switcher Dropdown */}
-          {showUserMenu && (
-            <div className={`absolute ${isCollapsed ? 'bottom-3 left-full ml-2 w-64' : 'bottom-16 left-3 right-3'} bg-white dark:bg-[#16252d] border border-slate-200 dark:border-[#283e4a] rounded-2xl shadow-2xl p-2 z-50 text-xs animate-in fade-in zoom-in-95 duration-100`}>
-              <div className="px-2 py-1.5 font-bold text-slate-400 dark:text-slate-500 border-b border-slate-100 dark:border-slate-800 mb-1 text-[10px] uppercase tracking-wider">
-                {language === 'bn' ? 'ব্যবহারকারী পরিবর্তন' : 'Switch Active User'}
-              </div>
-              {users.filter(u => u.status === 'Active').map(u => (
-                <button
-                  key={u.id}
-                  onClick={() => {
-                    setCurrentUser(u);
-                    setShowUserMenu(false);
-                    showToast(
-                      language === 'bn'
-                        ? `সক্রিয় ব্যবহারকারী হিসেবে ${u.full_name} (${u.role}) নির্বাচিত!`
-                        : `Switched active user to ${u.full_name} (${u.role})`
-                    );
-                  }}
-                  className="w-full flex items-center justify-between px-2.5 py-2 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 text-left text-slate-800 dark:text-slate-200 transition-colors font-medium"
-                >
-                  <div className="flex items-center gap-2">
-                    <span className="w-5 h-5 rounded-md bg-slate-900 text-white text-[10px] font-bold flex items-center justify-center">
-                      {u.avatar_initials}
-                    </span>
-                    <span>{u.full_name}</span>
-                    <span className="text-[10px] text-slate-400 font-mono">({u.role})</span>
-                  </div>
-                  {currentUser?.id === u.id && <Check size={14} className="text-emerald-600" />}
-                </button>
-              ))}
-            </div>
-          )}
-        </div>
+      {/* Bottom User Profile */}
+      <div className="p-3 border-t border-slate-100 dark:border-slate-800 relative" ref={userMenuRef}>
+        <button
+          type="button"
+          onClick={() => setShowUserMenu(v => !v)}
+          title={isCollapsed ? currentUser?.full_name : t('shell.profile_menu', 'Profile & switch user')}
+          aria-haspopup="menu"
+          aria-expanded={showUserMenu}
+          className={`w-full flex items-center ${isCollapsed ? 'justify-center' : 'justify-between'} p-2 rounded-xl cursor-pointer transition-colors border ${
+            showUserMenu || activeTab === 'profile'
+              ? 'bg-slate-100 dark:bg-slate-800/80 border-slate-200 dark:border-slate-700'
+              : 'border-transparent hover:bg-slate-100 dark:hover:bg-slate-800/80 hover:border-slate-200 dark:hover:border-slate-700'
+          }`}
+        >
+          <span className="flex items-center gap-3 min-w-0">
+            <UserAvatar user={currentUser} className="w-8 h-8 rounded-lg" />
+            {!isCollapsed && (
+              <span className="flex flex-col text-left min-w-0">
+                <span className="text-xs font-bold text-slate-900 dark:text-white truncate">{currentUser?.full_name || '—'}</span>
+                <span className="text-[10px] text-slate-400 dark:text-slate-500 truncate">{tv(currentUser?.role)}</span>
+              </span>
+            )}
+          </span>
+          {!isCollapsed && <ChevronsUpDown size={15} className="text-slate-400 shrink-0" />}
+        </button>
+
+        {showUserMenu && (
+          <ProfileMenu
+            onClose={closeMenu}
+            className={`absolute ${isCollapsed ? 'bottom-3 left-full ml-2' : 'bottom-16 left-3'} w-64`}
+          />
+        )}
+      </div>
     </aside>
   );
 };

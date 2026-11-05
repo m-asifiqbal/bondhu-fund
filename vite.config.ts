@@ -11,6 +11,11 @@ export default defineConfig({
       '@': path.resolve(__dirname, './src'),
     },
   },
+  build: {
+    target: 'chrome120', // Electron's Chromium: no legacy transpilation, smaller bundles
+    cssCodeSplit: true,
+    chunkSizeWarningLimit: 900,
+  },
   server: {
     port: 5173,
     strictPort: true,

@@ -8,6 +8,7 @@ import {
 import { SVGRenderer } from 'echarts/renderers';
 import type { EChartsCoreOption } from 'echarts/core';
 import { Table2, BarChart3 } from 'lucide-react';
+import { useApp } from '../../context/AppContext';
 
 echarts.use([
   BarChart, LineChart, PieChart, HeatmapChart,
@@ -141,7 +142,9 @@ interface ChartCardProps {
 }
 
 export const ChartCard: React.FC<ChartCardProps> = ({ title, subtitle, icon, actions, table, empty, emptyText, className = '', children }) => {
+  const { t } = useApp();
   const [showTable, setShowTable] = useState(false);
+  const toggleLabel = showTable ? t('chart.show_chart', 'Show chart') : t('chart.show_table', 'Show table');
   return (
     <section className={`card-base p-5 flex flex-col min-w-0 ${className}`}>
       <header className="flex items-start justify-between gap-3 mb-3">
@@ -158,8 +161,8 @@ export const ChartCard: React.FC<ChartCardProps> = ({ title, subtitle, icon, act
             <button
               type="button"
               onClick={() => setShowTable(s => !s)}
-              title={showTable ? 'Show chart' : 'Show table'}
-              aria-label={showTable ? 'Show chart' : 'Show table'}
+              title={toggleLabel}
+              aria-label={toggleLabel}
               className="p-1.5 rounded-lg text-slate-500 hover:text-brand hover:bg-slate-100 dark:hover:bg-slate-800 dark:text-slate-400"
             >
               {showTable ? <BarChart3 size={15} /> : <Table2 size={15} />}
@@ -169,7 +172,7 @@ export const ChartCard: React.FC<ChartCardProps> = ({ title, subtitle, icon, act
       </header>
       {empty ? (
         <div className="flex-1 min-h-[160px] flex items-center justify-center text-xs text-slate-400 dark:text-slate-500 text-center px-6">
-          {emptyText || 'No data for this period yet.'}
+          {emptyText || t('chart.no_data', 'No data to show yet')}
         </div>
       ) : showTable && table ? (
         <div className="overflow-auto max-h-[320px] -mx-1">
@@ -180,7 +183,7 @@ export const ChartCard: React.FC<ChartCardProps> = ({ title, subtitle, icon, act
             <tbody>
               {table.rows.map((r, i) => (
                 <tr key={i} className="border-b border-slate-100 dark:border-[#1b2c34] last:border-0">
-                  {r.map((c, j) => <td key={j} className={`py-1.5 px-2 text-slate-700 dark:text-slate-200 ${j ? 'text-right tabular-nums' : ''}`}>{c}</td>)}
+                  {r.map((c, j) => <td key={j} className={`py-2 px-2 text-slate-700 dark:text-slate-200 ${j ? 'text-right tabular-nums' : ''}`}>{c}</td>)}
                 </tr>
               ))}
             </tbody>

@@ -108,10 +108,11 @@ async function start() {
   initPaths();
   const fallbacks = listBackups().map(b => b.filePath); // newest first, used only if main DB is unreadable
   await store.openDatabase(dbFile, readWasm(), fallbacks);
-  dailyAutoBackup();
   registerIpc();
   Menu.setApplicationMenu(null);
   createWindow();
+  // Daily snapshot after the window is up, so it never delays startup.
+  setTimeout(dailyAutoBackup, 5000);
 }
 
 function createWindow() {

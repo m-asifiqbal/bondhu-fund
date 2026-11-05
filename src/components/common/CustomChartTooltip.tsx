@@ -1,9 +1,11 @@
 import React from 'react';
+import { useApp } from '../../context/AppContext';
 
 interface CustomChartTooltipProps {
   active?: boolean;
   payload?: any[];
   label?: string;
+  /** Legacy prefix; when omitted values use the app currency format (Bangla digits in bn). */
   currencyPrefix?: string;
 }
 
@@ -11,14 +13,16 @@ export const CustomChartTooltip: React.FC<CustomChartTooltipProps> = ({
   active,
   payload,
   label,
-  currencyPrefix = 'TK',
+  currencyPrefix,
 }) => {
+  const { formatCurrency, toBanglaDigits, language, tv } = useApp();
+  const bn = language === 'bn';
   if (active && payload && payload.length) {
     return (
       <div className="bg-slate-900/95 dark:bg-[#0c161c]/95 backdrop-blur-md border border-slate-700/80 dark:border-slate-600/80 p-3 rounded-xl shadow-2xl text-xs z-50 pointer-events-none min-w-[140px] animate-in fade-in duration-75">
         {label && (
           <div className="font-bold text-slate-300 dark:text-slate-300 text-[11px] pb-1.5 mb-1.5 border-b border-slate-800 dark:border-slate-700/60">
-            {label}
+            {bn ? toBanglaDigits(label) : label}
           </div>
         )}
 
@@ -26,8 +30,10 @@ export const CustomChartTooltip: React.FC<CustomChartTooltipProps> = ({
           {payload.map((entry, index) => {
             const val = entry.value;
             const formattedVal =
-              typeof val === 'number' ? `${currencyPrefix} ${val.toLocaleString()}` : val;
-            const name = entry.name || entry.dataKey;
+              typeof val !== 'number' ? val
+                : currencyPrefix ? `${currencyPrefix} ${bn ? toBanglaDigits(val.toLocaleString('en-IN')) : val.toLocaleString('en-IN')}`
+                : formatCurrency(val);
+            const name = tv(String(entry.name || entry.dataKey || ''));
 
             return (
               <div key={`item-${index}`} className="flex items-center justify-between gap-3">

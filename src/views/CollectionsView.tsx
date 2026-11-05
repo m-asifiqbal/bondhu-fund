@@ -7,7 +7,7 @@ import {
   AlertCircle,
   Info,
   Download,
-  X,
+  Receipt,
   Search,
   ChevronLeft,
   ChevronRight,
@@ -18,11 +18,20 @@ import {
   Users,
 } from 'lucide-react';
 import { useApp } from '../context/AppContext';
-import { getCollections, getAppSettings, deletePayment, saveTextFile } from '../services/db';
-import { AppSettings, CollectionRecord, CollectionStats, PaymentStatus } from '../types';
+import { getCollections, deletePayment, saveTextFile } from '../services/db';
+import { CollectionRecord, CollectionStats, PaymentStatus } from '../types';
 import { MonthPicker } from '../components/common/MonthPicker';
+import { SearchableSelect, SelectOption } from '../components/common/SearchableSelect';
+import { DatePicker } from '../components/common/DatePicker';
+import { Modal } from '../components/common/Modal';
+import { todayISO } from '../utils/date';
 
 type Tab = 'All' | 'Paid' | 'Pending' | 'Overdue';
+
+/** Fill {placeholders} in a translated template. */
+const fill = (s: string, vars: Record<string, string | number>) => s.replace(/\{(\w+)\}/g, (_, k) => String(vars[k] ?? ''));
+/** Bangla name, when the API provides it (member_name_bn is optional on collection rows). */
+type Rec = CollectionRecord & { member_name_bn?: string | null };
 
 const EMPTY_STATS: CollectionStats = {
   totalMembers: 0,
@@ -52,16 +61,20 @@ export const CollectionsView: React.FC = () => {
     toBanglaDigits,
     setOpenRecordModal,
     setSelectedMemberIdForPayment,
+    settings,
+    tv,
+    bnName,
   } = useApp();
 
-  const [allRecords, setAllRecords] = useState<CollectionRecord[]>([]);
+  const [allRecords, setAllRecords] = useState<Rec[]>([]);
   const [stats, setStats] = useState<CollectionStats>(EMPTY_STATS);
-  const [settings, setSettings] = useState<AppSettings | null>(null);
   const [loading, setLoading] = useState(true);
   const [selectedTab, setSelectedTab] = useState<Tab>('All');
-  const [selectedRecord, setSelectedRecord] = useState<CollectionRecord | null>(null);
+  const [selectedRecord, setSelectedRecord] = useState<Rec | null>(null);
+  const [confirmVoid, setConfirmVoid] = useState<Rec | null>(null);
   const [busyId, setBusyId] = useState<number | null>(null);
 
+  const [searchInput, setSearchInput] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
   const [startDate, setStartDate] = useState('');
   const [endDate, setEndDate] = useState('');
@@ -72,12 +85,25 @@ export const CollectionsView: React.FC = () => {
   const n = (v: number | string) => (language === 'bn' ? toBanglaDigits(v) : String(v));
   const monthLabel = formatMonth(selectedMonth);
 
+  const memberName = (r: Rec) => bnName(r.member_name, r.member_name_bn);
+
+  // Debounce the search box before querying.
   useEffect(() => {
-    getAppSettings()
-      .then(setSettings)
-      .catch((e: any) => showToast(e.message, 'error'));
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [refreshKey]);
+    const h = setTimeout(() => setSearchQuery(searchInput.trim()), 250);
+    return () => clearTimeout(h);
+  }, [searchInput]);
+
+  const sortOptions = useMemo<SelectOption[]>(() => [
+    { value: 'newest', label: t('members.col_sort_newest', 'Newest first') },
+    { value: 'oldest', label: t('members.col_sort_oldest', 'Oldest first') },
+    { value: 'status', label: t('members.col_sort_status', 'Status (unpaid first)') },
+    { value: 'name_asc', label: t('members.col_sort_nameAsc', 'Member: A to Z') },
+    { value: 'name_desc', label: t('members.col_sort_nameDesc', 'Member: Z to A') },
+    { value: 'amount_high', label: t('members.col_sort_amountHigh', 'Amount: high to low') },
+    { value: 'amount_low', label: t('members.col_sort_amountLow', 'Amount: low to high') },
+    { value: 'date_desc', label: t('members.col_sort_dateDesc', 'Payment date: latest') },
+    { value: 'date_asc', label: t('members.col_sort_dateAsc', 'Payment date: earliest') },
+  ], [t]);
 
   // Stats are computed by the API after the status filter, so we always load the
   // full month (statusTab 'All') and filter the tab locally to keep tab counts correct.
@@ -119,7 +145,7 @@ export const CollectionsView: React.FC = () => {
   const latePaymentsCount = useMemo(() => allRecords.filter(r => (r.late_fee || 0) > 0).length, [allRecords]);
 
   const pct = Math.max(0, Math.min(100, parseFloat(stats.percentage) || 0));
-  const hasFilters = !!(searchQuery || startDate || endDate || sortBy !== 'newest');
+  const hasFilters = !!(searchInput || startDate || endDate || sortBy !== 'newest');
 
   const totalPages = Math.ceil(records.length / limit) || 1;
   const safePage = Math.min(page, totalPages);
@@ -134,20 +160,15 @@ export const CollectionsView: React.FC = () => {
     setOpenRecordModal(true);
   };
 
-  const handleVoid = async (r: CollectionRecord) => {
-    if (r.payment_id == null) return;
-    const ok = window.confirm(
-      t(
-        'collections.voidConfirm',
-        `Void the ${formatMonth(r.payment_month)} payment of ${formatCurrency(r.total_amount || 0)} by ${r.member_name}? The due will become unpaid again.`
-      )
-    );
-    if (!ok) return;
+  const handleVoid = async () => {
+    const r = confirmVoid;
+    if (!r || r.payment_id == null || busyId != null) return;
     setBusyId(r.payment_id);
     try {
       await deletePayment(r.payment_id);
-      showToast(t('collections.voided', 'Payment voided.'));
+      showToast(t('members.col_voided', 'Payment voided.'));
       if (selectedRecord?.payment_id === r.payment_id) setSelectedRecord(null);
+      setConfirmVoid(null);
       triggerRefresh();
     } catch (e: any) {
       showToast(e.message, 'error');
@@ -156,7 +177,8 @@ export const CollectionsView: React.FC = () => {
     }
   };
 
-  const voucherText = (r: CollectionRecord) => {
+  // The saved/copied voucher file stays in English (plain-text record); the on-screen voucher is translated.
+  const voucherText = (r: Rec) => {
     const cur = settings?.currency_symbol || 'TK';
     const money = (v: number) => `${cur} ${(v || 0).toLocaleString('en-US')}`;
     return [
@@ -169,7 +191,7 @@ export const CollectionsView: React.FC = () => {
       `Payment Date     : ${formatDate(r.payment_date)}`,
       '--------------------------------------------------------',
       `Member Code      : ${r.member_code || '-'}`,
-      `Member Name      : ${r.member_name || '-'}`,
+      `Member Name      : ${[r.member_name, r.member_name_bn].filter(Boolean).join(' / ') || '-'}`,
       `Payment Method   : ${r.payment_method || '-'}`,
       '--------------------------------------------------------',
       `Contribution     : ${money(r.contribution_amount)}`,
@@ -188,7 +210,7 @@ export const CollectionsView: React.FC = () => {
         voucherText(r),
         [{ name: 'Text', extensions: ['txt'] }]
       );
-      if (!res.canceled) showToast(t('collections.voucherSaved', 'Voucher saved.'));
+      if (!res.canceled) showToast(t('members.col_voucherSaved', 'Voucher saved.'));
     } catch (e: any) {
       showToast(e.message, 'error');
     }
@@ -197,7 +219,7 @@ export const CollectionsView: React.FC = () => {
   const handleCopyVoucher = async (r: CollectionRecord) => {
     try {
       await navigator.clipboard.writeText(voucherText(r));
-      showToast(t('collections.voucherCopied', 'Voucher copied to clipboard.'));
+      showToast(t('members.col_voucherCopied', 'Voucher copied to clipboard.'));
     } catch (e: any) {
       showToast(e.message, 'error');
     }
@@ -211,7 +233,7 @@ export const CollectionsView: React.FC = () => {
     };
     return (
       <span className={`px-2.5 py-0.5 rounded-full text-[11px] font-bold border ${cls[status] || ''}`}>
-        {t(`status.${status.toLowerCase()}`, status)}
+        {tv(status)}
       </span>
     );
   };
@@ -253,12 +275,10 @@ export const CollectionsView: React.FC = () => {
       <div className="flex flex-wrap items-center justify-between gap-4">
         <div>
           <h1 className="text-2xl font-black text-slate-900 dark:text-white tracking-tight">
-            {language === 'bn' ? 'মাসিক চাঁদা কালেকশন' : 'Monthly collections'}
+            {t('members.col_title', 'Monthly collections')}
           </h1>
           <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
-            {language === 'bn'
-              ? 'সদস্যদের নিয়মিত চাঁদা, বিলম্ব ফি এবং বকেয়ার হিসাব।'
-              : 'Track contributions, late payments, and outstanding dues.'}
+            {t('members.col_subtitle', 'Track contributions, late payments, and outstanding dues.')}
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-3">
@@ -271,7 +291,7 @@ export const CollectionsView: React.FC = () => {
             className="flex items-center gap-1.5 px-4 py-2 bg-[#0f4a3c] hover:bg-[#145c4b] dark:bg-emerald-700 dark:hover:bg-emerald-600 text-white rounded-xl text-xs font-bold shadow-md transition-all"
           >
             <PlusCircle size={14} />
-            <span>{t('collections.recordPayment', 'Record payment')}</span>
+            <span>{t('members.col_recordPayment', 'Record payment')}</span>
           </button>
         </div>
       </div>
@@ -279,13 +299,13 @@ export const CollectionsView: React.FC = () => {
       {/* Entry Center banner */}
       <div className="card-base p-4 flex flex-wrap items-center justify-between gap-3">
         <span className="text-xs font-semibold text-slate-700 dark:text-slate-300">
-          {t('collections.entryHint', 'Need to add money, expense, or investment details?')}
+          {t('members.col_entryHint', 'Need to add money, expense, or investment details?')}
         </span>
         <button
           onClick={() => setActiveTab('entry')}
           className="flex items-center gap-1.5 px-4 py-2 bg-emerald-50 hover:bg-emerald-100 dark:bg-emerald-950/60 dark:hover:bg-emerald-900/60 text-[#0f4a3c] dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800/80 rounded-xl text-xs font-bold transition-all shadow-sm"
         >
-          <span>{t('collections.openEntry', 'Open entry center')}</span>
+          <span>{t('members.col_openEntry', 'Open entry center')}</span>
           <ArrowRight size={14} />
         </button>
       </div>
@@ -294,40 +314,40 @@ export const CollectionsView: React.FC = () => {
       <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
         {statCard(
           'border-l-purple-500',
-          t('collections.expected', `Expected in ${monthLabel}`),
+          fill(t('members.col_expected', 'Expected in {month}'), { month: monthLabel }),
           <Coins size={16} />,
           'bg-purple-50 dark:bg-purple-950/60 text-purple-600 dark:text-purple-400',
           formatCurrency(stats.expectedAmount),
           'text-slate-900 dark:text-white',
-          `${n(stats.totalMembers)} ${t('collections.memberDues', 'member dues')}`
+          `${n(stats.totalMembers)} ${t('members.col_memberDues', 'member dues')}`
         )}
         {statCard(
           'border-l-emerald-500',
-          t('collections.collected', 'Collected'),
+          t('members.col_collected', 'Collected'),
           <CheckCircle2 size={16} />,
           'bg-emerald-50 dark:bg-emerald-950/60 text-emerald-600 dark:text-emerald-400',
           formatCurrency(stats.collectedAmount),
           'text-emerald-600 dark:text-emerald-400',
-          `${n(stats.percentage)}% ${t('collections.ofExpected', 'of expected')}`,
+          `${n(stats.percentage)}% ${t('members.col_ofExpected', 'of expected')}`,
           'text-emerald-600 dark:text-emerald-400 font-bold'
         )}
         {statCard(
           'border-l-amber-500',
-          t('collections.lateFees', 'Late fees'),
+          t('members.col_lateFees', 'Late fees'),
           <Clock size={16} />,
           'bg-amber-50 dark:bg-amber-950/60 text-amber-600 dark:text-amber-400',
           formatCurrency(stats.lateFeeAmount),
           'text-amber-600 dark:text-amber-400',
-          `${n(latePaymentsCount)} ${t('collections.latePayments', 'late payments')}`
+          `${n(latePaymentsCount)} ${t('members.col_latePayments', 'late payments')}`
         )}
         {statCard(
           'border-l-rose-500',
-          t('collections.outstanding', 'Outstanding'),
+          t('members.col_outstanding', 'Outstanding'),
           <AlertCircle size={16} />,
           'bg-rose-50 dark:bg-rose-950/60 text-rose-600 dark:text-rose-400',
           formatCurrency(stats.outstandingAmount),
           'text-rose-600 dark:text-rose-400',
-          `${n(stats.pendingCount + stats.overdueCount)} ${t('collections.unpaidDues', 'unpaid dues')}`,
+          `${n(stats.pendingCount + stats.overdueCount)} ${t('members.col_unpaidDues', 'unpaid dues')}`,
           'text-rose-600 dark:text-rose-400 font-bold'
         )}
       </div>
@@ -338,10 +358,10 @@ export const CollectionsView: React.FC = () => {
           <div className="flex flex-wrap items-center justify-between gap-4">
             <div>
               <h3 className="text-base font-bold text-slate-900 dark:text-white">
-                {monthLabel} {t('collections.ledger', 'collection ledger')}
+                {fill(t('members.col_ledger', '{month} collection ledger'), { month: monthLabel })}
               </h3>
               <p className="text-xs text-slate-500 dark:text-slate-400">
-                {t('collections.ledgerSub', 'Review contribution status and payment details.')}
+                {t('members.col_ledgerSub', 'Review contribution status and payment details.')}
               </p>
             </div>
             <div className="flex flex-wrap items-center bg-slate-100 dark:bg-[#111e24] p-1 rounded-xl border border-slate-200 dark:border-slate-800 text-xs">
@@ -355,7 +375,7 @@ export const CollectionsView: React.FC = () => {
                       : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
                   }`}
                 >
-                  {t(`status.${tb.key.toLowerCase()}`, tb.key)} {n(tb.count)}
+                  {tb.key === 'All' ? t('common.all', 'All') : tv(tb.key)} {n(tb.count)}
                 </button>
               ))}
             </div>
@@ -363,49 +383,35 @@ export const CollectionsView: React.FC = () => {
 
           {/* Filters */}
           <div className="p-3 bg-slate-50 dark:bg-[#121f26] rounded-xl border border-slate-200 dark:border-slate-800 flex flex-wrap items-center gap-3 text-xs">
-            <div className="relative flex-1 min-w-[180px]">
+            <div className="relative flex-1 min-w-[220px]">
               <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 dark:text-slate-500" />
               <input
                 type="text"
-                placeholder={t('collections.searchPh', 'Search member, code, phone or TRX ID...')}
-                value={searchQuery}
-                onChange={e => setSearchQuery(e.target.value)}
+                placeholder={t('members.col_searchPh', 'Search member, code, phone or TRX ID…')}
+                aria-label={t('members.col_searchPh', 'Search member, code, phone or TRX ID…')}
+                value={searchInput}
+                onChange={e => setSearchInput(e.target.value)}
                 className="form-input pl-8"
               />
             </div>
-            <div className="w-48">
-              <select value={sortBy} onChange={e => setSortBy(e.target.value)} className="form-select">
-                <option value="newest">{t('sort.newest', 'Sort: Newest first')}</option>
-                <option value="oldest">{t('sort.oldest', 'Sort: Oldest first')}</option>
-                <option value="status">{t('sort.status', 'Status (unpaid first)')}</option>
-                <option value="name_asc">{t('sort.nameAsc', 'Member: A to Z')}</option>
-                <option value="name_desc">{t('sort.nameDesc', 'Member: Z to A')}</option>
-                <option value="amount_high">{t('sort.amountHigh', 'Amount: High to low')}</option>
-                <option value="amount_low">{t('sort.amountLow', 'Amount: Low to high')}</option>
-                <option value="date_desc">{t('sort.dateDesc', 'Payment date: Latest')}</option>
-                <option value="date_asc">{t('sort.dateAsc', 'Payment date: Earliest')}</option>
-              </select>
-            </div>
-            <div className="flex flex-wrap items-center gap-2" title={t('collections.dateHint', 'Filters by payment date (unpaid dues are hidden)')}>
-              <span className="text-slate-600 dark:text-slate-400 font-bold text-[11px]">{t('common.paidFrom', 'Paid from')}:</span>
-              <input
-                type="date"
-                value={startDate}
-                onChange={e => setStartDate(e.target.value)}
-                className="px-2 py-1.5 bg-white dark:bg-[#101b21] border border-slate-300 dark:border-[#283d47] rounded-xl text-xs text-slate-800 dark:text-slate-100 font-medium focus:outline-none focus:ring-2 focus:ring-[#0f4a3c]"
-              />
-              <span className="text-slate-600 dark:text-slate-400 font-bold text-[11px]">{t('common.to', 'To')}:</span>
-              <input
-                type="date"
-                value={endDate}
-                onChange={e => setEndDate(e.target.value)}
-                className="px-2 py-1.5 bg-white dark:bg-[#101b21] border border-slate-300 dark:border-[#283d47] rounded-xl text-xs text-slate-800 dark:text-slate-100 font-medium focus:outline-none focus:ring-2 focus:ring-[#0f4a3c]"
-              />
+            <SearchableSelect
+              size="sm"
+              className="min-w-[200px]"
+              options={sortOptions}
+              value={sortBy}
+              onChange={v => setSortBy(String(v || 'newest'))}
+            />
+            <div className="flex flex-wrap items-center gap-2" title={t('members.col_dateHint', 'Filters by payment date (unpaid dues are hidden)')}>
+              <span className="text-slate-600 dark:text-slate-400 font-bold text-[11px]">{t('members.col_paidFrom', 'Paid from')}</span>
+              <DatePicker size="sm" className="min-w-[150px]" value={startDate} max={endDate || todayISO()} onChange={setStartDate} />
+              <span className="text-slate-600 dark:text-slate-400 font-bold text-[11px]">{t('members.to', 'to')}</span>
+              <DatePicker size="sm" className="min-w-[150px]" value={endDate} min={startDate || undefined} max={todayISO()} onChange={setEndDate} />
             </div>
             {hasFilters && (
               <button
                 type="button"
                 onClick={() => {
+                  setSearchInput('');
                   setSearchQuery('');
                   setStartDate('');
                   setEndDate('');
@@ -426,17 +432,17 @@ export const CollectionsView: React.FC = () => {
               </div>
               <div>
                 <p className="text-sm font-bold text-slate-800 dark:text-slate-200">
-                  {t('collections.emptyTitle', `No dues for ${monthLabel}`)}
+                  {fill(t('members.col_emptyTitle', 'No dues for {month}'), { month: monthLabel })}
                 </p>
                 <p className="text-xs text-slate-500 dark:text-slate-400 mt-1 max-w-sm">
-                  {t('collections.emptyBody', 'Dues appear here for every active member who had joined by this month. Add members to start tracking collections.')}
+                  {t('members.col_emptyBody', 'Dues appear here for every active member who had joined by this month. Add members to start tracking collections.')}
                 </p>
               </div>
               <button
                 onClick={() => setActiveTab('members')}
                 className="px-4 py-2 bg-[#0f4a3c] hover:bg-[#145c4b] dark:bg-emerald-700 dark:hover:bg-emerald-600 text-white rounded-xl text-xs font-bold shadow-md"
               >
-                {t('collections.goMembers', 'Go to members')}
+                {t('members.col_goMembers', 'Go to members')}
               </button>
             </div>
           ) : (
@@ -445,13 +451,13 @@ export const CollectionsView: React.FC = () => {
                 <table className="w-full min-w-[820px] text-left text-xs text-slate-800 dark:text-slate-200">
                   <thead className="bg-slate-50 dark:bg-[#111e24] border-b border-slate-200 dark:border-slate-800 text-slate-600 dark:text-slate-400 font-bold uppercase tracking-wider text-[10px]">
                     <tr>
-                      <th className="py-3 px-3">{t('common.member')}</th>
-                      <th className="py-3 px-3">{language === 'bn' ? 'নির্ধারিত তারিখ' : 'Due date'}</th>
-                      <th className="py-3 px-3">{t('collections.paidOn', 'Paid on')}</th>
-                      <th className="py-3 px-3 text-right">{language === 'bn' ? 'নিয়মিত চাঁদা' : 'Contribution'}</th>
-                      <th className="py-3 px-3 text-right">{language === 'bn' ? 'বিলম্ব ফি' : 'Late fee'}</th>
-                      <th className="py-3 px-3">{t('common.status')}</th>
-                      <th className="py-3 px-3 text-right">{t('common.action')}</th>
+                      <th className="py-3 px-3">{t('common.member', 'Member')}</th>
+                      <th className="py-3 px-3">{t('members.col_dueDate', 'Due date')}</th>
+                      <th className="py-3 px-3">{t('members.col_paidOn', 'Paid on')}</th>
+                      <th className="py-3 px-3 text-right">{t('members.col_contribution', 'Contribution')}</th>
+                      <th className="py-3 px-3 text-right">{t('members.late_fee', 'Late fee')}</th>
+                      <th className="py-3 px-3">{t('common.status', 'Status')}</th>
+                      <th className="py-3 px-3 text-right">{t('common.actions', 'Actions')}</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100 dark:divide-slate-800/80 font-medium">
@@ -464,7 +470,7 @@ export const CollectionsView: React.FC = () => {
                     ) : displayedRecords.length === 0 ? (
                       <tr>
                         <td colSpan={7} className="py-8 text-center text-slate-400">
-                          {language === 'bn' ? 'কোনো কালেকশন রেকর্ড পাওয়া যায়নি।' : 'No collection records match your criteria.'}
+                          {t('members.col_noRecords', 'No collection records match your criteria.')}
                         </td>
                       </tr>
                     ) : (
@@ -473,7 +479,7 @@ export const CollectionsView: React.FC = () => {
                         return (
                           <tr key={r.id} className="hover:bg-slate-50/80 dark:hover:bg-[#1a2b34] transition-colors">
                             <td className="py-3 px-3 font-bold text-slate-900 dark:text-white">
-                              {r.member_name}
+                              <span title={bnName(r.member_name) !== memberName(r) ? r.member_name : undefined}>{memberName(r)}</span>
                               {r.member_code && (
                                 <span className="text-[11px] text-slate-500 dark:text-slate-400 font-normal ml-1">({r.member_code})</span>
                               )}
@@ -487,7 +493,7 @@ export const CollectionsView: React.FC = () => {
                                 formatCurrency(r.contribution_amount)
                               ) : (
                                 <span className="text-slate-400 font-semibold">
-                                  {formatCurrency(dueOf(r))} {t('collections.due', 'due')}
+                                  {formatCurrency(dueOf(r))} {t('members.col_due', 'due')}
                                 </span>
                               )}
                             </td>
@@ -503,20 +509,22 @@ export const CollectionsView: React.FC = () => {
                                     className="inline-flex items-center gap-1 px-2.5 py-1 text-[#0f4a3c] dark:text-emerald-400 bg-emerald-50/80 dark:bg-emerald-950/50 hover:bg-emerald-100 dark:hover:bg-emerald-900/50 rounded-lg font-bold transition-colors"
                                   >
                                     <Eye size={13} />
-                                    <span>{t('common.view')}</span>
+                                    <span>{t('common.view', 'View')}</span>
                                   </button>
                                   <button
                                     onClick={() => handleDownloadVoucher(r)}
                                     className="p-1 text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800"
-                                    title={t('collections.downloadVoucher', 'Download voucher')}
+                                    title={t('members.col_downloadVoucher', 'Download voucher')}
+                                    aria-label={t('members.col_downloadVoucher', 'Download voucher')}
                                   >
                                     <Download size={14} />
                                   </button>
                                   <button
-                                    onClick={() => handleVoid(r)}
+                                    onClick={() => setConfirmVoid(r)}
                                     disabled={busyId === r.payment_id}
                                     className="p-1 text-slate-400 hover:text-rose-600 dark:hover:text-rose-400 rounded-lg hover:bg-rose-50 dark:hover:bg-rose-950/40 disabled:opacity-40 disabled:cursor-not-allowed"
-                                    title={t('collections.voidPayment', 'Void payment')}
+                                    title={t('members.col_voidPayment', 'Void payment')}
+                                    aria-label={t('members.col_voidPayment', 'Void payment')}
                                   >
                                     <Ban size={14} />
                                   </button>
@@ -527,7 +535,7 @@ export const CollectionsView: React.FC = () => {
                                   className="inline-flex items-center gap-1 px-2.5 py-1 bg-[#0f4a3c] hover:bg-[#145c4b] dark:bg-emerald-700 dark:hover:bg-emerald-600 text-white rounded-lg font-bold transition-colors"
                                 >
                                   <PlusCircle size={13} />
-                                  <span>{t('collections.recordPayment', 'Record payment')}</span>
+                                  <span>{t('members.col_recordPayment', 'Record payment')}</span>
                                 </button>
                               )}
                             </td>
@@ -541,7 +549,7 @@ export const CollectionsView: React.FC = () => {
 
               <div className="pt-3 border-t border-slate-200 dark:border-slate-800 flex flex-wrap items-center justify-between gap-3 text-xs text-slate-500 dark:text-slate-400">
                 <span className="font-medium">
-                  {t('common.showing', 'Showing')} {n(startIdx)}-{n(endIdx)} {t('common.of', 'of')} {n(records.length)}
+                  {fill(t('members.col_showing', 'Showing {from}–{to} of {total}'), { from: n(startIdx), to: n(endIdx), total: n(records.length) })}
                 </span>
                 <div className="flex items-center gap-2">
                   <button
@@ -565,7 +573,7 @@ export const CollectionsView: React.FC = () => {
                   </button>
                 </div>
                 <button onClick={() => setActiveTab('members')} className="text-[#0f4a3c] dark:text-emerald-400 hover:underline font-bold">
-                  {t('collections.viewMembers', 'View all members')}
+                  {t('members.col_viewMembers', 'View all members')}
                 </button>
               </div>
             </>
@@ -576,11 +584,11 @@ export const CollectionsView: React.FC = () => {
         <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-1 gap-6 content-start">
           <div className="card-base p-6">
             <h3 className="text-sm font-bold text-slate-900 dark:text-white mb-2">
-              {t('collections.progress', 'Collection progress')}
+              {t('members.col_progress', 'Collection progress')}
             </h3>
             <div className="text-3xl font-black text-slate-900 dark:text-white mt-2">
               {n(stats.percentage)}%{' '}
-              <span className="text-xs font-normal text-slate-500 dark:text-slate-400">{t('collections.ofExpected', 'of expected')}</span>
+              <span className="text-xs font-normal text-slate-500 dark:text-slate-400">{t('members.col_ofExpected', 'of expected')}</span>
             </div>
             <div className="w-full bg-slate-100 dark:bg-slate-800 h-3 rounded-full overflow-hidden mt-3 p-0.5">
               <div
@@ -610,50 +618,79 @@ export const CollectionsView: React.FC = () => {
           <div className="bg-emerald-50/70 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-800/80 rounded-2xl p-5 text-xs shadow-sm">
             <div className="flex items-center gap-2 text-[#0f4a3c] dark:text-emerald-300 font-bold mb-1.5">
               <Info size={16} />
-              <span>{t('collections.lateRule', 'Late payment rule')}</span>
+              <span>{t('members.col_lateRule', 'Late payment rule')}</span>
             </div>
             <p className="text-slate-600 dark:text-slate-300 text-[11px] leading-relaxed">
               {settings
                 ? settings.late_fee_amount > 0
-                  ? t(
-                      'collections.lateRuleBody',
-                      `Dues are due by day ${settings.monthly_due_day} of each month. Payments after that are marked Overdue and a late fee of ${formatCurrency(settings.late_fee_amount)} is suggested.`
-                    )
-                  : t(
-                      'collections.lateRuleNoFee',
-                      `Dues are due by day ${settings.monthly_due_day} of each month. No late fee is configured.`
-                    )
+                  ? fill(t('members.col_lateRuleBody',
+                      'Dues are due by day {day} of each month. Payments after that are marked Overdue and a late fee of {fee} is suggested.'),
+                      { day: n(settings.monthly_due_day), fee: formatCurrency(settings.late_fee_amount) })
+                  : fill(t('members.col_lateRuleNoFee', 'Dues are due by day {day} of each month. No late fee is configured.'),
+                      { day: n(settings.monthly_due_day) })
                 : t('common.loading', 'Loading...')}
             </p>
             <button onClick={() => setActiveTab('settings')} className="mt-2 text-[11px] font-bold text-[#0f4a3c] dark:text-emerald-400 hover:underline">
-              {t('collections.changeRule', 'Change in settings')}
+              {t('members.col_changeRule', 'Change in settings')}
             </button>
           </div>
         </div>
       </div>
 
       {/* Voucher modal */}
-      {selectedRecord && (
-        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="card-base w-full max-w-md p-6 text-xs space-y-4 max-h-[90vh] overflow-y-auto">
-            <div className="flex items-center justify-between pb-2 border-b border-slate-200 dark:border-slate-800">
-              <h3 className="text-sm font-bold text-slate-900 dark:text-white">{t('collections.voucher', 'Payment voucher')}</h3>
-              <button onClick={() => setSelectedRecord(null)} className="text-slate-400 hover:text-slate-700 dark:hover:text-white">
-                <X size={16} />
-              </button>
-            </div>
+      <Modal
+        open={!!selectedRecord}
+        onClose={() => setSelectedRecord(null)}
+        size="sm"
+        icon={<Receipt size={18} />}
+        title={t('members.col_voucher', 'Payment voucher')}
+        subtitle={selectedRecord ? `${memberName(selectedRecord)} · ${formatMonth(selectedRecord.payment_month)}` : undefined}
+        footer={selectedRecord && (
+          <div className="flex flex-wrap items-center justify-end gap-2 text-xs">
+            <button
+              onClick={() => setConfirmVoid(selectedRecord)}
+              disabled={busyId === selectedRecord.payment_id}
+              className="flex items-center gap-1.5 px-3.5 py-2 text-rose-700 dark:text-rose-300 bg-rose-50 dark:bg-rose-950/40 hover:bg-rose-100 dark:hover:bg-rose-900/40 rounded-xl font-bold disabled:opacity-40"
+            >
+              <Ban size={14} />
+              <span>{t('members.col_voidPayment', 'Void payment')}</span>
+            </button>
+            <button
+              onClick={() => handleCopyVoucher(selectedRecord)}
+              className="px-3.5 py-2 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-200 rounded-xl font-bold"
+            >
+              {t('members.copy', 'Copy')}
+            </button>
+            <button
+              onClick={() => handleDownloadVoucher(selectedRecord)}
+              className="flex items-center gap-1.5 px-3.5 py-2 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-200 rounded-xl font-bold"
+            >
+              <Download size={14} />
+              <span>{t('members.download', 'Download')}</span>
+            </button>
+            <button
+              onClick={() => setSelectedRecord(null)}
+              className="px-4 py-2 bg-[#0f4a3c] hover:bg-[#145c4b] dark:bg-emerald-700 dark:hover:bg-emerald-600 text-white rounded-xl font-bold shadow-md"
+            >
+              {t('members.done', 'Done')}
+            </button>
+          </div>
+        )}
+      >
+        {selectedRecord && (
+          <div className="text-xs">
             <div className="p-4 bg-slate-50 dark:bg-[#121f26] rounded-xl border border-slate-200 dark:border-slate-800 divide-y divide-slate-200 dark:divide-slate-800">
               {[
-                [t('common.member', 'Member'), selectedRecord.member_name],
-                [t('collections.memberCode', 'Member code'), selectedRecord.member_code],
-                [t('collections.month', 'Month'), formatMonth(selectedRecord.payment_month)],
-                [t('collections.dueDate', 'Due date'), formatDate(selectedRecord.due_date)],
-                [t('collections.paidOn', 'Paid on'), formatDate(selectedRecord.payment_date)],
-                [t('collections.method', 'Method'), selectedRecord.payment_method || '—'],
-                [t('collections.trx', 'TRX ID'), selectedRecord.trx_id || '—'],
-                [t('collections.contribution', 'Contribution'), formatCurrency(selectedRecord.contribution_amount)],
-                [t('collections.lateFee', 'Late fee'), formatCurrency(selectedRecord.late_fee || 0)],
-                ...(selectedRecord.note ? [[t('common.note', 'Note'), selectedRecord.note]] : []),
+                [t('common.member', 'Member'), memberName(selectedRecord)],
+                [t('members.col_memberCode', 'Member code'), selectedRecord.member_code],
+                [t('members.col_month', 'Month'), formatMonth(selectedRecord.payment_month)],
+                [t('members.col_dueDate', 'Due date'), formatDate(selectedRecord.due_date)],
+                [t('members.col_paidOn', 'Paid on'), formatDate(selectedRecord.payment_date)],
+                [t('members.col_method', 'Payment method'), tv(selectedRecord.payment_method) || '—'],
+                [t('members.col_trx', 'Transaction ID'), selectedRecord.trx_id || '—'],
+                [t('members.col_contribution', 'Contribution'), formatCurrency(selectedRecord.contribution_amount)],
+                [t('members.late_fee', 'Late fee'), formatCurrency(selectedRecord.late_fee || 0)],
+                ...(selectedRecord.note ? [[t('members.note', 'Note'), selectedRecord.note]] : []),
               ].map(([k, v]) => (
                 <div key={String(k)} className="py-2 flex justify-between gap-3">
                   <span className="text-slate-500 dark:text-slate-400">{k}</span>
@@ -661,44 +698,56 @@ export const CollectionsView: React.FC = () => {
                 </div>
               ))}
               <div className="pt-2 flex justify-between items-center">
-                <span className="text-slate-700 dark:text-slate-300 font-bold">{t('collections.total', 'Total')}</span>
+                <span className="text-slate-700 dark:text-slate-300 font-bold">{t('members.col_total', 'Total')}</span>
                 <span className="text-base font-extrabold text-[#0f4a3c] dark:text-emerald-400">
                   {formatCurrency(selectedRecord.total_amount || selectedRecord.contribution_amount + (selectedRecord.late_fee || 0))}
                 </span>
               </div>
             </div>
-            <div className="pt-2 flex flex-wrap items-center justify-end gap-2">
-              <button
-                onClick={() => handleVoid(selectedRecord)}
-                disabled={busyId === selectedRecord.payment_id}
-                className="flex items-center gap-1.5 px-3.5 py-2 text-rose-700 dark:text-rose-300 bg-rose-50 dark:bg-rose-950/40 hover:bg-rose-100 dark:hover:bg-rose-900/40 rounded-xl font-bold disabled:opacity-40"
-              >
-                <Ban size={14} />
-                <span>{t('collections.voidPayment', 'Void payment')}</span>
-              </button>
-              <button
-                onClick={() => handleCopyVoucher(selectedRecord)}
-                className="px-3.5 py-2 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-200 rounded-xl font-bold"
-              >
-                {t('common.copy', 'Copy')}
-              </button>
-              <button
-                onClick={() => handleDownloadVoucher(selectedRecord)}
-                className="flex items-center gap-1.5 px-3.5 py-2 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-200 rounded-xl font-bold"
-              >
-                <Download size={14} />
-                <span>{t('common.download', 'Download')}</span>
-              </button>
-              <button
-                onClick={() => setSelectedRecord(null)}
-                className="px-4 py-2 bg-[#0f4a3c] hover:bg-[#145c4b] dark:bg-emerald-700 dark:hover:bg-emerald-600 text-white rounded-xl font-bold shadow-md"
-              >
-                {t('common.done', 'Done')}
-              </button>
-            </div>
           </div>
-        </div>
-      )}
+        )}
+      </Modal>
+
+      {/* Void confirmation */}
+      <Modal
+        open={!!confirmVoid}
+        onClose={() => busyId == null && setConfirmVoid(null)}
+        locked={busyId != null}
+        size="sm"
+        icon={<Ban size={18} />}
+        title={t('members.col_voidTitle', 'Void this payment?')}
+        footer={
+          <>
+            <button
+              type="button"
+              onClick={() => setConfirmVoid(null)}
+              disabled={busyId != null}
+              className="px-4 py-2 border border-slate-300 dark:border-slate-700 text-slate-700 dark:text-slate-300 rounded-xl hover:bg-slate-100 dark:hover:bg-slate-800 font-bold text-xs disabled:opacity-50"
+            >
+              {t('common.cancel', 'Cancel')}
+            </button>
+            <button
+              type="button"
+              onClick={handleVoid}
+              disabled={busyId != null}
+              className="flex items-center gap-1.5 px-4 py-2 bg-rose-600 hover:bg-rose-700 dark:bg-rose-700 dark:hover:bg-rose-600 text-white rounded-xl font-bold text-xs shadow-md disabled:opacity-50"
+            >
+              <Ban size={14} />
+              <span>{busyId != null ? t('members.col_voiding', 'Voiding…') : t('members.col_voidPayment', 'Void payment')}</span>
+            </button>
+          </>
+        }
+      >
+        {confirmVoid && (
+          <p className="text-xs text-slate-600 dark:text-slate-300 leading-relaxed">
+            {fill(t('members.col_voidConfirm', 'Void the {month} payment of {amount} by {name}? The due will become unpaid again.'), {
+              month: formatMonth(confirmVoid.payment_month),
+              amount: formatCurrency(confirmVoid.total_amount || 0),
+              name: memberName(confirmVoid),
+            })}
+          </p>
+        )}
+      </Modal>
     </div>
   );
 };

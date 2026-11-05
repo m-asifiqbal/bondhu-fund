@@ -45,7 +45,7 @@ export const MonthPicker: React.FC<MonthPickerProps> = ({
   className = '',
   align = 'right',
 }) => {
-  const { language, toBanglaDigits } = useApp();
+  const { language, toBanglaDigits, t } = useApp();
   const [isOpen, setIsOpen] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
 
@@ -126,11 +126,13 @@ export const MonthPicker: React.FC<MonthPickerProps> = ({
             ? 'border-emerald-600 dark:border-emerald-500 ring-2 ring-emerald-500/10 text-slate-900 dark:text-white'
             : 'border-slate-300 dark:border-[#283e4a] text-slate-700 dark:text-slate-200 hover:border-slate-400 dark:hover:border-slate-600'
         }`}
-        title="Select Month"
+        title={t('monthpicker.select', 'Select month')}
+        aria-label={t('monthpicker.select', 'Select month')}
+        aria-expanded={isOpen}
       >
         <Calendar size={14} className="text-[#0f4a3c] dark:text-emerald-400 shrink-0" />
         <span className="font-bold">{displayLabel()}</span>
-        <span className="text-[10px] text-slate-400">▾</span>
+        <span className="text-[10px] text-slate-400" aria-hidden>▾</span>
       </button>
 
       {/* Month Picker Calendar Grid Popover */}
@@ -146,7 +148,8 @@ export const MonthPicker: React.FC<MonthPickerProps> = ({
               type="button"
               onClick={() => setViewYear((y) => y - 1)}
               className="p-1.5 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-600 dark:text-slate-300 transition-colors"
-              title="Previous Year"
+              title={t('monthpicker.prev_year', 'Previous year')}
+              aria-label={t('monthpicker.prev_year', 'Previous year')}
             >
               <ChevronLeft size={16} />
             </button>
@@ -159,7 +162,8 @@ export const MonthPicker: React.FC<MonthPickerProps> = ({
               type="button"
               onClick={() => setViewYear((y) => y + 1)}
               className="p-1.5 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-600 dark:text-slate-300 transition-colors"
-              title="Next Year"
+              title={t('monthpicker.next_year', 'Next year')}
+              aria-label={t('monthpicker.next_year', 'Next year')}
             >
               <ChevronRight size={16} />
             </button>
@@ -184,7 +188,7 @@ export const MonthPicker: React.FC<MonthPickerProps> = ({
                   key={name}
                   type="button"
                   onClick={() => handleSelectMonth(idx)}
-                  className={`py-2 px-1 text-xs rounded-xl font-bold transition-all relative text-center ${
+                  className={`py-2 px-1 text-xs leading-snug rounded-xl font-bold transition-all relative text-center ${
                     isSelected
                       ? 'bg-slate-900 dark:bg-emerald-600 text-white shadow-md'
                       : isCurrentMonthNow
@@ -204,16 +208,16 @@ export const MonthPicker: React.FC<MonthPickerProps> = ({
           </div>
 
           {/* Quick jump to current month */}
-          <div className="pt-2 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between text-[11px]">
+          <div className="pt-2 border-t border-slate-100 dark:border-slate-800 flex flex-wrap items-center justify-between gap-2 text-[11px]">
             <span className="text-slate-400">
-              {language === 'bn' ? 'চলতি মাস নির্বাচন' : 'Jump to current'}
+              {t('monthpicker.jump', 'Jump to current')}
             </span>
             <button
               type="button"
               onClick={handleJumpToCurrent}
               className="px-2.5 py-1 text-emerald-700 dark:text-emerald-400 font-bold hover:underline"
             >
-              {language === 'bn' ? 'আজকের মাস' : 'This Month'}
+              {t('monthpicker.this_month', 'This month')}
             </button>
           </div>
         </div>

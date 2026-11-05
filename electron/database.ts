@@ -483,7 +483,7 @@ function duesForMonth(mk: string, today = todayISO()) {
   const due = dueDateOf(mk, dueDay());
   return {
     sql: `
-      SELECT m.id AS member_id, m.member_code, m.name AS member_name, m.phone AS member_phone,
+      SELECT m.id AS member_id, m.member_code, m.name AS member_name, m.name_bn AS member_name_bn, m.phone AS member_phone,
              m.monthly_due, m.avatar_initials,
              c.id AS payment_id, c.payment_date, COALESCE(c.contribution_amount,0) AS contribution_amount,
              COALESCE(c.late_fee,0) AS late_fee, COALESCE(c.total_amount,0) AS total_amount,
@@ -716,7 +716,7 @@ function getCollections(month?: string, statusTab = 'All', startDate?: string, e
   let src: { sql: string; params: any[] };
   if (month === 'All') {
     src = {
-      sql: `SELECT c.member_id, m.member_code, m.name AS member_name, m.phone AS member_phone, m.monthly_due, m.avatar_initials,
+      sql: `SELECT c.member_id, m.member_code, m.name AS member_name, m.name_bn AS member_name_bn, m.phone AS member_phone, m.monthly_due, m.avatar_initials,
                    c.id AS payment_id, c.payment_date, c.contribution_amount, c.late_fee, c.total_amount, c.payment_method,
                    c.trx_id, c.note, c.created_at, c.payment_month, NULL AS due_date, 'Paid' AS status
             FROM collections c JOIN members m ON m.id = c.member_id`,
@@ -1132,7 +1132,7 @@ function getOverviewData(month?: string) {
     if (!paidMonths.has(r.member_id)) paidMonths.set(r.member_id, new Set());
     paidMonths.get(r.member_id)!.add(r.payment_month);
   }
-  const arrears = all(`SELECT id, member_code, name, phone, monthly_due, join_date, avatar_initials FROM members WHERE status='Active'`)
+  const arrears = all(`SELECT id, member_code, name, name_bn, phone, monthly_due, join_date, avatar_initials FROM members WHERE status='Active'`)
     .map(m => {
       let months = 0;
       for (let k = String(m.join_date).slice(0, 7); k <= mk; k = addMonths(k, 1)) {
@@ -1179,11 +1179,11 @@ function getOverviewData(month?: string) {
     investments: all(`SELECT id, name, sector, invested_amount, current_estimated_value, status, review_date FROM investments WHERE status != 'Sold' ORDER BY current_estimated_value DESC`),
     paymentMethods: all(`SELECT payment_method AS name, COUNT(*) AS count, SUM(total_amount) AS value FROM collections
                          WHERE payment_date >= ? AND payment_date <= ? GROUP BY payment_method ORDER BY value DESC`, [from12, asOf]),
-    topContributors: all(`SELECT m.id, m.name, m.member_code, m.avatar_initials, m.opening_balance + COALESCE(SUM(c.contribution_amount),0) AS total
+    topContributors: all(`SELECT m.id, m.name, m.name_bn, m.member_code, m.avatar_initials, m.opening_balance + COALESCE(SUM(c.contribution_amount),0) AS total
                           FROM members m LEFT JOIN collections c ON c.member_id = m.id GROUP BY m.id ORDER BY total DESC LIMIT 8`),
     dailyCollections: all(`SELECT payment_date AS date, SUM(total_amount) AS value, COUNT(*) AS count FROM collections
                            WHERE payment_date >= ? GROUP BY payment_date`, [`${addMonths(mk, -5)}-01`]),
-    arrears: arrears.slice(0, 8),
+    arrears, // full list (Defaulters report); the dashboard shows the top rows
     attention: {
       overdue: ms.overdue,
       reviews: all(`SELECT id, name, review_date FROM investments WHERE status != 'Sold' AND (status='Review' OR (review_date IS NOT NULL AND review_date <= ?)) ORDER BY review_date`, [in30]),

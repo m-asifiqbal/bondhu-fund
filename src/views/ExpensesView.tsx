@@ -3,7 +3,6 @@ import {
   Plus,
   CheckCircle,
   AlertTriangle,
-  X,
   FileCheck,
   Search,
   ChevronLeft,
@@ -25,13 +24,14 @@ import {
   updateExpense,
   deleteExpense,
   verifyExpenseReceipt,
-  getMasterData,
   saveTextFile,
   toCsv,
 } from '../services/db';
-import { Expense, MasterCategory } from '../types';
+import { Expense } from '../types';
 import { MonthPicker } from '../components/common/MonthPicker';
 import { SearchableSelect, SelectOption } from '../components/common/SearchableSelect';
+import { DatePicker } from '../components/common/DatePicker';
+import { Modal } from '../components/common/Modal';
 import { todayISO, toMonthKey } from '../utils/date';
 
 const PALETTE = [
@@ -63,6 +63,15 @@ const emptyForm = (category = ''): FormState => ({
   notes: '',
 });
 
+function useDebounced<T>(value: T, ms = 250): T {
+  const [v, setV] = useState(value);
+  useEffect(() => {
+    const id = setTimeout(() => setV(value), ms);
+    return () => clearTimeout(id);
+  }, [value, ms]);
+  return v;
+}
+
 export const ExpensesView: React.FC = () => {
   const {
     showToast,
@@ -70,17 +79,18 @@ export const ExpensesView: React.FC = () => {
     triggerRefresh,
     selectedMonth,
     setSelectedMonth,
-    language,
     t,
+    tv,
     formatCurrency,
     formatDate,
     formatMonth,
     toBanglaDigits,
+    language,
     setActiveTab,
+    masterData,
   } = useApp();
 
   const [expenses, setExpenses] = useState<Expense[]>([]);
-  const [categories, setCategories] = useState<MasterCategory[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [busyId, setBusyId] = useState<number | null>(null);
@@ -94,8 +104,12 @@ export const ExpensesView: React.FC = () => {
   const [verifyExpense, setVerifyExpense] = useState<Expense | null>(null);
   const [receiptVoucher, setReceiptVoucher] = useState('');
 
+  // Delete confirmation
+  const [confirmDelete, setConfirmDelete] = useState<Expense | null>(null);
+
   // Filters
-  const [searchQuery, setSearchQuery] = useState('');
+  const [searchInput, setSearchInput] = useState('');
+  const searchQuery = useDebounced(searchInput.trim(), 250);
   const [categoryFilter, setCategoryFilter] = useState('All');
   const [statusFilter, setStatusFilter] = useState('All');
   const [startDate, setStartDate] = useState('');
@@ -106,13 +120,9 @@ export const ExpensesView: React.FC = () => {
 
   const n = (v: number | string) => (language === 'bn' ? toBanglaDigits(v) : String(v));
   const monthKey = toMonthKey(selectedMonth);
+  const today = todayISO();
 
-  useEffect(() => {
-    getMasterData('expense_category')
-      .then(setCategories)
-      .catch((e: any) => showToast(e.message, 'error'));
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [refreshKey]);
+  const categories = useMemo(() => masterData.filter(m => m.type === 'expense_category'), [masterData]);
 
   useEffect(() => {
     let alive = true;
@@ -163,17 +173,42 @@ export const ExpensesView: React.FC = () => {
   const startIdx = expenses.length === 0 ? 0 : (safePage - 1) * limit + 1;
   const endIdx = Math.min(safePage * limit, expenses.length);
 
-  const hasFilters = !!(searchQuery || categoryFilter !== 'All' || statusFilter !== 'All' || startDate || endDate || sortBy !== 'newest');
+  const hasFilters = !!(searchInput || categoryFilter !== 'All' || statusFilter !== 'All' || startDate || endDate || sortBy !== 'newest');
 
-  const activeCategoryOptions: SelectOption[] = categories.filter(c => c.is_active).map(c => ({ value: c.name, label: c.name }));
-  const filterCategoryOptions: SelectOption[] = [
-    { value: 'All', label: t('expenses.allCategories', 'All categories') },
-    ...categories.map(c => ({ value: c.name, label: c.is_active ? c.name : `${c.name} (${t('common.inactive', 'inactive')})` })),
-  ];
+  const activeCategoryOptions = useMemo<SelectOption[]>(
+    () => categories.filter(c => c.is_active).map(c => ({ value: c.name, label: tv(c.name) })),
+    [categories, tv]
+  );
+  const filterCategoryOptions = useMemo<SelectOption[]>(
+    () => [
+      { value: 'All', label: t('finance.exp_all_categories', 'All categories') },
+      ...categories.map(c => ({ value: c.name, label: c.is_active ? tv(c.name) : `${tv(c.name)} (${t('status.inactive', 'Inactive')})` })),
+    ],
+    [categories, t, tv]
+  );
+  const statusOptions = useMemo<SelectOption[]>(
+    () => [
+      { value: 'All', label: t('finance.all_statuses', 'All statuses') },
+      { value: 'Verified', label: tv('Verified') },
+      { value: 'Needs receipt', label: tv('Needs receipt') },
+    ],
+    [t, tv]
+  );
+  const sortOptions = useMemo<SelectOption[]>(
+    () => [
+      { value: 'newest', label: t('finance.sort_newest', 'Newest first') },
+      { value: 'oldest', label: t('finance.sort_oldest', 'Oldest first') },
+      { value: 'amount_high', label: t('finance.sort_amount_high', 'Amount: high to low') },
+      { value: 'amount_low', label: t('finance.sort_amount_low', 'Amount: low to high') },
+      { value: 'title_asc', label: t('finance.sort_title_asc', 'Title: A to Z') },
+      { value: 'category', label: t('finance.exp_category', 'Category') },
+    ],
+    [t]
+  );
 
   const formCategoryOptions: SelectOption[] =
     editing && form.category && !activeCategoryOptions.some(o => o.value === form.category)
-      ? [{ value: form.category, label: form.category }, ...activeCategoryOptions]
+      ? [{ value: form.category, label: tv(form.category) }, ...activeCategoryOptions]
       : activeCategoryOptions;
 
   const openAdd = () => {
@@ -196,9 +231,14 @@ export const ExpensesView: React.FC = () => {
     setFormOpen(true);
   };
 
+  const closeForm = () => {
+    if (saving) return;
+    setFormOpen(false);
+  };
+
   const handleExport = async () => {
     if (expenses.length === 0) {
-      showToast(t('expenses.nothingToExport', 'There are no expenses to export.'), 'info');
+      showToast(t('finance.exp_nothing_to_export', 'There are no expenses to export.'), 'info');
       return;
     }
     try {
@@ -207,15 +247,19 @@ export const ExpensesView: React.FC = () => {
         expenses.map(e => [e.expense_date, e.title, e.category, e.payee, e.amount, e.receipt_ref, e.status, e.notes || ''])
       );
       const res = await saveTextFile(`Bondhu_Fund_Expenses_${todayISO()}.csv`, csv, [{ name: 'CSV', extensions: ['csv'] }]);
-      if (!res.canceled) showToast(t('common.exported', 'Export saved.'));
+      if (!res.canceled) showToast(t('finance.export_saved', 'Export saved.'));
     } catch (e: any) {
       showToast(e.message, 'error');
     }
   };
 
-  const handleFormSubmit = async (ev: React.FormEvent) => {
-    ev.preventDefault();
+  const handleFormSubmit = async (ev?: React.FormEvent) => {
+    ev?.preventDefault();
     if (saving) return;
+    if (!form.title.trim() || !form.category || !form.amount || !form.expense_date) {
+      showToast(t('finance.fill_required', 'Please fill in all required fields.'), 'error');
+      return;
+    }
     const payload: Partial<Expense> = {
       title: form.title.trim(),
       category: form.category,
@@ -229,10 +273,10 @@ export const ExpensesView: React.FC = () => {
     try {
       if (editing) {
         await updateExpense(editing.id, { ...payload, status: payload.receipt_ref ? 'Verified' : 'Needs receipt' });
-        showToast(t('expenses.updated', `Expense "${payload.title}" updated.`));
+        showToast(t('finance.exp_updated', 'Expense "{title}" updated.').replace('{title}', payload.title || ''));
       } else {
         await addExpense(payload);
-        showToast(t('expenses.added', `Expense "${payload.title}" recorded.`));
+        showToast(t('finance.exp_added', 'Expense "{title}" recorded.').replace('{title}', payload.title || ''));
       }
       setFormOpen(false);
       setEditing(null);
@@ -244,13 +288,13 @@ export const ExpensesView: React.FC = () => {
     }
   };
 
-  const handleVerifySubmit = async (ev: React.FormEvent) => {
-    ev.preventDefault();
-    if (!verifyExpense || saving) return;
+  const handleVerifySubmit = async (ev?: React.FormEvent) => {
+    ev?.preventDefault();
+    if (!verifyExpense || saving || !receiptVoucher.trim()) return;
     setSaving(true);
     try {
       await verifyExpenseReceipt(verifyExpense.id, receiptVoucher);
-      showToast(t('expenses.verified', 'Receipt verified.'));
+      showToast(t('finance.exp_verified', 'Receipt verified.'));
       setVerifyExpense(null);
       setReceiptVoucher('');
       triggerRefresh();
@@ -261,18 +305,29 @@ export const ExpensesView: React.FC = () => {
     }
   };
 
-  const handleDelete = async (e: Expense) => {
-    if (!window.confirm(t('expenses.deleteConfirm', `Delete expense "${e.title}" (${formatCurrency(e.amount)})? This cannot be undone.`))) return;
+  const handleDelete = async () => {
+    const e = confirmDelete;
+    if (!e) return;
     setBusyId(e.id);
     try {
       await deleteExpense(e.id);
-      showToast(t('expenses.deleted', 'Expense deleted.'));
+      showToast(t('finance.exp_deleted', 'Expense deleted.'));
+      setConfirmDelete(null);
       triggerRefresh();
     } catch (err: any) {
       showToast(err.message, 'error');
     } finally {
       setBusyId(null);
     }
+  };
+
+  const resetFilters = () => {
+    setSearchInput('');
+    setCategoryFilter('All');
+    setStatusFilter('All');
+    setStartDate('');
+    setEndDate('');
+    setSortBy('newest');
   };
 
   const kpi = (accent: string, label: string, icon: React.ReactNode, iconCls: string, value: string, valueCls: string, sub: string) => (
@@ -282,8 +337,8 @@ export const ExpensesView: React.FC = () => {
         <div className={`w-8 h-8 rounded-xl flex items-center justify-center shrink-0 ${iconCls}`}>{icon}</div>
       </div>
       <div className="mt-4 min-w-0">
-        <div className={`text-2xl font-black tracking-tight truncate ${valueCls}`}>{value}</div>
-        <div className="text-[11px] text-slate-500 dark:text-slate-400 font-medium mt-1 truncate">{sub}</div>
+        <div className={`text-2xl font-black tracking-tight truncate ${valueCls}`} title={value}>{value}</div>
+        <div className="text-[11px] text-slate-500 dark:text-slate-400 font-medium mt-1 truncate" title={sub}>{sub}</div>
       </div>
     </div>
   );
@@ -292,6 +347,7 @@ export const ExpensesView: React.FC = () => {
     setForm(f => ({ ...f, [k]: e.target.value }));
 
   const isFreshEmpty = !loading && expenses.length === 0 && !hasFilters;
+  const recordsLabel = t('finance.records', 'records');
 
   return (
     <div className="p-6 lg:p-8 space-y-6 max-w-7xl mx-auto">
@@ -299,12 +355,10 @@ export const ExpensesView: React.FC = () => {
       <div className="flex flex-wrap items-center justify-between gap-4">
         <div>
           <h1 className="text-2xl font-black text-slate-900 dark:text-white tracking-tight">
-            {language === 'bn' ? 'পরিচালনা ব্যয় ও খরচের হিসাব' : 'Operating expenses'}
+            {t('finance.exp_title', 'Operating expenses')}
           </h1>
           <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
-            {language === 'bn'
-              ? 'বন্ধু ফান্ডের দাপ্তরিক খরচ, মিটিং ব্যয় ও অডিট রশিদের হিসাব।'
-              : 'Track operational costs, meeting disbursements, and audit receipts.'}
+            {t('finance.exp_subtitle', 'Track operational costs, meeting disbursements, and audit receipts.')}
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-3">
@@ -314,14 +368,14 @@ export const ExpensesView: React.FC = () => {
             className="flex items-center gap-1.5 px-3.5 py-2 bg-white dark:bg-[#16252d] border border-slate-300 dark:border-[#283e4a] rounded-xl text-xs font-bold text-slate-700 dark:text-slate-200 shadow-sm hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors"
           >
             <Download size={14} className="text-slate-500" />
-            <span>{t('common.export')}</span>
+            <span>{t('common.export_csv', 'Export CSV')}</span>
           </button>
           <button
             onClick={openAdd}
             className="flex items-center gap-1.5 px-4 py-2 bg-[#0f4a3c] hover:bg-[#145c4b] dark:bg-emerald-700 dark:hover:bg-emerald-600 text-white rounded-xl text-xs font-bold shadow-md transition-all"
           >
             <Plus size={15} strokeWidth={2.5} />
-            <span>{t('expenses.record', 'Record expense')}</span>
+            <span>{t('finance.exp_record', 'Record expense')}</span>
           </button>
         </div>
       </div>
@@ -330,41 +384,41 @@ export const ExpensesView: React.FC = () => {
       <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
         {kpi(
           'border-l-purple-500',
-          hasFilters ? t('expenses.totalFiltered', 'Total (filtered)') : t('expenses.totalAll', 'Total expenses'),
+          hasFilters ? t('finance.exp_total_filtered', 'Total (filtered)') : t('finance.exp_total_all', 'Total expenses'),
           <Wallet size={16} />,
           'bg-purple-50 dark:bg-purple-950/60 text-purple-600 dark:text-purple-400',
           formatCurrency(totalExpense),
           'text-slate-900 dark:text-white',
-          `${n(expenses.length)} ${t('expenses.records', 'records')}`
+          `${n(expenses.length)} ${recordsLabel}`
         )}
         {kpi(
           'border-l-blue-500',
-          `${t('expenses.inMonth', 'In')} ${formatMonth(selectedMonth)}`,
+          t('finance.exp_in_month', 'In {month}').replace('{month}', formatMonth(selectedMonth)),
           <CalendarDays size={16} />,
           'bg-blue-50 dark:bg-blue-950/60 text-blue-600 dark:text-blue-400',
           formatCurrency(monthTotal),
           'text-slate-900 dark:text-white',
-          `${n(monthList.length)} ${t('expenses.records', 'records')}`
+          `${n(monthList.length)} ${recordsLabel}`
         )}
         {kpi(
           'border-l-amber-500',
-          t('expenses.needsReceipt', 'Needs receipt'),
+          tv('Needs receipt'),
           <Clock size={16} />,
           'bg-amber-50 dark:bg-amber-950/60 text-amber-600 dark:text-amber-400',
           n(needsReceipt.length),
           'text-amber-600 dark:text-amber-400',
-          `${formatCurrency(needsReceiptAmount)} ${t('expenses.unverified', 'unverified')}`
+          `${formatCurrency(needsReceiptAmount)} ${t('finance.exp_unverified', 'unverified')}`
         )}
         {kpi(
           'border-l-emerald-500',
-          t('expenses.topCategory', 'Top category'),
+          t('finance.exp_top_category', 'Top category'),
           <Tag size={16} />,
           'bg-emerald-50 dark:bg-emerald-950/60 text-emerald-600 dark:text-emerald-400',
-          topCategory ? topCategory.name : '—',
+          topCategory ? tv(topCategory.name) : '—',
           'text-slate-900 dark:text-white text-lg',
           topCategory
             ? `${formatCurrency(topCategory.amount)} · ${n(totalExpense > 0 ? Math.round((topCategory.amount / totalExpense) * 100) : 0)}%`
-            : t('expenses.noData', 'No expenses yet')
+            : t('finance.exp_no_data', 'No expenses yet')
         )}
       </div>
 
@@ -373,8 +427,8 @@ export const ExpensesView: React.FC = () => {
         <div className="card-base p-5 lg:p-6">
           <div className="flex flex-wrap items-center justify-between gap-2 mb-4">
             <div>
-              <h3 className="text-sm font-bold text-slate-900 dark:text-white">{t('expenses.byCategory', 'Expenses by category')}</h3>
-              <p className="text-[11px] text-slate-400 mt-0.5">{t('expenses.byCategoryHint', 'Click a category to filter the ledger')}</p>
+              <h3 className="text-sm font-bold text-slate-900 dark:text-white">{t('finance.exp_by_category', 'Expenses by category')}</h3>
+              <p className="text-[11px] text-slate-400 mt-0.5">{t('finance.exp_by_category_hint', 'Click a category to filter the ledger')}</p>
             </div>
             {categoryFilter !== 'All' && (
               <button
@@ -382,7 +436,7 @@ export const ExpensesView: React.FC = () => {
                 className="text-xs font-bold text-rose-600 dark:text-rose-400 hover:underline flex items-center gap-1"
               >
                 <RotateCcw size={12} />
-                <span>{t('expenses.clearCategory', 'Clear category')} ({categoryFilter})</span>
+                <span>{t('finance.exp_clear_category', 'Clear category')} ({tv(categoryFilter)})</span>
               </button>
             )}
           </div>
@@ -395,6 +449,7 @@ export const ExpensesView: React.FC = () => {
                 <button
                   key={cat.name}
                   onClick={() => setCategoryFilter(isSelected ? 'All' : cat.name)}
+                  title={tv(cat.name)}
                   className={`p-3 rounded-2xl border text-left transition-all min-w-0 ${
                     isSelected
                       ? 'border-slate-900 dark:border-white shadow-md ring-2 ring-slate-900/10 dark:ring-white/10 bg-slate-50 dark:bg-slate-800'
@@ -407,7 +462,7 @@ export const ExpensesView: React.FC = () => {
                     </div>
                     <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-md ${st.badgeBg}`}>{n(share)}%</span>
                   </div>
-                  <div className="text-[11px] font-medium text-slate-500 dark:text-slate-400 truncate">{cat.name}</div>
+                  <div className="text-[11px] font-medium text-slate-500 dark:text-slate-400 truncate">{tv(cat.name)}</div>
                   <div className="text-sm font-black text-slate-900 dark:text-white mt-1 truncate">{formatCurrency(cat.amount)}</div>
                 </button>
               );
@@ -420,85 +475,89 @@ export const ExpensesView: React.FC = () => {
       <div className="card-base overflow-hidden flex flex-col shadow-sm">
         <div className="p-5 pb-3 border-b border-slate-200 dark:border-slate-800 flex flex-wrap items-center justify-between gap-3">
           <div>
-            <h3 className="text-sm font-bold text-slate-900 dark:text-white">
-              {language === 'bn' ? 'পরিচালনা ব্যয়ের লেজার' : 'Expenses ledger'}
-            </h3>
-            <p className="text-[11px] text-slate-400 mt-0.5">{t('expenses.ledgerSub', 'Filter by search, category, status or date.')}</p>
+            <h3 className="text-sm font-bold text-slate-900 dark:text-white">{t('finance.exp_ledger', 'Expenses ledger')}</h3>
+            <p className="text-[11px] text-slate-400 mt-0.5">{t('finance.exp_ledger_sub', 'Filter by search, category, status or date.')}</p>
           </div>
           <div className="text-xs font-bold text-slate-700 dark:text-slate-300">
-            {t('expenses.totalMatching', 'Total matching')}:{' '}
+            {t('finance.total_matching', 'Total matching')}:{' '}
             <span className="text-rose-600 dark:text-rose-400 font-black">{formatCurrency(totalExpense)}</span>
           </div>
         </div>
 
-        <div className="p-3 bg-slate-50 dark:bg-[#121f26] border-b border-slate-200 dark:border-slate-800 flex flex-wrap items-center gap-2.5 text-xs">
-          <div className="relative flex-1 min-w-[180px]">
+        <div className="p-4 bg-slate-50 dark:bg-[#121f26] border-b border-slate-200 dark:border-slate-800 flex flex-wrap items-center gap-3 text-xs">
+          <div className="relative flex-1 min-w-[220px]">
             <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
             <input
               type="text"
-              placeholder={t('expenses.searchPh', 'Search title, payee, receipt ref...')}
-              value={searchQuery}
-              onChange={e => setSearchQuery(e.target.value)}
+              placeholder={t('finance.exp_search_ph', 'Search title, payee, receipt ref…')}
+              aria-label={t('common.search', 'Search')}
+              value={searchInput}
+              onChange={e => setSearchInput(e.target.value)}
               className="form-input pl-8 py-1.5 text-xs"
             />
           </div>
-          <div className="w-44">
+          <div className="min-w-[180px] flex-1 sm:flex-none sm:w-48">
             <SearchableSelect
+              size="sm"
               options={filterCategoryOptions}
               value={categoryFilter}
-              onChange={val => setCategoryFilter(String(val))}
-              placeholder={t('expenses.category', 'Category')}
+              onChange={val => setCategoryFilter(val == null || val === '' ? 'All' : String(val))}
+              clearable={categoryFilter !== 'All'}
+              placeholder={t('finance.exp_category', 'Category')}
             />
           </div>
-          <div className="w-36">
-            <select value={statusFilter} onChange={e => setStatusFilter(e.target.value)} className="form-select py-1.5 text-xs">
-              <option value="All">{t('common.allStatus', 'All status')}</option>
-              <option value="Verified">{t('expenses.statusVerified', 'Verified')}</option>
-              <option value="Needs receipt">{t('expenses.needsReceipt', 'Needs receipt')}</option>
-            </select>
+          <div className="min-w-[160px] flex-1 sm:flex-none sm:w-44">
+            <SearchableSelect
+              size="sm"
+              options={statusOptions}
+              value={statusFilter}
+              onChange={val => setStatusFilter(val == null || val === '' ? 'All' : String(val))}
+              clearable={statusFilter !== 'All'}
+              placeholder={t('common.status', 'Status')}
+            />
           </div>
-          <div className="w-40">
-            <select value={sortBy} onChange={e => setSortBy(e.target.value)} className="form-select py-1.5 text-xs">
-              <option value="newest">{t('sort.newest', 'Sort: Newest first')}</option>
-              <option value="oldest">{t('sort.oldest', 'Sort: Oldest first')}</option>
-              <option value="amount_high">{t('sort.amountHigh', 'Amount: High to low')}</option>
-              <option value="amount_low">{t('sort.amountLow', 'Amount: Low to high')}</option>
-              <option value="title_asc">{t('sort.titleAsc', 'Title: A to Z')}</option>
-              <option value="category">{t('sort.category', 'Category')}</option>
-            </select>
+          <div className="min-w-[180px] flex-1 sm:flex-none sm:w-52">
+            <SearchableSelect
+              size="sm"
+              options={sortOptions}
+              value={sortBy}
+              onChange={val => setSortBy(val == null || val === '' ? 'newest' : String(val))}
+              placeholder={t('common.sort', 'Sort')}
+            />
           </div>
           <div className="flex flex-wrap items-center gap-2">
-            <span className="text-slate-600 dark:text-slate-400 font-bold text-[11px]">{t('common.from', 'From')}:</span>
-            <input
-              type="date"
-              value={startDate}
-              onChange={e => setStartDate(e.target.value)}
-              className="px-2 py-1.5 bg-white dark:bg-[#101b21] border border-slate-300 dark:border-[#283d47] rounded-xl text-xs text-slate-800 dark:text-slate-100 font-medium focus:outline-none focus:ring-2 focus:ring-[#0f4a3c]"
-            />
-            <span className="text-slate-600 dark:text-slate-400 font-bold text-[11px]">{t('common.to', 'To')}:</span>
-            <input
-              type="date"
-              value={endDate}
-              onChange={e => setEndDate(e.target.value)}
-              className="px-2 py-1.5 bg-white dark:bg-[#101b21] border border-slate-300 dark:border-[#283d47] rounded-xl text-xs text-slate-800 dark:text-slate-100 font-medium focus:outline-none focus:ring-2 focus:ring-[#0f4a3c]"
-            />
+            <span className="text-slate-600 dark:text-slate-400 font-bold text-[11px]">{t('common.from', 'From')}</span>
+            <div className="min-w-[150px]">
+              <DatePicker
+                size="sm"
+                clearable
+                value={startDate}
+                onChange={setStartDate}
+                max={endDate || today}
+                placeholder={t('finance.start_date', 'Start date')}
+              />
+            </div>
+            <span className="text-slate-600 dark:text-slate-400 font-bold text-[11px]">{t('common.to', 'To')}</span>
+            <div className="min-w-[150px]">
+              <DatePicker
+                size="sm"
+                clearable
+                value={endDate}
+                onChange={setEndDate}
+                min={startDate || undefined}
+                placeholder={t('finance.end_date', 'End date')}
+              />
+            </div>
           </div>
           {hasFilters && (
             <button
               type="button"
-              onClick={() => {
-                setSearchQuery('');
-                setCategoryFilter('All');
-                setStatusFilter('All');
-                setStartDate('');
-                setEndDate('');
-                setSortBy('newest');
-              }}
+              onClick={resetFilters}
               className="flex items-center gap-1 px-2.5 py-1.5 bg-white dark:bg-[#182830] text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700 rounded-xl font-bold transition-colors"
-              title={t('common.reset', 'Reset')}
+              title={t('finance.reset_filters', 'Reset filters')}
             >
               <RotateCcw size={12} />
-              <span>{t('common.reset', 'Reset')}</span>
+              <span>{t('finance.reset', 'Reset')}</span>
             </button>
           )}
         </div>
@@ -509,16 +568,16 @@ export const ExpensesView: React.FC = () => {
               <Receipt size={22} />
             </div>
             <div>
-              <p className="text-sm font-bold text-slate-800 dark:text-slate-200">{t('expenses.emptyTitle', 'No expenses recorded yet')}</p>
+              <p className="text-sm font-bold text-slate-800 dark:text-slate-200">{t('finance.exp_empty_title', 'No expenses recorded yet')}</p>
               <p className="text-xs text-slate-500 dark:text-slate-400 mt-1 max-w-sm">
-                {t('expenses.emptyBody', 'Record meeting costs, office supplies, bank charges and other fund spending here.')}
+                {t('finance.exp_empty_body', 'Record meeting costs, office supplies, bank charges and other fund spending here.')}
               </p>
             </div>
             <button
               onClick={openAdd}
               className="px-4 py-2 bg-[#0f4a3c] hover:bg-[#145c4b] dark:bg-emerald-700 dark:hover:bg-emerald-600 text-white rounded-xl text-xs font-bold shadow-md"
             >
-              {t('expenses.record', 'Record expense')}
+              {t('finance.exp_record', 'Record expense')}
             </button>
           </div>
         ) : (
@@ -527,24 +586,24 @@ export const ExpensesView: React.FC = () => {
               <table className="w-full min-w-[880px] text-left text-xs text-slate-800 dark:text-slate-200">
                 <thead className="bg-slate-50 dark:bg-[#111e24] border-b border-slate-200 dark:border-slate-800 text-slate-500 dark:text-slate-400 font-bold uppercase tracking-wider text-[10px]">
                   <tr>
-                    <th className="py-3 px-4">{t('common.date')}</th>
-                    <th className="py-3 px-4">{t('expenses.expensePayee', 'Expense & payee')}</th>
-                    <th className="py-3 px-4">{t('expenses.category', 'Category')}</th>
-                    <th className="py-3 px-4">{t('expenses.receiptRef', 'Receipt ref')}</th>
-                    <th className="py-3 px-4 text-right">{t('common.amount')}</th>
-                    <th className="py-3 px-4 text-center">{t('common.status')}</th>
-                    <th className="py-3 px-4 text-right">{t('common.action')}</th>
+                    <th className="py-3 px-4">{t('common.date', 'Date')}</th>
+                    <th className="py-3 px-4">{t('finance.exp_expense_payee', 'Expense & payee')}</th>
+                    <th className="py-3 px-4">{t('finance.exp_category', 'Category')}</th>
+                    <th className="py-3 px-4">{t('finance.exp_receipt_ref', 'Receipt ref')}</th>
+                    <th className="py-3 px-4 text-right">{t('common.amount', 'Amount')}</th>
+                    <th className="py-3 px-4 text-center">{t('common.status', 'Status')}</th>
+                    <th className="py-3 px-4 text-right">{t('common.actions', 'Actions')}</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100 dark:divide-slate-800/80 font-medium">
                   {loading && expenses.length === 0 ? (
                     <tr>
-                      <td colSpan={7} className="py-8 text-center text-slate-400">{t('common.loading', 'Loading...')}</td>
+                      <td colSpan={7} className="py-8 text-center text-slate-400">{t('common.loading', 'Loading…')}</td>
                     </tr>
                   ) : displayedExpenses.length === 0 ? (
                     <tr>
                       <td colSpan={7} className="py-8 text-center text-slate-400">
-                        {t('expenses.noMatch', 'No expenses match your filters.')}
+                        {t('finance.exp_no_match', 'No expenses match your filters.')}
                       </td>
                     </tr>
                   ) : (
@@ -562,14 +621,14 @@ export const ExpensesView: React.FC = () => {
                                 <div className="font-bold text-slate-900 dark:text-white leading-snug">{e.title}</div>
                                 {e.payee && (
                                   <div className="text-[10px] text-slate-400 font-normal">
-                                    {t('expenses.payee', 'Payee')}: {e.payee}
+                                    {t('finance.exp_payee', 'Payee')}: {e.payee}
                                   </div>
                                 )}
                               </div>
                             </div>
                           </td>
                           <td className="py-3 px-4">
-                            <span className={`px-2 py-0.5 rounded-md text-[10px] font-semibold ${st.badgeBg}`}>{e.category}</span>
+                            <span className={`px-2 py-0.5 rounded-md text-[10px] font-semibold ${st.badgeBg}`}>{tv(e.category)}</span>
                           </td>
                           <td className="py-3 px-4 font-mono font-bold text-slate-600 dark:text-slate-400 text-[11px]">{e.receipt_ref || '—'}</td>
                           <td className="py-3 px-4 text-right font-black text-rose-600 dark:text-rose-400 whitespace-nowrap">{formatCurrency(e.amount)}</td>
@@ -577,12 +636,12 @@ export const ExpensesView: React.FC = () => {
                             {e.status === 'Verified' ? (
                               <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 dark:bg-emerald-950 text-emerald-800 dark:text-emerald-300">
                                 <CheckCircle size={10} />
-                                <span>{t('expenses.statusVerified', 'Verified')}</span>
+                                <span>{tv('Verified')}</span>
                               </span>
                             ) : (
                               <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-amber-100 dark:bg-amber-950 text-amber-800 dark:text-amber-300">
                                 <AlertTriangle size={10} />
-                                <span>{t('expenses.needsReceipt', 'Needs receipt')}</span>
+                                <span>{tv('Needs receipt')}</span>
                               </span>
                             )}
                           </td>
@@ -597,21 +656,23 @@ export const ExpensesView: React.FC = () => {
                                   className="inline-flex items-center gap-1 px-2.5 py-1 bg-emerald-50 dark:bg-emerald-950 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800 rounded-lg text-[11px] font-bold hover:bg-emerald-100 dark:hover:bg-emerald-900 transition-colors"
                                 >
                                   <FileCheck size={12} />
-                                  <span>{t('expenses.verify', 'Verify')}</span>
+                                  <span>{t('finance.exp_verify', 'Verify')}</span>
                                 </button>
                               )}
                               <button
                                 onClick={() => openEdit(e)}
                                 className="p-1.5 text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800"
                                 title={t('common.edit', 'Edit')}
+                                aria-label={t('common.edit', 'Edit')}
                               >
                                 <Pencil size={14} />
                               </button>
                               <button
-                                onClick={() => handleDelete(e)}
+                                onClick={() => setConfirmDelete(e)}
                                 disabled={busyId === e.id}
                                 className="p-1.5 text-slate-400 hover:text-rose-600 dark:hover:text-rose-400 rounded-lg hover:bg-rose-50 dark:hover:bg-rose-950/40 disabled:opacity-40 disabled:cursor-not-allowed"
                                 title={t('common.delete', 'Delete')}
+                                aria-label={t('common.delete', 'Delete')}
                               >
                                 <Trash2 size={14} />
                               </button>
@@ -627,12 +688,17 @@ export const ExpensesView: React.FC = () => {
 
             <div className="p-3 border-t border-slate-200 dark:border-slate-800 flex flex-wrap items-center justify-between gap-2 text-xs text-slate-500 dark:text-slate-400 bg-slate-50/50 dark:bg-[#132026]/50">
               <span className="font-medium text-[11px]">
-                {t('common.showing', 'Showing')} {n(startIdx)}-{n(endIdx)} {t('common.of', 'of')} {n(expenses.length)}
+                {t('finance.showing_range', 'Showing {from}–{to} of {total}')
+                  .replace('{from}', n(startIdx))
+                  .replace('{to}', n(endIdx))
+                  .replace('{total}', n(expenses.length))}
               </span>
               <div className="flex items-center gap-2">
                 <button
                   onClick={() => setPage(p => Math.max(1, p - 1))}
                   disabled={safePage <= 1}
+                  title={t('finance.prev_page', 'Previous page')}
+                  aria-label={t('finance.prev_page', 'Previous page')}
                   className="px-2.5 py-1 rounded-lg border border-slate-200 dark:border-slate-700 disabled:opacity-40 font-bold"
                 >
                   <ChevronLeft size={12} />
@@ -643,6 +709,8 @@ export const ExpensesView: React.FC = () => {
                 <button
                   onClick={() => setPage(p => Math.min(totalPages, p + 1))}
                   disabled={safePage >= totalPages}
+                  title={t('finance.next_page', 'Next page')}
+                  aria-label={t('finance.next_page', 'Next page')}
                   className="px-2.5 py-1 rounded-lg border border-slate-200 dark:border-slate-700 disabled:opacity-40 font-bold"
                 >
                   <ChevronRight size={12} />
@@ -654,149 +722,201 @@ export const ExpensesView: React.FC = () => {
       </div>
 
       {/* Add / Edit modal */}
-      {formOpen && (
-        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="card-base w-full max-w-lg p-6 text-xs space-y-4 shadow-2xl max-h-[90vh] overflow-y-auto">
-            <div className="flex items-center justify-between pb-2 border-b border-slate-200 dark:border-slate-800">
-              <h3 className="text-sm font-bold text-slate-900 dark:text-white">
-                {editing ? t('expenses.editTitle', 'Edit expense') : t('expenses.addTitle', 'Record expense')}
-              </h3>
-              <button onClick={() => setFormOpen(false)} className="text-slate-400 hover:text-slate-700 dark:hover:text-white">
-                <X size={16} />
-              </button>
-            </div>
-
-            <form onSubmit={handleFormSubmit} className="space-y-3">
-              <div>
-                <label className="form-label">{t('expenses.title', 'Title')} *</label>
-                <input type="text" value={form.title} onChange={set('title')} className="form-input" required />
-              </div>
-
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <div>
-                  {formCategoryOptions.length > 0 ? (
-                    <SearchableSelect
-                      label={t('expenses.category', 'Category')}
-                      required
-                      options={formCategoryOptions}
-                      value={form.category}
-                      onChange={val => setForm(f => ({ ...f, category: String(val) }))}
-                      placeholder={t('expenses.selectCategory', 'Select category...')}
-                    />
-                  ) : (
-                    <>
-                      <label className="form-label">{t('expenses.category', 'Category')} *</label>
-                      <p className="form-hint">
-                        {t('expenses.noCategories', 'No expense categories yet.')}{' '}
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setFormOpen(false);
-                            setActiveTab('master');
-                          }}
-                          className="font-bold text-[#0f4a3c] dark:text-emerald-400 hover:underline"
-                        >
-                          {t('expenses.addCategories', 'Add them in Master data')}
-                        </button>
-                      </p>
-                    </>
-                  )}
-                </div>
-                <div>
-                  <label className="form-label">{t('common.amount', 'Amount')} *</label>
-                  <input type="number" min="0" step="any" value={form.amount} onChange={set('amount')} className="form-input font-bold" required />
-                </div>
-              </div>
-
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <div>
-                  <label className="form-label">{t('expenses.date', 'Expense date')} *</label>
-                  <input type="date" max={todayISO()} value={form.expense_date} onChange={set('expense_date')} className="form-input" required />
-                </div>
-                <div>
-                  <label className="form-label">{t('expenses.payeeVendor', 'Payee / vendor')}</label>
-                  <input type="text" value={form.payee} onChange={set('payee')} className="form-input" />
-                </div>
-              </div>
-
-              <div>
-                <label className="form-label">{t('expenses.receiptRefOpt', 'Receipt / voucher ref (optional)')}</label>
-                <input type="text" value={form.receipt_ref} onChange={set('receipt_ref')} className="form-input font-mono" />
-                <p className="form-hint">{t('expenses.receiptHint', 'Leave blank to flag as "Needs receipt" for later verification.')}</p>
-              </div>
-
-              <div>
-                <label className="form-label">{t('common.notes', 'Notes')}</label>
-                <textarea rows={2} value={form.notes} onChange={set('notes')} className="form-input" />
-              </div>
-
-              <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-200 dark:border-slate-800">
-                <button
-                  type="button"
-                  onClick={() => setFormOpen(false)}
-                  className="px-4 py-2 border border-slate-300 dark:border-slate-700 text-slate-700 dark:text-slate-300 rounded-xl font-bold"
-                >
-                  {t('common.cancel')}
-                </button>
-                <button
-                  type="submit"
-                  disabled={saving || !form.category}
-                  className="px-5 py-2 bg-[#0f4a3c] hover:bg-[#145c4b] dark:bg-emerald-700 dark:hover:bg-emerald-600 text-white rounded-xl font-bold shadow-md disabled:opacity-50 disabled:cursor-not-allowed"
-                >
-                  {saving ? t('common.saving', 'Saving...') : t('common.save')}
-                </button>
-              </div>
-            </form>
+      <Modal
+        open={formOpen}
+        onClose={closeForm}
+        locked={saving}
+        size="md"
+        icon={<Receipt size={18} />}
+        title={editing ? t('finance.exp_edit_title', 'Edit expense') : t('finance.exp_add_title', 'Record expense')}
+        subtitle={editing ? editing.title : t('finance.exp_add_sub', 'Add a fund spending entry to the ledger.')}
+        footer={
+          <div className="flex items-center justify-end gap-2">
+            <button
+              type="button"
+              onClick={closeForm}
+              disabled={saving}
+              className="px-4 py-2 border border-slate-300 dark:border-slate-700 text-slate-700 dark:text-slate-300 rounded-xl text-xs font-bold disabled:opacity-50"
+            >
+              {t('common.cancel', 'Cancel')}
+            </button>
+            <button
+              type="submit"
+              form="expense-form"
+              disabled={saving || !form.category}
+              className="px-5 py-2 bg-[#0f4a3c] hover:bg-[#145c4b] dark:bg-emerald-700 dark:hover:bg-emerald-600 text-white rounded-xl text-xs font-bold shadow-md disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              {saving ? t('common.saving', 'Saving…') : t('common.save', 'Save')}
+            </button>
           </div>
-        </div>
-      )}
+        }
+      >
+        <form id="expense-form" onSubmit={handleFormSubmit} className="space-y-4 text-xs">
+          <div>
+            <label className="form-label">{t('finance.exp_field_title', 'Title')} *</label>
+            <input
+              type="text"
+              value={form.title}
+              onChange={set('title')}
+              className="form-input"
+              placeholder={t('finance.exp_title_ph', 'e.g. Monthly meeting snacks')}
+              required
+            />
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div>
+              {formCategoryOptions.length > 0 ? (
+                <SearchableSelect
+                  label={t('finance.exp_category', 'Category')}
+                  required
+                  options={formCategoryOptions}
+                  value={form.category}
+                  onChange={val => setForm(f => ({ ...f, category: String(val ?? '') }))}
+                  placeholder={t('finance.exp_select_category', 'Select category…')}
+                />
+              ) : (
+                <>
+                  <label className="form-label">{t('finance.exp_category', 'Category')} *</label>
+                  <p className="form-hint">
+                    {t('finance.exp_no_categories', 'No expense categories yet.')}{' '}
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setFormOpen(false);
+                        setActiveTab('master');
+                      }}
+                      className="font-bold text-[#0f4a3c] dark:text-emerald-400 hover:underline"
+                    >
+                      {t('finance.exp_add_categories', 'Add them in Master data')}
+                    </button>
+                  </p>
+                </>
+              )}
+            </div>
+            <div>
+              <label className="form-label">{t('common.amount', 'Amount')} *</label>
+              <input type="number" min="0" step="any" value={form.amount} onChange={set('amount')} className="form-input font-bold" placeholder="0" required />
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div>
+              <DatePicker
+                label={t('finance.exp_date', 'Expense date')}
+                required
+                max={today}
+                value={form.expense_date}
+                onChange={iso => setForm(f => ({ ...f, expense_date: iso }))}
+              />
+            </div>
+            <div>
+              <label className="form-label">{t('finance.exp_payee_vendor', 'Payee / vendor')}</label>
+              <input type="text" value={form.payee} onChange={set('payee')} className="form-input" />
+            </div>
+          </div>
+
+          <div>
+            <label className="form-label">{t('finance.exp_receipt_ref_opt', 'Receipt / voucher ref (optional)')}</label>
+            <input type="text" value={form.receipt_ref} onChange={set('receipt_ref')} className="form-input font-mono" />
+            <p className="form-hint">{t('finance.exp_receipt_hint', 'Leave blank to flag as "Needs receipt" for later verification.')}</p>
+          </div>
+
+          <div>
+            <label className="form-label">{t('common.notes', 'Notes')}</label>
+            <textarea rows={2} value={form.notes} onChange={set('notes')} className="form-input" />
+          </div>
+        </form>
+      </Modal>
 
       {/* Verify receipt modal */}
-      {verifyExpense && (
-        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="card-base w-full max-w-sm p-6 text-xs space-y-4 shadow-2xl">
-            <h3 className="text-sm font-bold text-slate-900 dark:text-white flex items-center gap-2">
-              <FileCheck size={16} className="text-emerald-600 dark:text-emerald-400" />
-              <span>{t('expenses.verifyTitle', 'Verify receipt')}</span>
-            </h3>
+      <Modal
+        open={!!verifyExpense}
+        onClose={() => !saving && setVerifyExpense(null)}
+        locked={saving}
+        size="sm"
+        icon={<FileCheck size={18} />}
+        title={t('finance.exp_verify_title', 'Verify receipt')}
+        subtitle={verifyExpense ? `${formatDate(verifyExpense.expense_date)} · ${formatCurrency(verifyExpense.amount)}` : undefined}
+        footer={
+          <div className="flex items-center justify-end gap-2">
+            <button
+              type="button"
+              onClick={() => setVerifyExpense(null)}
+              disabled={saving}
+              className="px-3 py-1.5 border border-slate-300 dark:border-slate-700 text-slate-700 dark:text-slate-300 rounded-xl text-xs font-bold disabled:opacity-50"
+            >
+              {t('common.cancel', 'Cancel')}
+            </button>
+            <button
+              type="submit"
+              form="verify-form"
+              disabled={saving || !receiptVoucher.trim()}
+              className="px-4 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-bold shadow-md disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              {saving ? t('common.saving', 'Saving…') : t('finance.exp_mark_verified', 'Mark as verified')}
+            </button>
+          </div>
+        }
+      >
+        {verifyExpense && (
+          <form id="verify-form" onSubmit={handleVerifySubmit} className="space-y-4 text-xs">
             <div className="p-3 rounded-xl bg-slate-50 dark:bg-[#121f26] border border-slate-200 dark:border-slate-800">
               <p className="font-bold text-slate-900 dark:text-white">{verifyExpense.title}</p>
-              <p className="text-[11px] text-slate-500 dark:text-slate-400">
-                {formatDate(verifyExpense.expense_date)} · {formatCurrency(verifyExpense.amount)}
-              </p>
+              <p className="text-[11px] text-slate-500 dark:text-slate-400">{tv(verifyExpense.category)}</p>
             </div>
-            <form onSubmit={handleVerifySubmit} className="space-y-3">
-              <div>
-                <label className="form-label">{t('expenses.receiptNumber', 'Receipt / voucher number')} *</label>
-                <input
-                  type="text"
-                  value={receiptVoucher}
-                  onChange={e => setReceiptVoucher(e.target.value)}
-                  className="form-input font-mono font-bold"
-                  autoFocus
-                  required
-                />
-              </div>
-              <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-200 dark:border-slate-800">
-                <button
-                  type="button"
-                  onClick={() => setVerifyExpense(null)}
-                  className="px-3 py-1.5 border border-slate-300 dark:border-slate-700 text-slate-700 dark:text-slate-300 rounded-xl font-bold"
-                >
-                  {t('common.cancel')}
-                </button>
-                <button
-                  type="submit"
-                  disabled={saving}
-                  className="px-4 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl font-bold shadow-md disabled:opacity-50 disabled:cursor-not-allowed"
-                >
-                  {saving ? t('common.saving', 'Saving...') : t('expenses.markVerified', 'Mark as verified')}
-                </button>
-              </div>
-            </form>
+            <div>
+              <label className="form-label">{t('finance.exp_receipt_number', 'Receipt / voucher number')} *</label>
+              <input
+                type="text"
+                value={receiptVoucher}
+                onChange={e => setReceiptVoucher(e.target.value)}
+                className="form-input font-mono font-bold"
+                autoFocus
+                required
+              />
+            </div>
+          </form>
+        )}
+      </Modal>
+
+      {/* Delete confirmation */}
+      <Modal
+        open={!!confirmDelete}
+        onClose={() => busyId === null && setConfirmDelete(null)}
+        locked={busyId !== null}
+        size="sm"
+        icon={<Trash2 size={18} />}
+        title={t('finance.exp_delete_title', 'Delete expense?')}
+        footer={
+          <div className="flex items-center justify-end gap-2">
+            <button
+              type="button"
+              onClick={() => setConfirmDelete(null)}
+              disabled={busyId !== null}
+              className="px-3 py-1.5 border border-slate-300 dark:border-slate-700 text-slate-700 dark:text-slate-300 rounded-xl text-xs font-bold disabled:opacity-50"
+            >
+              {t('common.cancel', 'Cancel')}
+            </button>
+            <button
+              type="button"
+              onClick={handleDelete}
+              disabled={busyId !== null}
+              className="px-4 py-1.5 bg-rose-600 hover:bg-rose-500 text-white rounded-xl text-xs font-bold shadow-md disabled:opacity-50"
+            >
+              {busyId !== null ? t('finance.deleting', 'Deleting…') : t('common.delete', 'Delete')}
+            </button>
           </div>
-        </div>
-      )}
+        }
+      >
+        {confirmDelete && (
+          <p className="text-xs text-slate-600 dark:text-slate-300 leading-relaxed">
+            {t('finance.exp_delete_body', 'Delete expense "{title}" ({amount})? This cannot be undone.')
+              .replace('{title}', confirmDelete.title)
+              .replace('{amount}', formatCurrency(confirmDelete.amount))}
+          </p>
+        )}
+      </Modal>
     </div>
   );
 };
