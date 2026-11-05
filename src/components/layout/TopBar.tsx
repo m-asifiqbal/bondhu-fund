@@ -19,6 +19,8 @@ import {
   Users,
 } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
+import { getAppSettings } from '../../services/db';
+import type { AppNotification } from '../../types';
 
 export const TopBar: React.FC = () => {
   const {
@@ -37,6 +39,7 @@ export const TopBar: React.FC = () => {
     language,
     toggleLanguage,
     t,
+    refreshKey,
   } = useApp();
 
   const [searchTerm, setSearchTerm] = useState('');
@@ -46,6 +49,16 @@ export const TopBar: React.FC = () => {
   const [isNotifExpanded, setIsNotifExpanded] = useState(false);
 
   const notificationRef = useRef<HTMLDivElement>(null);
+  const [orgName, setOrgName] = useState('');
+
+  // Organization name comes from settings (no hardcoded name); reload whenever data changes.
+  useEffect(() => {
+    let alive = true;
+    getAppSettings()
+      .then(s => { if (alive) setOrgName(s.organization_name || ''); })
+      .catch(() => { if (alive) setOrgName(''); });
+    return () => { alive = false; };
+  }, [refreshKey]);
 
   // Close notification popover when clicking outside
   useEffect(() => {
@@ -98,16 +111,11 @@ export const TopBar: React.FC = () => {
   const handleManualRefresh = () => {
     setIsRefreshing(true);
     triggerRefresh();
-    showToast(
-      language === 'bn'
-        ? 'SQLite ডাটাবেজ থেকে লাইভ ডাটা রিফ্রেশ সম্পন্ন!'
-        : 'Data refreshed live from SQLite database!',
-      'success'
-    );
+    showToast(t('topbar.refreshed', language === 'bn' ? 'ডাটা রিফ্রেশ সম্পন্ন' : 'Data refreshed'), 'info');
     setTimeout(() => setIsRefreshing(false), 700);
   };
 
-  const handleNotificationClick = (n: any) => {
+  const handleNotificationClick = (n: AppNotification) => {
     markNotificationRead(n.id);
     if (n.targetFilter) {
       setMemberFilterStatus(n.targetFilter);
@@ -116,34 +124,38 @@ export const TopBar: React.FC = () => {
     setShowNotificationMenu(false);
   };
 
-  const filteredNotifs = notifications.filter((n) => {
+  const filteredNotifs = (notifications || []).filter((n) => {
     if (notifFilter === 'warning') return n.type === 'warning';
     if (notifFilter === 'info') return n.type === 'info' || n.type === 'success';
     return true;
   });
 
   return (
-    <header className="h-16 bg-white dark:bg-[#111e24] border-b border-slate-200 dark:border-[#223640] px-6 lg:px-8 flex items-center justify-between shrink-0 select-none shadow-sm transition-colors z-40 relative">
+    <header className="no-print h-16 bg-white dark:bg-[#111e24] border-b border-slate-200 dark:border-[#223640] px-4 lg:px-6 xl:px-8 gap-3 flex items-center justify-between shrink-0 select-none shadow-sm transition-colors z-40 relative">
       {/* Breadcrumb with i18n */}
-      <div className="flex items-center gap-2 text-xs font-semibold text-slate-500 dark:text-slate-400">
-        <span className="hover:text-slate-900 dark:hover:text-white cursor-pointer transition-colors">
-          {t('nav.workspace')}
+      <div className="flex items-center gap-2 text-xs font-semibold text-slate-500 dark:text-slate-400 min-w-0">
+        <span
+          onClick={() => setActiveTab('overview')}
+          title={orgName || t('nav.workspace')}
+          className="hover:text-slate-900 dark:hover:text-white cursor-pointer transition-colors truncate max-w-[220px]"
+        >
+          {orgName || t('nav.workspace')}
         </span>
-        <span className="text-slate-300 dark:text-slate-600">&rsaquo;</span>
-        <span className="text-slate-900 dark:text-white font-bold">{getBreadcrumbTitle()}</span>
+        <span className="text-slate-300 dark:text-slate-600 shrink-0">&rsaquo;</span>
+        <span className="text-slate-900 dark:text-white font-bold truncate">{getBreadcrumbTitle()}</span>
       </div>
 
       {/* Right Navigation Controls */}
-      <div className="flex items-center gap-2.5 sm:gap-3">
+      <div className="flex items-center gap-2 shrink-0">
         {/* Global Search Bar */}
-        <form onSubmit={handleSearchSubmit} className="relative hidden md:block">
+        <form onSubmit={handleSearchSubmit} className="relative hidden xl:block">
           <Search size={14} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400 dark:text-slate-500" />
           <input
             type="text"
             placeholder={t('topbar.search_placeholder')}
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
-            className="w-56 lg:w-64 pl-9 pr-4 py-2 bg-slate-50 dark:bg-[#16252d] rounded-xl border border-slate-300 dark:border-[#2d424e] text-xs text-slate-900 dark:text-slate-100 placeholder-slate-400 dark:placeholder-slate-500 font-medium focus:outline-none focus:ring-2 focus:ring-[#0f4a3c]/20 focus:border-[#0f4a3c] dark:focus:border-emerald-500 shadow-sm"
+            className="w-52 2xl:w-64 pl-9 pr-4 py-2 bg-slate-50 dark:bg-[#16252d] rounded-xl border border-slate-300 dark:border-[#2d424e] text-xs text-slate-900 dark:text-slate-100 placeholder-slate-400 dark:placeholder-slate-500 font-medium focus:outline-none focus:ring-2 focus:ring-[#0f4a3c]/20 focus:border-[#0f4a3c] dark:focus:border-emerald-500 shadow-sm"
           />
         </form>
 
@@ -164,10 +176,10 @@ export const TopBar: React.FC = () => {
         <button
           onClick={handleManualRefresh}
           className="flex items-center gap-1.5 px-3 py-2 bg-slate-50 hover:bg-slate-100 dark:bg-[#16252d] dark:hover:bg-[#1d303b] text-slate-700 dark:text-slate-200 border border-slate-300 dark:border-[#2d424e] rounded-xl text-xs font-bold shadow-sm transition-all"
-          title={language === 'bn' ? 'SQLite ডাটাবেজ থেকে রিফ্রেশ' : 'Refresh live data from local SQLite database'}
+          title={t('topbar.refresh_title', language === 'bn' ? 'ডাটা রিফ্রেশ করুন' : 'Reload data')}
         >
           <RotateCw size={14} className={`text-[#0f4a3c] dark:text-emerald-400 ${isRefreshing ? 'animate-spin' : ''}`} />
-          <span className="hidden lg:inline">{t('topbar.refresh')}</span>
+          <span className="hidden 2xl:inline">{t('topbar.refresh')}</span>
         </button>
 
         {/* Night Mode Toggle */}
@@ -256,7 +268,7 @@ export const TopBar: React.FC = () => {
                       : 'text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800'
                   }`}
                 >
-                  {language === 'bn' ? 'সকল' : 'All'} ({notifications.length})
+                  {language === 'bn' ? 'সকল' : 'All'} ({(notifications || []).length})
                 </button>
                 <button
                   onClick={() => setNotifFilter('warning')}
@@ -349,7 +361,7 @@ export const TopBar: React.FC = () => {
           title="Open Database Backup & Restore Center"
         >
           <Database size={14} className="text-[#0f4a3c] dark:text-emerald-400" />
-          <span className="hidden sm:inline">{t('topbar.backup')}</span>
+          <span className="hidden 2xl:inline">{t('topbar.backup')}</span>
         </button>
 
         {/* Global Record Payment Action Button */}

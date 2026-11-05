@@ -1,21 +1,85 @@
 import React from 'react';
+import { AlertTriangle, Copy, RotateCw } from 'lucide-react';
 import { AppProvider, useApp } from './context/AppContext';
 import { Sidebar } from './components/layout/Sidebar';
 import { TopBar } from './components/layout/TopBar';
 import { RecordPaymentModal } from './components/modals/RecordPaymentModal';
 
 // Views
-import { OverviewView } from './views/OverviewView';
-import { MembersView } from './views/MembersView';
-import { CollectionsView } from './views/CollectionsView';
-import { InvestmentsView } from './views/InvestmentsView';
-import { ExpensesView } from './views/ExpensesView';
-import { EntryCenterView } from './views/EntryCenterView';
-import { MasterDataView } from './views/MasterDataView';
-import { UserManagementView } from './views/UserManagementView';
-import { BackupRestoreView } from './views/BackupRestoreView';
-import { ReportsView } from './views/ReportsView';
-import { SettingsView } from './views/SettingsView';
+const OverviewView = React.lazy(() => import('./views/OverviewView').then(m => ({ default: m.OverviewView })));
+const MembersView = React.lazy(() => import('./views/MembersView').then(m => ({ default: m.MembersView })));
+const CollectionsView = React.lazy(() => import('./views/CollectionsView').then(m => ({ default: m.CollectionsView })));
+const InvestmentsView = React.lazy(() => import('./views/InvestmentsView').then(m => ({ default: m.InvestmentsView })));
+const ExpensesView = React.lazy(() => import('./views/ExpensesView').then(m => ({ default: m.ExpensesView })));
+const EntryCenterView = React.lazy(() => import('./views/EntryCenterView').then(m => ({ default: m.EntryCenterView })));
+const MasterDataView = React.lazy(() => import('./views/MasterDataView').then(m => ({ default: m.MasterDataView })));
+const UserManagementView = React.lazy(() => import('./views/UserManagementView').then(m => ({ default: m.UserManagementView })));
+const BackupRestoreView = React.lazy(() => import('./views/BackupRestoreView').then(m => ({ default: m.BackupRestoreView })));
+const ReportsView = React.lazy(() => import('./views/ReportsView').then(m => ({ default: m.ReportsView })));
+const SettingsView = React.lazy(() => import('./views/SettingsView').then(m => ({ default: m.SettingsView })));
+
+interface ErrorBoundaryProps { resetKey: string; children: React.ReactNode }
+interface ErrorBoundaryState { error: Error | null; copied: boolean }
+
+/** Keeps one broken screen from blanking the whole app. Resets when the user navigates to another tab. */
+class ViewErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoundaryState> {
+  state: ErrorBoundaryState = { error: null, copied: false };
+
+  static getDerivedStateFromError(error: Error): Partial<ErrorBoundaryState> {
+    return { error, copied: false };
+  }
+
+  componentDidCatch(error: Error, info: React.ErrorInfo) {
+    console.error('View crashed:', error, info.componentStack);
+  }
+
+  componentDidUpdate(prev: ErrorBoundaryProps) {
+    if (prev.resetKey !== this.props.resetKey && this.state.error) this.setState({ error: null, copied: false });
+  }
+
+  private copy = () => {
+    const e = this.state.error;
+    const text = `${e?.message || 'Unknown error'}\n\n${e?.stack || ''}`;
+    const done = () => this.setState({ copied: true });
+    if (navigator.clipboard?.writeText) navigator.clipboard.writeText(text).then(done, done);
+    else done();
+  };
+
+  render() {
+    const { error, copied } = this.state;
+    if (!error) return this.props.children;
+    return (
+      <div className="p-8 flex justify-center">
+        <div className="card-base max-w-xl w-full p-6 text-xs">
+          <div className="flex items-center gap-2 mb-2">
+            <AlertTriangle size={20} className="text-rose-600" />
+            <h2 className="text-base font-black text-slate-900 dark:text-white">This screen ran into a problem</h2>
+          </div>
+          <p className="text-slate-600 dark:text-slate-400 mb-3">
+            Your data is safe. You can switch to another screen from the sidebar, or reload the app.
+          </p>
+          <pre className="whitespace-pre-wrap break-words select-text bg-rose-50 dark:bg-rose-950/40 text-rose-800 dark:text-rose-300 border border-rose-200 dark:border-rose-900 rounded-xl p-3 font-mono text-[11px] max-h-48 overflow-auto">
+            {error.message || String(error)}
+          </pre>
+          <div className="flex justify-end gap-2 mt-4">
+            <button
+              onClick={this.copy}
+              className="flex items-center gap-1.5 px-4 py-2 rounded-xl font-bold bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200"
+            >
+              <Copy size={13} /> {copied ? 'Copied!' : 'Copy'}
+            </button>
+            <button
+              onClick={() => window.location.reload()}
+              className="flex items-center gap-1.5 px-4 py-2 rounded-xl font-bold text-white bg-brand hover:bg-brand-hover dark:bg-emerald-700 dark:hover:bg-emerald-600"
+            >
+              <RotateCw size={13} /> Reload
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+}
 
 const MainLayout: React.FC = () => {
   const { activeTab } = useApp();
@@ -61,7 +125,11 @@ const MainLayout: React.FC = () => {
 
         {/* Viewport Scrollable Content */}
         <main className="flex-1 overflow-y-auto bg-slate-100/80 dark:bg-[#0b1317] transition-colors">
-          {renderActiveView()}
+          <ViewErrorBoundary resetKey={activeTab}>
+            <React.Suspense fallback={<div className="p-8 flex items-center gap-2 text-xs text-slate-500"><RotateCw size={14} className="animate-spin" />Loading…</div>}>
+              {renderActiveView()}
+            </React.Suspense>
+          </ViewErrorBoundary>
         </main>
       </div>
 

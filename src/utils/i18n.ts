@@ -53,7 +53,7 @@ export const translations: Record<string, { en: string; bn: string }> = {
   'topbar.search_placeholder': { en: 'Search members or payment...', bn: 'সদস্য বা পেমেন্ট অনুসন্ধান করুন...' },
   'topbar.refresh': { en: 'Refresh', bn: 'রিফ্রেশ' },
   'topbar.backup': { en: 'Backup', bn: 'ব্যাকআপ' },
-  'topbar.record_payment': { en: '+ Record payment', bn: '+ পেমেন্ট গ্রহণ' },
+  'topbar.record_payment': { en: 'Record payment', bn: 'পেমেন্ট গ্রহণ' },
   'topbar.notifications': { en: 'System Notifications', bn: 'সিস্টেম বিজ্ঞপ্তি' },
   'topbar.mark_all_read': { en: 'Mark all read', bn: 'সব পঠিত হিসেবে চিহ্নিত করুন' },
   'topbar.no_notifications': { en: 'No new notifications. Everything is in order.', bn: 'কোনো নতুন বিজ্ঞপ্তি নেই। সবকিছু ঠিকঠাক আছে।' },

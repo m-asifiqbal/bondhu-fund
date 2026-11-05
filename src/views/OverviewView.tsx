@@ -1,686 +1,542 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
-  Wallet,
-  TrendingUp,
-  TrendingDown,
-  Users,
-  Building,
-  Calendar,
-  Download,
-  AlertCircle,
-  FileCheck,
-  CheckCircle2,
-  Clock,
-  ArrowRight,
-  Eye,
-  Plus,
+  Wallet, Landmark, HandCoins, AlertTriangle, Building2, Receipt, TrendingUp, TrendingDown, Minus,
+  Download, Printer, RefreshCw, Users, CalendarDays, PieChart as PieIcon, Activity, BellRing,
+  ArrowDownLeft, ArrowUpRight, UserPlus, FileWarning, ShieldCheck, Sparkles, DatabaseBackup, Plus,
 } from 'lucide-react';
-import {
-  AreaChart,
-  Area,
-  PieChart,
-  Pie,
-  Cell,
-  Tooltip,
-  ResponsiveContainer,
-  XAxis,
-  YAxis,
-} from 'recharts';
 import { useApp } from '../context/AppContext';
-import {
-  getOverviewMetrics,
-  getExpenses,
-  getInvestments,
-  getCollections,
-} from '../services/db';
-import { OverviewMetrics, Expense, Investment, CollectionRecord } from '../types';
 import { MonthPicker } from '../components/common/MonthPicker';
-import { CustomChartTooltip } from '../components/common/CustomChartTooltip';
+import { EChart, ChartCard, chartTheme, baseOption, valueAxis, categoryAxis } from '../components/charts/EChart';
+import { getOverviewData, loadDemoData, saveTextFile, savePdf, toCsv } from '../services/db';
+import { formatMonth as fmtMonth, toMonthKey } from '../utils/date';
+import { toBanglaDigits } from '../utils/i18n';
+import type { OverviewData } from '../types';
+
+// --- small bilingual dictionary for this screen ------------------------------
+const L = {
+  greeting: ['Good morning', 'শুভ সকাল'], afternoon: ['Good afternoon', 'শুভ অপরাহ্ন'], evening: ['Good evening', 'শুভ সন্ধ্যা'],
+  subtitle: ['Financial position of the fund for', 'তহবিলের আর্থিক অবস্থা —'],
+  collectedShort: ['Collected', 'আদায়'],
+  netWorth: ['Net worth', 'মোট সম্পদ'], cash: ['Cash in hand', 'হাতে নগদ'], collected: ['Collected this month', 'এ মাসে আদায়'],
+  outstanding: ['Outstanding dues', 'বকেয়া'], portfolio: ['Portfolio value', 'বিনিয়োগ মূল্য'], expenses: ['Expenses this month', 'এ মাসের খরচ'],
+  vsLast: ['vs last month', 'গত মাসের তুলনায়'], of: ['of', 'এর মধ্যে'],
+  collections: ['Collections', 'আদায়'], fund: ['Fund growth & cash flow', 'তহবিল বৃদ্ধি ও নগদ প্রবাহ'],
+  portfolioSpend: ['Portfolio & spending', 'বিনিয়োগ ও খরচ'], members: ['Members', 'সদস্য'],
+  expVsColl: ['Expected vs collected', 'প্রত্যাশিত বনাম আদায়'], expected: ['Expected', 'প্রত্যাশিত'], last12: ['Last 12 months', 'গত ১২ মাস'],
+  status: ['Dues status', 'বকেয়ার অবস্থা'], paid: ['Paid', 'পরিশোধিত'], pending: ['Pending', 'অপেক্ষমাণ'], overdue: ['Overdue', 'মেয়াদোত্তীর্ণ'],
+  balance: ['Fund balance', 'তহবিল স্থিতি'], cashLine: ['Cash in hand', 'হাতে নগদ'],
+  flow: ['Monthly cash flow', 'মাসিক নগদ প্রবাহ'], inflow: ['Money in', 'আয়'], outExp: ['Expenses', 'খরচ'], outInv: ['Investments', 'বিনিয়োগ'],
+  bySector: ['Portfolio by sector', 'খাতভিত্তিক বিনিয়োগ'], cost: ['Cost', 'ক্রয়মূল্য'], value: ['Est. value', 'বর্তমান মূল্য'],
+  byCategory: ['Expenses by category', 'খাতভিত্তিক খরচ'], heat: ['Payment calendar', 'পেমেন্ট ক্যালেন্ডার'], heatSub: ['Daily collections, last 6 months', 'দৈনিক আদায়, গত ৬ মাস'],
+  top: ['Top contributors', 'শীর্ষ অবদানকারী'], methods: ['Payment methods', 'পেমেন্ট মাধ্যম'],
+  arrears: ['Members in arrears', 'বকেয়াধারী সদস্য'], months: ['months', 'মাস'],
+  attention: ['Needs attention', 'মনোযোগ প্রয়োজন'], recent: ['Recent activity', 'সাম্প্রতিক কার্যক্রম'],
+  allClear: ['All clear — nothing needs attention.', 'সব ঠিক আছে।'],
+  emptyTitle: ['Welcome to Bondhu Fund', 'বন্ধু ফান্ডে স্বাগতম'],
+  emptyBody: ['Your database is empty. Add members to start tracking dues, or restore an existing backup.', 'ডাটাবেস খালি। সদস্য যোগ করুন অথবা ব্যাকআপ রিস্টোর করুন।'],
+  addMember: ['Add first member', 'প্রথম সদস্য যোগ করুন'], restore: ['Restore a backup', 'ব্যাকআপ রিস্টোর'], demo: ['Explore with demo data', 'ডেমো ডেটা দেখুন'],
+  export: ['Export CSV', 'CSV এক্সপোর্ট'], pdf: ['Save PDF', 'PDF সংরক্ষণ'], rate: ['collection rate', 'আদায় হার'],
+  members_n: ['members', 'জন সদস্য'], gain: ['gain', 'লাভ'], loss: ['loss', 'ক্ষতি'], noData: ['No data for this period yet.', 'এই সময়ের কোনো তথ্য নেই।'],
+};
+type Key = keyof typeof L;
 
 export const OverviewView: React.FC = () => {
   const {
-    currentUser,
-    setActiveTab,
-    showToast,
-    refreshKey,
-    selectedMonth,
-    setSelectedMonth,
-    setMemberFilterStatus,
-    setEntryCenterInitialTab,
-    language,
-    t,
-    formatCurrency,
-    toBanglaDigits,
+    selectedMonth, setSelectedMonth, isDarkMode, language, formatCurrency, formatDate, currentUser, refreshKey,
+    triggerRefresh, showToast, setActiveTab, setMemberFilterStatus, setOpenRecordModal, setSelectedMemberIdForPayment,
   } = useApp();
+  const tr = useCallback((k: Key) => L[k][language === 'bn' ? 1 : 0], [language]);
+  const [data, setData] = useState<OverviewData | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [busy, setBusy] = useState(false);
 
-  const [metrics, setMetrics] = useState<OverviewMetrics | null>(null);
-  const [expenses, setExpenses] = useState<Expense[]>([]);
-  const [investments, setInvestments] = useState<Investment[]>([]);
-  const [collections, setCollections] = useState<CollectionRecord[]>([]);
-  const [growthPeriod, setGrowthPeriod] = useState<'6m' | '12m'>('6m');
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      setData(await getOverviewData(selectedMonth));
+    } catch (e: any) {
+      showToast(e.message, 'error');
+    } finally {
+      setLoading(false);
+    }
+  }, [selectedMonth]);
 
-  useEffect(() => {
-    getOverviewMetrics(selectedMonth).then(setMetrics);
-    getExpenses().then(setExpenses);
-    getInvestments().then(setInvestments);
-    getCollections(selectedMonth, 'All').then(res => setCollections(res.records));
-  }, [selectedMonth, refreshKey]);
+  useEffect(() => { load(); }, [load, refreshKey]);
 
-  // Authentic Fund Growth data trajectory (Matching Image 1)
-  const fundGrowthData6m = [
-    { month: 'Jan', amount: 920000 },
-    { month: 'Feb', amount: 980000 },
-    { month: 'Mar', amount: 1050000 },
-    { month: 'Apr', amount: 1120000 },
-    { month: 'May', amount: 1200000 },
-    { month: 'Jun', amount: 1284600 },
-  ];
+  const th = useMemo(() => chartTheme(isDarkMode), [isDarkMode]);
+  const digits = (s: string | number) => (language === 'bn' ? toBanglaDigits(s) : String(s));
+  const compact = useCallback((v: number) => {
+    const a = Math.abs(v);
+    const s = a >= 1e7 ? `${(v / 1e7).toFixed(1)}Cr` : a >= 1e5 ? `${(v / 1e5).toFixed(1)}L` : a >= 1e3 ? `${(v / 1e3).toFixed(0)}K` : `${v}`;
+    return digits(s);
+  }, [language]);
+  const mLabel = useCallback((k: string) => fmtMonth(k, language as any, true), [language]);
+  const money = (v: number) => formatCurrency(Math.round(v || 0));
 
-  const fundGrowthData12m = [
-    { month: 'Jul 23', amount: 650000 },
-    { month: 'Sep 23', amount: 740000 },
-    { month: 'Nov 23', amount: 830000 },
-    { month: 'Jan 24', amount: 920000 },
-    { month: 'Mar 24', amount: 1050000 },
-    { month: 'Jun 24', amount: 1284600 },
-  ];
+  const hour = new Date().getHours();
+  const hello = hour < 12 ? tr('greeting') : hour < 17 ? tr('afternoon') : tr('evening');
+  const firstName = currentUser?.full_name?.split(' ')[0] || '';
 
-  // Authentic Union Collection Status Donut Data (Matching Image 1)
-  const collectionPieData = [
-    {
-      name: language === 'bn' ? 'পরিশোধিত' : 'Paid',
-      value: metrics?.paid_count || 42,
-      amount: 84000,
-      color: '#0f4a3c', // dark emerald
-      pct: '87.5%',
-    },
-    {
-      name: language === 'bn' ? 'অপেক্ষমাণ' : 'Pending',
-      value: metrics?.pending_count || 3,
-      amount: 6000,
-      color: '#d97706', // amber
-      pct: '6.25%',
-    },
-    {
-      name: language === 'bn' ? 'বকেয়া' : 'Overdue',
-      value: metrics?.overdue_count || 3,
-      amount: 6000,
-      color: '#2563eb', // blue/accent
-      pct: '6.25%',
-    },
-  ];
+  // ---------------------------------------------------------------------------
+  // Chart options
+  // ---------------------------------------------------------------------------
+  const opts = useMemo(() => {
+    if (!data) return null;
+    const months = data.trend.map(p => mLabel(p.month));
+    const tipMoney = (params: any) => {
+      const list = Array.isArray(params) ? params : [params];
+      const head = `<div style="font-weight:700;margin-bottom:4px">${list[0].axisValueLabel ?? list[0].name}</div>`;
+      return head + list.map((p: any) => `<div style="display:flex;justify-content:space-between;gap:16px"><span>${p.marker}${p.seriesName}</span><b>${money(Math.abs(p.value))}</b></div>`).join('');
+    };
 
-  // Export Overview Summary Report
-  const handleExportReport = () => {
-    showToast(
-      language === 'bn'
-        ? 'বন্ধু ফান্ডের মাসিক আর্থিক রিপোর্ট ডাউনলোড হচ্ছে...'
-        : 'Downloading Bondhu Fund Monthly Summary Report...'
-    );
+    const expectedVsCollected = {
+      ...baseOption(th),
+      color: [th.cat[0], th.cat[2]],
+      grid: { left: 8, right: 8, top: 36, bottom: 4, containLabel: true },
+      tooltip: { ...(baseOption(th) as any).tooltip, trigger: 'axis', axisPointer: { type: 'shadow' }, formatter: tipMoney },
+      legend: { ...(baseOption(th) as any).legend, data: [tr('expected'), tr('collectedShort')] },
+      xAxis: categoryAxis(th, months),
+      yAxis: valueAxis(th, compact),
+      series: [
+        { name: tr('expected'), type: 'bar', barGap: '8%', barMaxWidth: 14, itemStyle: { borderRadius: [4, 4, 0, 0], opacity: 0.35 }, data: data.trend.map(p => p.expected) },
+        { name: tr('collectedShort'), type: 'bar', barMaxWidth: 14, itemStyle: { borderRadius: [4, 4, 0, 0] }, data: data.trend.map(p => p.collected) },
+      ],
+    };
 
-    const reportContent = `========================================================
-            BONDHU FUND - UNION FINANCE DESK
-             MONTHLY EXECUTIVE SUMMARY REPORT
-========================================================
-Reporting Period      : ${selectedMonth}
-Generated Date        : ${new Date().toLocaleDateString('en-GB')}
-Generated By          : ${currentUser?.full_name || 'Treasurer'} (${currentUser?.role || 'Admin'})
---------------------------------------------------------
-EXECUTIVE METRICS:
-  Total Fund Balance  : TK 1,284,600 (+8.4% growth)
-  This Month Inflow   : TK 84,000 / TK 96,000 (87.5% rate)
-  Active Members      : 48 Members (42 Paid, 3 Pending, 3 Overdue)
-  Invested Assets     : TK 920,000 (71.6% of total treasury)
-  Unrealized Gain     : +TK 156,000 across 4 asset sectors
---------------------------------------------------------
-KEY ACTIVE INVESTMENTS:
-  1. Green Valley Land     - Invested: TK 386,400 | Est: TK 452,000
-  2. Lakeview Flat Share   - Invested: TK 285,200 | Est: TK 309,000
-  3. Uttara Plot 7B        - Invested: TK 165,600 | Est: TK 201,000
-  4. Community Generator   - Invested: TK  82,800 | Est: TK 114,000
-========================================================
-Audited & Verified via Local SQLite Database
-========================================================`;
+    const k = data.kpis;
+    const statusDonut = {
+      ...baseOption(th),
+      tooltip: { ...(baseOption(th) as any).tooltip, trigger: 'item', formatter: (p: any) => `${p.marker}${p.name}: <b>${digits(p.value)}</b> ${tr('members_n')} (${digits(p.percent)}%)` },
+      legend: { ...(baseOption(th) as any).legend, top: 'bottom', right: 'center' },
+      series: [{
+        type: 'pie', radius: ['58%', '80%'], center: ['50%', '44%'], padAngle: 2, itemStyle: { borderRadius: 6, borderColor: th.surface, borderWidth: 2 },
+        label: { show: true, position: 'center', formatter: () => `{v|${digits(k.collectionRate)}%}\n{l|${tr('rate')}}`,
+          rich: { v: { fontSize: 22, fontWeight: 800, color: th.text }, l: { fontSize: 11, color: th.textMuted, padding: [4, 0, 0, 0] } } },
+        emphasis: { scale: true, scaleSize: 4, label: { show: true } },
+        data: [
+          { name: tr('paid'), value: k.paid, itemStyle: { color: th.status.good }, filter: 'Paid' },
+          { name: tr('pending'), value: k.pending, itemStyle: { color: th.status.warning }, filter: 'Pending' },
+          { name: tr('overdue'), value: k.overdue, itemStyle: { color: th.status.critical }, filter: 'Overdue' },
+        ],
+      }],
+    };
 
-    const blob = new Blob([reportContent], { type: 'text/plain;charset=utf-8' });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = `Bondhu_Fund_Summary_${selectedMonth.replace(/\s+/g, '_')}.txt`;
-    link.click();
-    URL.revokeObjectURL(url);
+    const growth = {
+      ...baseOption(th),
+      color: [th.cat[0], th.cat[2]],
+      grid: { left: 8, right: 12, top: 36, bottom: 4, containLabel: true },
+      tooltip: { ...(baseOption(th) as any).tooltip, trigger: 'axis', axisPointer: { type: 'line', lineStyle: { color: th.axis } }, formatter: tipMoney },
+      legend: { ...(baseOption(th) as any).legend, data: [tr('balance'), tr('cashLine')] },
+      xAxis: { ...categoryAxis(th, months), boundaryGap: false },
+      yAxis: valueAxis(th, compact),
+      series: [
+        { name: tr('balance'), type: 'line', smooth: 0.3, symbol: 'circle', symbolSize: 8, showSymbol: false, lineStyle: { width: 2 },
+          areaStyle: { opacity: 0.12 }, data: data.trend.map(p => Math.round(p.fundBalance)) },
+        { name: tr('cashLine'), type: 'line', smooth: 0.3, symbol: 'circle', symbolSize: 8, showSymbol: false, lineStyle: { width: 2 },
+          data: data.trend.map(p => Math.round(p.cashInHand)) },
+      ],
+    };
+
+    const flow = {
+      ...baseOption(th),
+      color: [th.cat[2], th.cat[1], th.cat[6]],
+      grid: { left: 8, right: 8, top: 36, bottom: 4, containLabel: true },
+      tooltip: { ...(baseOption(th) as any).tooltip, trigger: 'axis', axisPointer: { type: 'shadow' }, formatter: tipMoney },
+      legend: { ...(baseOption(th) as any).legend, data: [tr('inflow'), tr('outExp'), tr('outInv')] },
+      xAxis: categoryAxis(th, months),
+      yAxis: valueAxis(th, compact),
+      series: [
+        { name: tr('inflow'), type: 'bar', stack: 'flow', barMaxWidth: 18, itemStyle: { borderRadius: [4, 4, 0, 0] }, data: data.trend.map(p => p.collected + p.lateFees) },
+        { name: tr('outExp'), type: 'bar', stack: 'flow', barMaxWidth: 18, itemStyle: { borderColor: th.surface, borderWidth: 1 }, data: data.trend.map(p => -p.expenses) },
+        { name: tr('outInv'), type: 'bar', stack: 'flow', barMaxWidth: 18, itemStyle: { borderRadius: [0, 0, 4, 4], borderColor: th.surface, borderWidth: 1 }, data: data.trend.map(p => -p.invested) },
+      ],
+    };
+
+    const sectors = data.portfolio.map(p => p.name);
+    const portfolio = {
+      ...baseOption(th),
+      color: [th.cat[0], th.cat[2]],
+      grid: { left: 8, right: 16, top: 36, bottom: 4, containLabel: true },
+      tooltip: { ...(baseOption(th) as any).tooltip, trigger: 'axis', axisPointer: { type: 'shadow' }, formatter: tipMoney },
+      legend: { ...(baseOption(th) as any).legend, data: [tr('cost'), tr('value')] },
+      xAxis: valueAxis(th, compact),
+      yAxis: { ...categoryAxis(th, sectors), inverse: true },
+      series: [
+        { name: tr('cost'), type: 'bar', barMaxWidth: 12, barGap: '20%', itemStyle: { borderRadius: [0, 4, 4, 0], opacity: 0.4 }, data: data.portfolio.map(p => p.invested) },
+        { name: tr('value'), type: 'bar', barMaxWidth: 12, itemStyle: { borderRadius: [0, 4, 4, 0] }, data: data.portfolio.map(p => p.value) },
+      ],
+    };
+
+    // fold categories beyond 7 into "Other" (never generate a 9th hue)
+    const cats = data.expenseByCategory.slice(0, 7).map(c => ({ name: c.name, value: c.value }));
+    const rest = data.expenseByCategory.slice(7).reduce((a, c) => a + c.value, 0);
+    if (rest > 0) cats.push({ name: language === 'bn' ? 'অন্যান্য' : 'Other', value: rest });
+    const expenseDonut = {
+      ...baseOption(th),
+      color: th.cat,
+      tooltip: { ...(baseOption(th) as any).tooltip, trigger: 'item', formatter: (p: any) => `${p.marker}${p.name}<br/><b>${money(p.value)}</b> (${digits(p.percent)}%)` },
+      legend: { ...(baseOption(th) as any).legend, type: 'scroll', orient: 'vertical', top: 'middle', right: 0, left: undefined },
+      series: [{
+        type: 'pie', radius: ['50%', '78%'], center: ['32%', '50%'], padAngle: 2,
+        itemStyle: { borderRadius: 6, borderColor: th.surface, borderWidth: 2 }, label: { show: false },
+        emphasis: { label: { show: true, formatter: '{d}%', fontWeight: 800, color: th.text } }, data: cats,
+      }],
+    };
+
+    const maxDay = Math.max(1, ...data.dailyCollections.map(d => d.value));
+    const startM = toMonthKey(data.trend[6]?.month || data.month);
+    const heat = {
+      ...baseOption(th),
+      tooltip: { ...(baseOption(th) as any).tooltip, formatter: (p: any) => `${formatDate(p.value[0])}<br/><b>${money(p.value[1])}</b> · ${digits(p.value[2])} ${language === 'bn' ? 'টি পেমেন্ট' : 'payment(s)'}` },
+      visualMap: { show: false, min: 0, max: maxDay, inRange: { color: th.seq } },
+      calendar: {
+        top: 28, left: 34, right: 8, bottom: 4, cellSize: ['auto', 14],
+        range: [`${startM}-01`, data.today < `${data.month}-31` ? data.today : `${data.month}-28`],
+        itemStyle: { borderColor: th.surface, borderWidth: 2, color: th.dark ? '#1b2a31' : '#f1f5f4' },
+        splitLine: { show: false }, yearLabel: { show: false },
+        dayLabel: { color: th.textMuted, fontSize: 10, firstDay: 6, nameMap: language === 'bn' ? ['র', 'সো', 'ম', 'বু', 'বৃ', 'শু', 'শ'] : ['S', 'M', 'T', 'W', 'T', 'F', 'S'] },
+        monthLabel: { color: th.textMuted, fontSize: 10 },
+      },
+      series: [{ type: 'heatmap', coordinateSystem: 'calendar', data: data.dailyCollections.map(d => [d.date, d.value, d.count]) }],
+    };
+
+    const topC = [...data.topContributors].reverse();
+    const top = {
+      ...baseOption(th),
+      color: [th.cat[0]],
+      grid: { left: 8, right: 56, top: 4, bottom: 4, containLabel: true },
+      tooltip: { ...(baseOption(th) as any).tooltip, trigger: 'item', formatter: (p: any) => `${p.name}<br/><b>${money(p.value)}</b>` },
+      xAxis: { ...valueAxis(th, compact), show: false },
+      yAxis: { ...categoryAxis(th, topC.map(c => c.name)), axisLine: { show: false } },
+      series: [{ type: 'bar', barMaxWidth: 12, itemStyle: { borderRadius: [0, 4, 4, 0] },
+        label: { show: true, position: 'right', color: th.textMuted, fontSize: 11, formatter: (p: any) => compact(p.value) },
+        data: topC.map(c => c.total) }],
+    };
+
+    const methods = {
+      ...baseOption(th),
+      color: th.cat,
+      grid: { left: 8, right: 56, top: 4, bottom: 4, containLabel: true },
+      tooltip: { ...(baseOption(th) as any).tooltip, trigger: 'item', formatter: (p: any) => `${p.name}<br/><b>${money(p.value)}</b> · ${digits(data.paymentMethods[p.dataIndex]?.count ?? 0)}×` },
+      xAxis: { ...valueAxis(th, compact), show: false },
+      yAxis: { ...categoryAxis(th, data.paymentMethods.map(m => m.name)), inverse: true, axisLine: { show: false } },
+      series: [{ type: 'bar', barMaxWidth: 12, colorBy: 'data', itemStyle: { borderRadius: [0, 4, 4, 0] },
+        label: { show: true, position: 'right', color: th.textMuted, fontSize: 11, formatter: (p: any) => compact(p.value) },
+        data: data.paymentMethods.map(m => m.value) }],
+    };
+
+    return { expectedVsCollected, statusDonut, growth, flow, portfolio, expenseDonut, heat, top, methods };
+  }, [data, th, language]);
+
+  // ---------------------------------------------------------------------------
+  // Actions
+  // ---------------------------------------------------------------------------
+  const exportCsv = async () => {
+    if (!data) return;
+    try {
+      const csv = toCsv(
+        ['Month', 'Expected', 'Collected', 'Late fees', 'Collection rate %', 'Expenses', 'New investments', 'Fund balance', 'Cash in hand'],
+        data.trend.map(p => [p.month, p.expected, p.collected, p.lateFees, p.rate, p.expenses, p.invested, Math.round(p.fundBalance), Math.round(p.cashInHand)]),
+      );
+      const r = await saveTextFile(`BondhuFund_Overview_${data.month}.csv`, csv);
+      if (!r.canceled) showToast(`Saved ${r.filePath}`);
+    } catch (e: any) { showToast(e.message, 'error'); }
   };
+  const exportPdf = async () => {
+    try { const r = await savePdf(`BondhuFund_Overview_${data?.month}.pdf`); if (!r.canceled) showToast(`Saved ${r.filePath}`); }
+    catch (e: any) { showToast(e.message, 'error'); }
+  };
+  const startDemo = async () => {
+    if (!window.confirm('Load demo data? This fills the app with sample members, payments, expenses and investments so you can explore. You can clear it later from Backup & Restore.')) return;
+    setBusy(true);
+    try { await loadDemoData(); showToast('Demo data loaded'); triggerRefresh(); }
+    catch (e: any) { showToast(e.message, 'error'); }
+    finally { setBusy(false); }
+  };
+  const goCollections = (status: string) => { setMemberFilterStatus(status); setActiveTab('collections'); };
 
-  const greetingName = currentUser?.full_name?.split(' ')[0] || 'Nusrat';
+  // ---------------------------------------------------------------------------
+  // Render
+  // ---------------------------------------------------------------------------
+  if (loading && !data) {
+    return (
+      <div className="p-6 lg:p-8 max-w-[1600px] mx-auto space-y-6 animate-pulse">
+        <div className="h-10 w-72 rounded-xl bg-slate-200 dark:bg-slate-800" />
+        <div className="grid grid-cols-2 lg:grid-cols-3 2xl:grid-cols-6 gap-4">{Array.from({ length: 6 }).map((_, i) => <div key={i} className="h-28 rounded-2xl bg-slate-200 dark:bg-slate-800" />)}</div>
+        <div className="grid grid-cols-1 xl:grid-cols-3 gap-4">{Array.from({ length: 3 }).map((_, i) => <div key={i} className="h-72 rounded-2xl bg-slate-200 dark:bg-slate-800" />)}</div>
+      </div>
+    );
+  }
+  if (!data || !opts) return null;
+  const k = data.kpis;
+
+  if (k.totalMembers === 0 && k.investmentCount === 0 && data.recent.length === 0) {
+    return (
+      <div className="p-6 lg:p-10 max-w-3xl mx-auto">
+        <div className="card-base p-8 lg:p-10 text-center">
+          <div className="w-14 h-14 mx-auto rounded-2xl bg-brand-light dark:bg-emerald-950/60 text-brand dark:text-emerald-400 flex items-center justify-center"><Sparkles size={26} /></div>
+          <h1 className="mt-5 text-2xl font-black text-slate-900 dark:text-white">{tr('emptyTitle')}</h1>
+          <p className="mt-2 text-sm text-slate-600 dark:text-slate-300 max-w-lg mx-auto">{tr('emptyBody')}</p>
+          <div className="mt-7 grid grid-cols-1 sm:grid-cols-3 gap-3">
+            <button onClick={() => setActiveTab('members')} className="flex flex-col items-center gap-2 p-4 rounded-2xl bg-brand text-white hover:bg-brand-hover font-bold text-sm"><UserPlus size={20} />{tr('addMember')}</button>
+            <button onClick={() => setActiveTab('backup')} className="flex flex-col items-center gap-2 p-4 rounded-2xl border border-slate-300 dark:border-[#283e4a] text-slate-800 dark:text-slate-100 hover:bg-slate-50 dark:hover:bg-slate-800 font-bold text-sm"><DatabaseBackup size={20} />{tr('restore')}</button>
+            <button disabled={busy} onClick={startDemo} className="flex flex-col items-center gap-2 p-4 rounded-2xl border border-slate-300 dark:border-[#283e4a] text-slate-800 dark:text-slate-100 hover:bg-slate-50 dark:hover:bg-slate-800 font-bold text-sm disabled:opacity-50"><Sparkles size={20} />{tr('demo')}</button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  const attentionCount = k.overdue + data.attention.reviews.length + data.attention.receiptCount + (data.attention.lastBackup === 'Never' ? 1 : 0);
 
   return (
-    <div className="p-6 lg:p-8 space-y-6 max-w-7xl mx-auto">
-      {/* ========================================================= */}
-      {/* 1. TOP HEADER (Matching Image 1: Good morning, Nusrat)    */}
-      {/* ========================================================= */}
-      <div className="flex flex-wrap items-center justify-between gap-4">
+    <div className="p-4 sm:p-6 lg:p-8 space-y-8 max-w-[1600px] mx-auto">
+      {/* Header */}
+      <div className="flex flex-wrap items-end justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-black text-slate-900 dark:text-white tracking-tight">
-            {language === 'bn' ? `শুভ সকাল, ${greetingName}` : `Good morning, ${greetingName}`}
-          </h1>
-          <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5 font-medium">
-            {language === 'bn'
-              ? 'এখানে বন্ধু ফান্ডের সর্বশেষ সামগ্রিক আর্থিক চিত্র।'
-              : 'Here is the latest picture of Bondhu Fund.'}
-          </p>
+          <h1 className="text-2xl font-black text-slate-900 dark:text-white tracking-tight">{hello}{firstName ? `, ${firstName}` : ''}</h1>
+          <p className="text-xs text-slate-500 dark:text-slate-400 mt-1 font-medium">{tr('subtitle')} <b className="text-slate-700 dark:text-slate-200">{fmtMonth(data.month, language as any, false)}</b></p>
         </div>
-
-        <div className="flex items-center gap-3">
-          {/* Interactive Visual Month Picker (Calendar popover, NOT a dropdown) */}
-          <MonthPicker
-            value={selectedMonth}
-            onChange={(m) => {
-              setSelectedMonth(m);
-              showToast(
-                language === 'bn'
-                  ? `নির্বাচিত মাস: ${m}`
-                  : `Viewing records for ${m}`
-              );
-            }}
-          />
-
-          {/* Export Report Action Button */}
-          <button
-            onClick={handleExportReport}
-            className="flex items-center gap-1.5 px-3.5 py-2 bg-white dark:bg-[#16252d] border border-slate-300 dark:border-[#283e4a] rounded-xl text-xs font-bold text-slate-700 dark:text-slate-200 shadow-sm hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors"
-          >
-            <Download size={14} className="text-slate-500 dark:text-slate-400" />
-            <span>{t('common.export')}</span>
-          </button>
+        <div className="flex flex-wrap items-center gap-2 no-print">
+          <MonthPicker value={selectedMonth} onChange={setSelectedMonth} />
+          <button onClick={load} title="Refresh" className="p-2.5 rounded-xl border border-slate-300 dark:border-[#283e4a] bg-white dark:bg-[#16252d] text-slate-600 dark:text-slate-300 hover:text-brand"><RefreshCw size={15} className={loading ? 'animate-spin' : ''} /></button>
+          <button onClick={exportCsv} className="flex items-center gap-1.5 px-3.5 py-2.5 bg-white dark:bg-[#16252d] border border-slate-300 dark:border-[#283e4a] rounded-xl text-xs font-bold text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800"><Download size={14} />{tr('export')}</button>
+          <button onClick={exportPdf} className="flex items-center gap-1.5 px-3.5 py-2.5 bg-brand hover:bg-brand-hover rounded-xl text-xs font-bold text-white"><Printer size={14} />{tr('pdf')}</button>
         </div>
       </div>
 
-      {/* ========================================================= */}
-      {/* 2. TOP 4 METRIC CARDS (Matching Image 1 with Left Border) */}
-      {/* ========================================================= */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        {/* Card 1: Total fund balance (Purple Accent) */}
-        <div className="card-base border-l-4 border-l-purple-500 p-5 shadow-sm hover:shadow-md transition-all flex flex-col justify-between">
-          <div className="flex items-center justify-between">
-            <span className="text-xs font-bold text-slate-500 dark:text-slate-400">
-              {t('metric.total_fund')}
-            </span>
-            <div className="w-8 h-8 rounded-xl bg-purple-50 dark:bg-purple-950/60 flex items-center justify-center text-purple-600 dark:text-purple-400">
-              <Wallet size={16} />
-            </div>
-          </div>
-          <div className="mt-4">
-            <div className="text-2xl font-black text-slate-900 dark:text-white tracking-tight">
-              {formatCurrency(1284600)}
-            </div>
-            <div className="flex items-center gap-1 text-[11px] font-bold text-emerald-600 dark:text-emerald-400 mt-1">
-              <TrendingUp size={12} />
-              <span>+8.4% {language === 'bn' ? 'গত মাসের চেয়ে' : 'from last month'}</span>
-            </div>
-          </div>
-        </div>
-
-        {/* Card 2: This month collected (Emerald Accent + Progress Bar) */}
-        <div className="card-base border-l-4 border-l-emerald-500 p-5 shadow-sm hover:shadow-md transition-all flex flex-col justify-between">
-          <div className="flex items-center justify-between">
-            <span className="text-xs font-bold text-slate-500 dark:text-slate-400">
-              {t('metric.collected_this_month')}
-            </span>
-            <div className="w-8 h-8 rounded-xl bg-emerald-50 dark:bg-emerald-950/60 flex items-center justify-center text-emerald-600 dark:text-emerald-400">
-              <TrendingDown size={16} />
-            </div>
-          </div>
-          <div className="mt-3">
-            <div className="text-2xl font-black text-slate-900 dark:text-white tracking-tight">
-              {formatCurrency(84000)}{' '}
-              <span className="text-xs font-normal text-slate-400">/ {formatCurrency(96000)}</span>
-            </div>
-            <div className="mt-2 space-y-1">
-              <div className="flex items-center justify-between text-[11px] font-bold">
-                <span className="text-slate-500 dark:text-slate-400">
-                  {language === 'bn' ? '৮৭.৫% আদায় হার' : '87.5% collection rate'}
-                </span>
-              </div>
-              <div className="w-full bg-slate-100 dark:bg-slate-800 h-1.5 rounded-full overflow-hidden">
-                <div className="bg-[#0f4a3c] dark:bg-emerald-500 h-full rounded-full" style={{ width: '87.5%' }} />
-              </div>
-            </div>
-          </div>
-        </div>
-
-        {/* Card 3: Active members (Amber Accent) */}
-        <div className="card-base border-l-4 border-l-amber-500 p-5 shadow-sm hover:shadow-md transition-all flex flex-col justify-between">
-          <div className="flex items-center justify-between">
-            <span className="text-xs font-bold text-slate-500 dark:text-slate-400">
-              {t('metric.active_members')}
-            </span>
-            <div className="w-8 h-8 rounded-xl bg-amber-50 dark:bg-amber-950/60 flex items-center justify-center text-amber-600 dark:text-amber-400">
-              <Users size={16} />
-            </div>
-          </div>
-          <div className="mt-4">
-            <div className="text-2xl font-black text-slate-900 dark:text-white tracking-tight">
-              {language === 'bn' ? toBanglaDigits(48) : 48}
-            </div>
-            <button
-              onClick={() => {
-                setMemberFilterStatus('Overdue');
-                setActiveTab('members');
-              }}
-              className="text-[11px] font-bold text-amber-600 dark:text-amber-400 hover:underline mt-1 block text-left"
-            >
-              {language === 'bn' ? '৩ জনের বকেয়া চাঁদা রয়েছে' : '3 payments overdue'} →
-            </button>
-          </div>
-        </div>
-
-        {/* Card 4: Invested assets (Blue Accent) */}
-        <div className="card-base border-l-4 border-l-blue-500 p-5 shadow-sm hover:shadow-md transition-all flex flex-col justify-between">
-          <div className="flex items-center justify-between">
-            <span className="text-xs font-bold text-slate-500 dark:text-slate-400">
-              {t('metric.invested_assets')}
-            </span>
-            <div className="w-8 h-8 rounded-xl bg-blue-50 dark:bg-blue-950/60 flex items-center justify-center text-blue-600 dark:text-blue-400">
-              <Building size={16} />
-            </div>
-          </div>
-          <div className="mt-4">
-            <div className="text-2xl font-black text-slate-900 dark:text-white tracking-tight">
-              {formatCurrency(920000)}
-            </div>
-            <div className="text-[11px] text-slate-500 dark:text-slate-400 font-semibold mt-1">
-              {language === 'bn' ? 'মোট ফান্ডের ৭১.৬%' : '71.6% of total fund'}
-            </div>
-          </div>
-        </div>
+      {/* KPI tiles */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-6 gap-4">
+        <Kpi icon={<Wallet size={16} />} label={tr('netWorth')} value={money(k.netWorth)} delta={pct(k.fundBalance, k.prevFundBalance)} deltaLabel={tr('vsLast')} digits={digits} />
+        <Kpi icon={<Landmark size={16} />} label={tr('cash')} value={money(k.cashInHand)} delta={pct(k.cashInHand, k.prevCashInHand)} deltaLabel={tr('vsLast')} digits={digits} />
+        <Kpi icon={<HandCoins size={16} />} label={tr('collected')} value={money(k.monthCollected)}
+          foot={<Progress value={k.collectionRate} label={`${digits(k.collectionRate)}% ${tr('of')} ${money(k.monthExpected)}`} />} />
+        <Kpi icon={<AlertTriangle size={16} />} label={tr('outstanding')} value={money(k.outstanding)} tone={k.outstanding > 0 ? 'warn' : undefined}
+          foot={<span className="text-[11px] text-slate-500 dark:text-slate-400">{digits(k.pending + k.overdue)} {tr('members_n')} · {language === 'bn' ? 'মোট বকেয়া' : 'total arrears'} {money(k.totalArrears)}</span>}
+          onClick={() => goCollections('Overdue')} />
+        <Kpi icon={<Building2 size={16} />} label={tr('portfolio')} value={money(k.portfolioValue)}
+          foot={<span className={`text-[11px] font-bold ${k.unrealizedGain >= 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-rose-600 dark:text-rose-400'}`}>{k.unrealizedGain >= 0 ? '+' : '−'}{money(Math.abs(k.unrealizedGain))} {k.unrealizedGain >= 0 ? tr('gain') : tr('loss')}</span>}
+          onClick={() => setActiveTab('investments')} />
+        <Kpi icon={<Receipt size={16} />} label={tr('expenses')} value={money(k.monthExpenses)} delta={pct(k.monthExpenses, k.prevMonthExpenses)} deltaLabel={tr('vsLast')} invertDelta digits={digits}
+          onClick={() => setActiveTab('expenses')} />
       </div>
 
-      {/* ========================================================= */}
-      {/* 3. MIDDLE ROW: Fund growth & Collection status            */}
-      {/* ========================================================= */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Left 2 Cols: Fund growth Area Chart (Matching Image 1) */}
-        <div className="lg:col-span-2 card-base p-6 space-y-4">
-          <div className="flex items-center justify-between">
-            <div>
-              <h2 className="text-base font-bold text-slate-900 dark:text-white">
-                {language === 'bn' ? 'ফান্ড বৃদ্ধি চার্ট' : 'Fund growth'}
-              </h2>
-              <p className="text-xs text-slate-400 mt-0.5">
-                {language === 'bn' ? 'মাসিক ক্রমপুঞ্জিত তহবিলের গতিধারা' : 'Monthly cumulative treasury progression'}
-              </p>
-            </div>
-
-            {/* Period Switcher Pills (6m / 12m) */}
-            <div className="flex items-center bg-slate-100 dark:bg-slate-800 p-0.5 rounded-lg border border-slate-200 dark:border-slate-700 text-xs">
-              <button
-                onClick={() => setGrowthPeriod('6m')}
-                className={`px-3 py-1 rounded-md font-bold transition-all ${
-                  growthPeriod === '6m'
-                    ? 'bg-white dark:bg-[#15232b] text-slate-900 dark:text-white shadow-sm'
-                    : 'text-slate-500 hover:text-slate-800 dark:hover:text-white'
-                }`}
-              >
-                {language === 'bn' ? '৬ মাস' : '6 months'}
-              </button>
-              <button
-                onClick={() => setGrowthPeriod('12m')}
-                className={`px-3 py-1 rounded-md font-bold transition-all ${
-                  growthPeriod === '12m'
-                    ? 'bg-white dark:bg-[#15232b] text-slate-900 dark:text-white shadow-sm'
-                    : 'text-slate-500 hover:text-slate-800 dark:hover:text-white'
-                }`}
-              >
-                {language === 'bn' ? '১২ মাস' : '12 months'}
-              </button>
-            </div>
-          </div>
-
-          {/* Area Chart with Fixed High-Contrast Tooltip */}
-          <div className="h-64 w-full pt-2">
-            <ResponsiveContainer width="100%" height="100%">
-              <AreaChart data={growthPeriod === '6m' ? fundGrowthData6m : fundGrowthData12m}>
-                <defs>
-                  <linearGradient id="fundGreenGradient" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%" stopColor="#0f4a3c" stopOpacity={0.25} />
-                    <stop offset="95%" stopColor="#0f4a3c" stopOpacity={0.01} />
-                  </linearGradient>
-                </defs>
-                <XAxis dataKey="month" axisLine={false} tickLine={false} tick={{ fill: '#64748b', fontSize: 11 }} />
-                <YAxis
-                  axisLine={false}
-                  tickLine={false}
-                  tick={{ fill: '#64748b', fontSize: 11 }}
-                  tickFormatter={(val) => `${(val / 1000).toFixed(0)}k`}
-                />
-                <Tooltip content={<CustomChartTooltip currencyPrefix={language === 'bn' ? '৳' : 'TK'} />} />
-                <Area
-                  type="monotone"
-                  dataKey="amount"
-                  name={language === 'bn' ? 'মোট তহবিল' : 'Total Fund'}
-                  stroke="#0f4a3c"
-                  strokeWidth={2.5}
-                  fillOpacity={1}
-                  fill="url(#fundGreenGradient)"
-                />
-              </AreaChart>
-            </ResponsiveContainer>
-          </div>
+      {/* Collections */}
+      <Section icon={<HandCoins size={15} />} title={tr('collections')}>
+        <div className="grid grid-cols-1 xl:grid-cols-3 gap-4">
+          <ChartCard className="xl:col-span-2" title={tr('expVsColl')} subtitle={tr('last12')} icon={<Activity size={15} />}
+            empty={data.trend.every(p => !p.expected && !p.collected)} emptyText={tr('noData')}
+            table={{ headers: ['Month', 'Expected', 'Collected', 'Rate'], rows: data.trend.map(p => [mLabel(p.month), money(p.expected), money(p.collected), `${digits(p.rate)}%`]) }}>
+            <EChart option={opts.expectedVsCollected} height={280} ariaLabel="Expected versus collected dues, last 12 months" />
+          </ChartCard>
+          <ChartCard title={tr('status')} subtitle={fmtMonth(data.month, language as any, false)} icon={<PieIcon size={15} />}
+            empty={k.dueMembers === 0} emptyText={tr('noData')}
+            table={{ headers: ['Status', 'Members'], rows: [[tr('paid'), digits(k.paid)], [tr('pending'), digits(k.pending)], [tr('overdue'), digits(k.overdue)]] }}>
+            <EChart option={opts.statusDonut} height={280} ariaLabel="Dues status for selected month"
+              onClick={(p: any) => p?.data?.filter && goCollections(p.data.filter)} />
+          </ChartCard>
         </div>
+      </Section>
 
-        {/* Right 1 Col: Collection status Donut Chart (Matching Image 1) */}
-        <div className="card-base p-6 space-y-4 flex flex-col justify-between">
-          <div>
-            <h2 className="text-base font-bold text-slate-900 dark:text-white">
-              {t('heading.collection_status')}
-            </h2>
-            <p className="text-xs text-slate-400 mt-0.5">
-              {language === 'bn' ? 'চলতি মাসের চাঁদা পরিশোধের হার' : 'Current month member standing'}
-            </p>
-          </div>
-
-          <div className="relative h-44 w-44 mx-auto flex items-center justify-center my-2">
-            <ResponsiveContainer width="100%" height="100%">
-              <PieChart>
-                <Tooltip content={<CustomChartTooltip currencyPrefix={language === 'bn' ? '৳' : 'TK'} />} />
-                <Pie
-                  data={collectionPieData}
-                  cx="50%"
-                  cy="50%"
-                  innerRadius={50}
-                  outerRadius={70}
-                  paddingAngle={3}
-                  dataKey="value"
-                >
-                  {collectionPieData.map((entry, idx) => (
-                    <Cell key={`cell-${idx}`} fill={entry.color} />
-                  ))}
-                </Pie>
-              </PieChart>
-            </ResponsiveContainer>
-
-            {/* Center percentage label: 87.5% paid */}
-            <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none text-center">
-              <span className="text-lg font-black text-slate-900 dark:text-white leading-none">
-                {language === 'bn' ? toBanglaDigits('87.5%') : '87.5%'}
-              </span>
-              <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider mt-1">
-                {language === 'bn' ? 'পরিশোধিত' : 'Paid'}
-              </span>
-            </div>
-          </div>
-
-          {/* Clean Vertical Legend matching Image 1 */}
-          <div className="space-y-2 pt-2 border-t border-slate-100 dark:border-slate-800 text-xs">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <span className="w-2.5 h-2.5 rounded-full bg-[#0f4a3c] dark:bg-emerald-500" />
-                <span className="text-slate-600 dark:text-slate-300 font-medium">{t('status.paid')}</span>
-              </div>
-              <span className="font-black text-slate-900 dark:text-white">
-                {language === 'bn' ? toBanglaDigits(42) : 42}
-              </span>
-            </div>
-
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <span className="w-2.5 h-2.5 rounded-full bg-amber-500" />
-                <span className="text-slate-600 dark:text-slate-300 font-medium">{t('status.pending')}</span>
-              </div>
-              <span className="font-black text-slate-900 dark:text-white">
-                {language === 'bn' ? toBanglaDigits(3) : 3}
-              </span>
-            </div>
-
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <span className="w-2.5 h-2.5 rounded-full bg-blue-600" />
-                <span className="text-slate-600 dark:text-slate-300 font-medium">{t('status.overdue')}</span>
-              </div>
-              <span className="font-black text-slate-900 dark:text-white">
-                {language === 'bn' ? toBanglaDigits(3) : 3}
-              </span>
-            </div>
-          </div>
+      {/* Fund */}
+      <Section icon={<TrendingUp size={15} />} title={tr('fund')}>
+        <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
+          <ChartCard title={tr('balance')} subtitle={tr('last12')} icon={<Wallet size={15} />}
+            table={{ headers: ['Month', 'Fund balance', 'Cash in hand'], rows: data.trend.map(p => [mLabel(p.month), money(p.fundBalance), money(p.cashInHand)]) }}>
+            <EChart option={opts.growth} height={280} ariaLabel="Fund balance and cash in hand over 12 months" />
+          </ChartCard>
+          <ChartCard title={tr('flow')} subtitle={tr('last12')} icon={<ArrowDownLeft size={15} />}
+            empty={data.trend.every(p => !p.collected && !p.expenses && !p.invested)} emptyText={tr('noData')}
+            table={{ headers: ['Month', 'In', 'Expenses', 'Investments'], rows: data.trend.map(p => [mLabel(p.month), money(p.collected + p.lateFees), money(p.expenses), money(p.invested)]) }}>
+            <EChart option={opts.flow} height={280} ariaLabel="Monthly money in versus money out" />
+          </ChartCard>
         </div>
-      </div>
+      </Section>
 
-      {/* ========================================================= */}
-      {/* 4. BOTTOM ROW: Needs attention & Recent activity          */}
-      {/* (Matching Image 1 EXACTLY, with nice Action buttons)      */}
-      {/* ========================================================= */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* Left Col: Needs attention (Matching Image 1) */}
-        <div className="card-base p-6 space-y-4">
-          <div className="flex items-center justify-between pb-1 border-b border-slate-100 dark:border-slate-800">
-            <h2 className="text-base font-bold text-slate-900 dark:text-white flex items-center gap-2">
-              <AlertCircle size={16} className="text-amber-500" />
-              <span>{t('heading.needs_attention')}</span>
-            </h2>
-            <span className="text-[11px] font-bold text-amber-700 dark:text-amber-400 bg-amber-50 dark:bg-amber-950/60 px-2.5 py-0.5 rounded-full border border-amber-200 dark:border-amber-900/50">
-              {language === 'bn' ? '৩টি অ্যাকশন বাকি' : '3 Actions Pending'}
-            </span>
-          </div>
-
-          <div className="space-y-3">
-            {/* Item 1: Overdue dues */}
-            <div className="p-3.5 bg-amber-50/60 dark:bg-amber-950/20 rounded-xl border border-amber-200/80 dark:border-amber-900/40 flex items-center justify-between gap-3">
-              <div className="flex items-start gap-3">
-                <div className="w-8 h-8 rounded-lg bg-amber-100 dark:bg-amber-900/50 flex items-center justify-center text-amber-700 dark:text-amber-300 shrink-0 mt-0.5">
-                  <Clock size={16} />
-                </div>
-                <div>
-                  <div className="text-xs font-bold text-slate-900 dark:text-white">
-                    {language === 'bn' ? '৩ জন সদস্যের চাঁদা বকেয়া আছে' : '3 members have overdue dues'}
-                  </div>
-                  <div className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5">
-                    {language === 'bn' ? '৩০ জুনের পূর্বে নোটিশ পাঠান' : 'Follow up before 30 June'}
-                  </div>
-                </div>
-              </div>
-
-              <button
-                onClick={() => {
-                  setMemberFilterStatus('Overdue');
-                  setActiveTab('members');
-                }}
-                className="px-3 py-1.5 bg-white dark:bg-slate-800 hover:bg-slate-50 text-amber-800 dark:text-amber-300 border border-amber-300 dark:border-amber-700/60 rounded-lg text-xs font-bold shadow-xs transition-colors shrink-0"
-              >
-                {language === 'bn' ? 'পদক্ষেপ নিন' : 'Action'}
-              </button>
-            </div>
-
-            {/* Item 2: Land purchase review */}
-            <div className="p-3.5 bg-blue-50/60 dark:bg-blue-950/20 rounded-xl border border-blue-200/80 dark:border-blue-900/40 flex items-center justify-between gap-3">
-              <div className="flex items-start gap-3">
-                <div className="w-8 h-8 rounded-lg bg-blue-100 dark:bg-blue-900/50 flex items-center justify-center text-blue-700 dark:text-blue-300 shrink-0 mt-0.5">
-                  <Building size={16} />
-                </div>
-                <div>
-                  <div className="text-xs font-bold text-slate-900 dark:text-white">
-                    {language === 'bn' ? 'জমি ক্রয়ের নথি পর্যালোচনা বাকি' : 'Land purchase review is due'}
-                  </div>
-                  <div className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5">
-                    {language === 'bn' ? 'কমিটি বৈঠক: ২৮ জুন ২০২৪' : 'Committee meeting on 28 June'}
-                  </div>
-                </div>
-              </div>
-
-              <button
-                onClick={() => setActiveTab('investments')}
-                className="px-3 py-1.5 bg-white dark:bg-slate-800 hover:bg-slate-50 text-blue-800 dark:text-blue-300 border border-blue-300 dark:border-blue-700/60 rounded-lg text-xs font-bold shadow-xs transition-colors shrink-0"
-              >
-                {language === 'bn' ? 'পর্যালোচনা' : 'Review'}
-              </button>
-            </div>
-
-            {/* Item 3: Meetup expense receipt */}
-            <div className="p-3.5 bg-emerald-50/60 dark:bg-emerald-950/20 rounded-xl border border-emerald-200/80 dark:border-emerald-900/40 flex items-center justify-between gap-3">
-              <div className="flex items-start gap-3">
-                <div className="w-8 h-8 rounded-lg bg-emerald-100 dark:bg-emerald-900/50 flex items-center justify-center text-[#0f4a3c] dark:text-emerald-300 shrink-0 mt-0.5">
-                  <FileCheck size={16} />
-                </div>
-                <div>
-                  <div className="text-xs font-bold text-slate-900 dark:text-white">
-                    {language === 'bn' ? 'জুন সভার খরচের রশিদ জমা বাকি' : 'June meetup expense needs receipt'}
-                  </div>
-                  <div className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5">
-                    {language === 'bn' ? 'দাখিল করেছেন: রফিক হাসান' : 'Submitted by Rafiq Hasan'}
-                  </div>
-                </div>
-              </div>
-
-              <button
-                onClick={() => setActiveTab('expenses')}
-                className="px-3 py-1.5 bg-white dark:bg-slate-800 hover:bg-slate-50 text-[#0f4a3c] dark:text-emerald-300 border border-emerald-300 dark:border-emerald-700/60 rounded-lg text-xs font-bold shadow-xs transition-colors shrink-0"
-              >
-                {language === 'bn' ? 'যাচাই করুন' : 'Verify'}
-              </button>
-            </div>
-          </div>
+      {/* Portfolio & spending */}
+      <Section icon={<Building2 size={15} />} title={tr('portfolioSpend')}>
+        <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
+          <ChartCard title={tr('bySector')} subtitle={`${digits(k.investmentCount)} ${language === 'bn' ? 'টি সক্রিয় বিনিয়োগ' : 'active investments'}`} icon={<Building2 size={15} />}
+            empty={data.portfolio.length === 0} emptyText={tr('noData')}
+            table={{ headers: ['Sector', 'Cost', 'Est. value', 'Gain'], rows: data.portfolio.map(p => [p.name, money(p.invested), money(p.value), money(p.value - p.invested)]) }}>
+            <EChart option={opts.portfolio} height={Math.max(200, 60 + data.portfolio.length * 46)} ariaLabel="Investment cost versus estimated value by sector" />
+          </ChartCard>
+          <ChartCard title={tr('byCategory')} subtitle={tr('last12')} icon={<Receipt size={15} />}
+            empty={data.expenseByCategory.length === 0} emptyText={tr('noData')}
+            table={{ headers: ['Category', 'Amount', 'Entries'], rows: data.expenseByCategory.map(c => [c.name, money(c.value), digits(c.count)]) }}>
+            <EChart option={opts.expenseDonut} height={260} ariaLabel="Expenses by category, last 12 months" />
+          </ChartCard>
         </div>
+      </Section>
 
-        {/* Right Col: Recent activity (Matching Image 1 with Horizontal Scroll & Open Icons) */}
-        <div className="card-base p-6 space-y-4">
-          <div className="flex items-center justify-between pb-1 border-b border-slate-100 dark:border-slate-800">
-            <h2 className="text-base font-bold text-slate-900 dark:text-white">
-              {t('heading.recent_activity')}
-            </h2>
-            <button
-              onClick={() => setActiveTab('collections')}
-              className="text-xs font-bold text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white flex items-center gap-1 transition-colors"
-            >
-              <span>{language === 'bn' ? 'সকল দেখুন' : 'View all'}</span>
-              <ArrowRight size={13} />
-            </button>
-          </div>
-
-          <div className="divide-y divide-slate-100 dark:divide-slate-800/80">
-            {/* Activity 1: Mim Akter paid June contribution */}
-            <div className="py-3 flex items-center justify-between gap-3">
-              <div className="flex items-center gap-3 min-w-0">
-                <div className="w-8 h-8 rounded-full bg-emerald-50 dark:bg-emerald-950/60 text-[#0f4a3c] dark:text-emerald-300 flex items-center justify-center shrink-0">
-                  <CheckCircle2 size={16} />
-                </div>
-                <div className="min-w-0">
-                  <div className="text-xs font-bold text-slate-900 dark:text-white truncate">
-                    {language === 'bn' ? 'মিম আক্তার জুন মাসের চাঁদা জমা দিয়েছেন' : 'Mim Akter paid June contribution'}
-                  </div>
-                  <div className="text-[11px] text-slate-400 mt-0.5">
-                    {language === 'bn' ? 'আজ, ১০:৪২ পূর্বাহ্ন' : 'Today, 10:42 AM'}
-                  </div>
-                </div>
-              </div>
-
-              <div className="flex items-center gap-2 shrink-0">
-                <span className="text-xs font-black text-emerald-700 dark:text-emerald-400">
-                  +TK 2,000
-                </span>
-                <button
-                  onClick={() => {
-                    setActiveTab('collections');
-                    showToast('Viewing Mim Akter payment voucher');
-                  }}
-                  className="p-1 text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 rounded-md hover:bg-slate-100 dark:hover:bg-slate-800"
-                  title="View Voucher"
-                >
-                  <Eye size={14} />
-                </button>
-              </div>
+      {/* Members */}
+      <Section icon={<Users size={15} />} title={tr('members')}>
+        <div className="grid grid-cols-1 xl:grid-cols-3 gap-4">
+          <ChartCard className="xl:col-span-2" title={tr('heat')} subtitle={tr('heatSub')} icon={<CalendarDays size={15} />}
+            empty={data.dailyCollections.length === 0} emptyText={tr('noData')}
+            table={{ headers: ['Date', 'Amount', 'Payments'], rows: [...data.dailyCollections].sort((a, b) => b.date.localeCompare(a.date)).map(d => [formatDate(d.date), money(d.value), digits(d.count)]) }}>
+            <EChart option={opts.heat} height={150} ariaLabel="Calendar of daily collections" />
+            <div className="flex items-center justify-end gap-1.5 mt-2 text-[10px] text-slate-500 dark:text-slate-400">
+              <span>{language === 'bn' ? 'কম' : 'Less'}</span>
+              {th.seq.map(c => <span key={c} className="w-3 h-3 rounded-sm" style={{ background: c }} />)}
+              <span>{language === 'bn' ? 'বেশি' : 'More'}</span>
             </div>
-
-            {/* Activity 2: Plot investment milestone */}
-            <div className="py-3 flex items-center justify-between gap-3">
-              <div className="flex items-center gap-3 min-w-0">
-                <div className="w-8 h-8 rounded-full bg-blue-50 dark:bg-blue-950/60 text-blue-700 dark:text-blue-300 flex items-center justify-center shrink-0">
-                  <TrendingUp size={16} />
-                </div>
-                <div className="min-w-0">
-                  <div className="text-xs font-bold text-slate-900 dark:text-white truncate">
-                    {language === 'bn' ? 'উত্তরা প্লট কিস্তির টাকা প্রদান' : 'Added plot investment milestone'}
-                  </div>
-                  <div className="text-[11px] text-slate-400 mt-0.5">
-                    {language === 'bn' ? 'গতকাল, ৪:১৫ অপরাহ্ন' : 'Yesterday, 4:15 PM'}
-                  </div>
-                </div>
-              </div>
-
-              <div className="flex items-center gap-2 shrink-0">
-                <span className="text-xs font-black text-slate-900 dark:text-white">
-                  TK 120,000
-                </span>
-                <button
-                  onClick={() => setActiveTab('investments')}
-                  className="p-1 text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 rounded-md hover:bg-slate-100 dark:hover:bg-slate-800"
-                  title="View Investment"
-                >
-                  <Eye size={14} />
-                </button>
-              </div>
+          </ChartCard>
+          <ChartCard title={tr('methods')} subtitle={tr('last12')} icon={<Landmark size={15} />}
+            empty={data.paymentMethods.length === 0} emptyText={tr('noData')}
+            table={{ headers: ['Method', 'Amount', 'Payments'], rows: data.paymentMethods.map(m => [m.name, money(m.value), digits(m.count)]) }}>
+            <EChart option={opts.methods} height={Math.max(150, 30 + data.paymentMethods.length * 34)} ariaLabel="Collections by payment method" />
+          </ChartCard>
+          <ChartCard title={tr('top')} subtitle={language === 'bn' ? 'আজীবন অবদান' : 'Lifetime contribution'} icon={<Users size={15} />}
+            empty={data.topContributors.length === 0} emptyText={tr('noData')}
+            table={{ headers: ['Member', 'Total'], rows: data.topContributors.map(c => [`${c.name} (${c.member_code})`, money(c.total)]) }}>
+            <EChart option={opts.top} height={Math.max(180, 20 + data.topContributors.length * 30)} ariaLabel="Top contributors" />
+          </ChartCard>
+          <section className="card-base p-5 xl:col-span-2 min-w-0">
+            <div className="flex items-center justify-between mb-3">
+              <h3 className="text-sm font-extrabold text-slate-900 dark:text-white flex items-center gap-2"><AlertTriangle size={15} className="text-rose-500" />{tr('arrears')}</h3>
+              <span className="text-[11px] text-slate-500 dark:text-slate-400">{digits(k.membersInArrears)} {tr('members_n')} · {money(k.totalArrears)}</span>
             </div>
-
-            {/* Activity 3: Rafiq Hasan added meetup expense */}
-            <div className="py-3 flex items-center justify-between gap-3">
-              <div className="flex items-center gap-3 min-w-0">
-                <div className="w-8 h-8 rounded-full bg-rose-50 dark:bg-rose-950/60 text-rose-700 dark:text-rose-300 flex items-center justify-center shrink-0">
-                  <Wallet size={16} />
-                </div>
-                <div className="min-w-0">
-                  <div className="text-xs font-bold text-slate-900 dark:text-white truncate">
-                    {language === 'bn' ? 'রফিক হাসান সভা খরচ ভাউচার দাখিল করেছেন' : 'Rafiq Hasan added meetup expense'}
-                  </div>
-                  <div className="text-[11px] text-slate-400 mt-0.5">
-                    {language === 'bn' ? '২৮ জুন, ৯:৩০ অপরাহ্ন' : '28 Jun, 9:30 PM'}
-                  </div>
-                </div>
+            {data.arrears.length === 0 ? (
+              <p className="text-xs text-slate-500 dark:text-slate-400 py-8 text-center flex items-center justify-center gap-2"><ShieldCheck size={16} className="text-emerald-500" />{tr('allClear')}</p>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full text-xs">
+                  <thead><tr className="text-slate-500 dark:text-slate-400 border-b border-slate-200 dark:border-[#22353f]">
+                    <th className="text-left py-2 font-bold">{language === 'bn' ? 'সদস্য' : 'Member'}</th>
+                    <th className="text-right py-2 font-bold">{language === 'bn' ? 'বকেয়া মাস' : 'Unpaid months'}</th>
+                    <th className="text-right py-2 font-bold">{language === 'bn' ? 'পরিমাণ' : 'Amount'}</th>
+                    <th className="py-2" />
+                  </tr></thead>
+                  <tbody>
+                    {data.arrears.map(a => (
+                      <tr key={a.id} className="border-b border-slate-100 dark:border-[#1b2c34] last:border-0">
+                        <td className="py-2">
+                          <div className="flex items-center gap-2.5">
+                            <span className="w-7 h-7 rounded-full bg-rose-50 dark:bg-rose-950/50 text-rose-700 dark:text-rose-300 flex items-center justify-center text-[10px] font-black">{a.avatar_initials}</span>
+                            <div><div className="font-bold text-slate-800 dark:text-slate-100">{a.name}</div><div className="text-[10px] text-slate-500">{a.member_code}{a.phone ? ` · ${a.phone}` : ''}</div></div>
+                          </div>
+                        </td>
+                        <td className="py-2 text-right tabular-nums font-bold text-slate-700 dark:text-slate-200">{digits(a.months)}</td>
+                        <td className="py-2 text-right tabular-nums font-bold text-rose-600 dark:text-rose-400">{money(a.amount)}</td>
+                        <td className="py-2 text-right no-print">
+                          <button onClick={() => { setSelectedMemberIdForPayment(a.id); setOpenRecordModal(true); }}
+                            className="px-2.5 py-1 rounded-lg text-[11px] font-bold bg-brand text-white hover:bg-brand-hover">{language === 'bn' ? 'আদায়' : 'Collect'}</button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
               </div>
-
-              <div className="flex items-center gap-2 shrink-0">
-                <span className="text-xs font-black text-rose-700 dark:text-rose-400">
-                  TK 6,800
-                </span>
-                <button
-                  onClick={() => setActiveTab('expenses')}
-                  className="p-1 text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 rounded-md hover:bg-slate-100 dark:hover:bg-slate-800"
-                  title="Verify Expense"
-                >
-                  <Eye size={14} />
-                </button>
-              </div>
-            </div>
-
-            {/* Activity 4: Sadia Rahman paid May late fee */}
-            <div className="py-3 flex items-center justify-between gap-3">
-              <div className="flex items-center gap-3 min-w-0">
-                <div className="w-8 h-8 rounded-full bg-amber-50 dark:bg-amber-950/60 text-amber-700 dark:text-amber-300 flex items-center justify-center shrink-0">
-                  <Clock size={16} />
-                </div>
-                <div className="min-w-0">
-                  <div className="text-xs font-bold text-slate-900 dark:text-white truncate">
-                    {language === 'bn' ? 'সাদিয়া রহমান মে মাসের বিলম্ব ফি পরিশোধ করেছেন' : 'Sadia Rahman paid May late fee'}
-                  </div>
-                  <div className="text-[11px] text-slate-400 mt-0.5">
-                    {language === 'bn' ? '২২ জুন, ৯:১০ পূর্বাহ্ন' : '22 Jun, 9:10 AM'}
-                  </div>
-                </div>
-              </div>
-
-              <div className="flex items-center gap-2 shrink-0">
-                <span className="text-xs font-black text-emerald-700 dark:text-emerald-400">
-                  +TK 300
-                </span>
-                <button
-                  onClick={() => setActiveTab('collections')}
-                  className="p-1 text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 rounded-md hover:bg-slate-100 dark:hover:bg-slate-800"
-                  title="View Voucher"
-                >
-                  <Eye size={14} />
-                </button>
-              </div>
-            </div>
-          </div>
+            )}
+          </section>
         </div>
+      </Section>
+
+      {/* Attention + activity */}
+      <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
+        <section className="card-base p-5">
+          <h3 className="text-sm font-extrabold text-slate-900 dark:text-white flex items-center gap-2 mb-3">
+            <BellRing size={15} className="text-amber-500" />{tr('attention')}
+            {attentionCount > 0 && <span className="ml-1 px-2 py-0.5 rounded-full bg-amber-100 dark:bg-amber-950/60 text-amber-700 dark:text-amber-300 text-[10px] font-black">{digits(attentionCount)}</span>}
+          </h3>
+          <ul className="space-y-2">
+            {k.overdue > 0 && <Attention tone="critical" icon={<AlertTriangle size={14} />} title={`${digits(k.overdue)} ${language === 'bn' ? 'জন সদস্যের বকেয়া মেয়াদোত্তীর্ণ' : 'members overdue this month'}`} sub={money(k.outstanding)} onClick={() => goCollections('Overdue')} />}
+            {data.attention.reviews.map(r => <Attention key={r.id} tone="warning" icon={<Building2 size={14} />} title={`${r.name}`} sub={`${language === 'bn' ? 'রিভিউ' : 'Review'} ${formatDate(r.review_date)}`} onClick={() => setActiveTab('investments')} />)}
+            {data.attention.receiptCount > 0 && <Attention tone="warning" icon={<FileWarning size={14} />} title={`${digits(data.attention.receiptCount)} ${language === 'bn' ? 'টি খরচের রসিদ প্রয়োজন' : 'expenses need a receipt'}`} sub={data.attention.receipts.slice(0, 2).map(r => r.title).join(', ')} onClick={() => setActiveTab('expenses')} />}
+            {(data.attention.lastBackup === 'Never' || Date.now() - Date.parse(data.attention.lastBackup) > 7 * 864e5) &&
+              <Attention tone="warning" icon={<DatabaseBackup size={14} />} title={language === 'bn' ? 'ব্যাকআপ নিন' : 'Back up your data'} sub={data.attention.lastBackup === 'Never' ? (language === 'bn' ? 'এখনও কোনো ব্যাকআপ নেই' : 'No manual backup yet') : `${language === 'bn' ? 'সর্বশেষ' : 'Last'} ${formatDate(data.attention.lastBackup.slice(0, 10))}`} onClick={() => setActiveTab('backup')} />}
+            {attentionCount === 0 && <li className="text-xs text-slate-500 dark:text-slate-400 py-6 text-center flex items-center justify-center gap-2"><ShieldCheck size={16} className="text-emerald-500" />{tr('allClear')}</li>}
+          </ul>
+        </section>
+        <section className="card-base p-5">
+          <div className="flex items-center justify-between mb-3">
+            <h3 className="text-sm font-extrabold text-slate-900 dark:text-white flex items-center gap-2"><Activity size={15} className="text-brand dark:text-emerald-400" />{tr('recent')}</h3>
+            <button onClick={() => setOpenRecordModal(true)} className="no-print flex items-center gap-1 text-[11px] font-bold text-brand dark:text-emerald-400 hover:underline"><Plus size={12} />{language === 'bn' ? 'পেমেন্ট' : 'Record payment'}</button>
+          </div>
+          {data.recent.length === 0 ? <p className="text-xs text-slate-500 py-6 text-center">{tr('noData')}</p> : (
+            <ul className="divide-y divide-slate-100 dark:divide-[#1b2c34]">
+              {data.recent.map(r => (
+                <li key={`${r.kind}-${r.id}`} className="py-2.5 flex items-center gap-3">
+                  <span className={`w-8 h-8 shrink-0 rounded-xl flex items-center justify-center ${r.kind === 'collection' ? 'bg-emerald-50 text-emerald-600 dark:bg-emerald-950/50 dark:text-emerald-400' : r.kind === 'member' ? 'bg-sky-50 text-sky-600 dark:bg-sky-950/50 dark:text-sky-400' : 'bg-rose-50 text-rose-600 dark:bg-rose-950/50 dark:text-rose-400'}`}>
+                    {r.kind === 'collection' ? <ArrowDownLeft size={14} /> : r.kind === 'member' ? <UserPlus size={14} /> : <ArrowUpRight size={14} />}
+                  </span>
+                  <div className="min-w-0 flex-1">
+                    <div className="text-xs font-bold text-slate-800 dark:text-slate-100 truncate">{r.kind === 'collection' ? r.title.replace(/(\d{4}-\d{2})$/, m => mLabel(m)) : r.title}</div>
+                    <div className="text-[10px] text-slate-500 dark:text-slate-400 truncate">{r.sub} · {formatDate(r.date)}</div>
+                  </div>
+                  {r.amount !== 0 && <span className={`text-xs font-black tabular-nums ${r.amount > 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-slate-700 dark:text-slate-200'}`}>{r.amount > 0 ? '+' : '−'}{money(Math.abs(r.amount))}</span>}
+                </li>
+              ))}
+            </ul>
+          )}
+        </section>
       </div>
     </div>
   );
 };
+
+// -----------------------------------------------------------------------------
+// Pieces
+// -----------------------------------------------------------------------------
+function pct(cur: number, prev: number): number | null {
+  if (!prev) return null;
+  return +(((cur - prev) / Math.abs(prev)) * 100).toFixed(1);
+}
+
+const Section: React.FC<{ icon: React.ReactNode; title: string; children: React.ReactNode }> = ({ icon, title, children }) => (
+  <div className="space-y-3">
+    <h2 className="flex items-center gap-2 text-[11px] font-black uppercase tracking-[0.12em] text-slate-500 dark:text-slate-400">
+      <span className="text-brand dark:text-emerald-400">{icon}</span>{title}
+      <span className="flex-1 h-px bg-slate-200 dark:bg-[#22353f] ml-2" />
+    </h2>
+    {children}
+  </div>
+);
+
+const Kpi: React.FC<{
+  icon: React.ReactNode; label: string; value: string; delta?: number | null; deltaLabel?: string; invertDelta?: boolean;
+  foot?: React.ReactNode; tone?: 'warn'; onClick?: () => void; digits?: (s: string | number) => string;
+}> = ({ icon, label, value, delta, deltaLabel, invertDelta, foot, tone, onClick, digits = String }) => {
+  const good = delta === null || delta === undefined ? null : invertDelta ? delta <= 0 : delta >= 0;
+  const Tag: any = onClick ? 'button' : 'div';
+  return (
+    <Tag onClick={onClick} className={`card-base p-4 text-left flex flex-col gap-3 min-w-0 ${onClick ? 'hover:shadow-md hover:-translate-y-0.5 cursor-pointer' : ''} ${tone === 'warn' ? 'ring-1 ring-amber-300/60 dark:ring-amber-700/40' : ''}`}>
+      <div className="flex items-center justify-between gap-2">
+        <span className="text-[11px] font-bold text-slate-500 dark:text-slate-400 truncate">{label}</span>
+        <span className="w-7 h-7 shrink-0 rounded-lg bg-brand-light dark:bg-emerald-950/50 text-brand dark:text-emerald-400 flex items-center justify-center">{icon}</span>
+      </div>
+      <div className="text-xl font-black text-slate-900 dark:text-white tracking-tight tabular-nums truncate">{value}</div>
+      {foot ?? (delta === null || delta === undefined ? <span className="text-[11px] text-slate-400">—</span> : (
+        <span className={`flex items-center gap-1 text-[11px] font-bold ${delta === 0 ? 'text-slate-500' : good ? 'text-emerald-600 dark:text-emerald-400' : 'text-rose-600 dark:text-rose-400'}`}>
+          {delta === 0 ? <Minus size={12} /> : delta > 0 ? <TrendingUp size={12} /> : <TrendingDown size={12} />}
+          {delta > 0 ? '+' : ''}{digits(delta)}% <span className="font-medium text-slate-400">{deltaLabel}</span>
+        </span>
+      ))}
+    </Tag>
+  );
+};
+
+const Progress: React.FC<{ value: number; label: string }> = ({ value, label }) => (
+  <div>
+    <div className="h-1.5 rounded-full bg-slate-100 dark:bg-slate-800 overflow-hidden">
+      <div className="h-full rounded-full bg-emerald-500" style={{ width: `${Math.min(100, Math.max(0, value))}%` }} />
+    </div>
+    <div className="text-[11px] text-slate-500 dark:text-slate-400 mt-1 truncate">{label}</div>
+  </div>
+);
+
+const Attention: React.FC<{ tone: 'critical' | 'warning'; icon: React.ReactNode; title: string; sub?: string; onClick: () => void }> = ({ tone, icon, title, sub, onClick }) => (
+  <li>
+    <button onClick={onClick} className="w-full flex items-center gap-3 p-2.5 rounded-xl hover:bg-slate-50 dark:hover:bg-slate-800/60 text-left">
+      <span className={`w-8 h-8 shrink-0 rounded-xl flex items-center justify-center ${tone === 'critical' ? 'bg-rose-50 text-rose-600 dark:bg-rose-950/50 dark:text-rose-400' : 'bg-amber-50 text-amber-600 dark:bg-amber-950/50 dark:text-amber-400'}`}>{icon}</span>
+      <span className="min-w-0 flex-1">
+        <span className="block text-xs font-bold text-slate-800 dark:text-slate-100 truncate">{title}</span>
+        {sub && <span className="block text-[10px] text-slate-500 dark:text-slate-400 truncate">{sub}</span>}
+      </span>
+      <ArrowUpRight size={14} className="text-slate-400 shrink-0" />
+    </button>
+  </li>
+);
+
+export default OverviewView;

@@ -1,77 +1,103 @@
 {
-  "name": "bondhu-fund-desktop",
-  "version": "1.0.0",
-  "description": "Bondhu Fund - Union Finance Desk Windows Desktop Application",
-  "main": "dist-electron/main.js",
-  "scripts": {
-    "dev": "vite",
-    "build": "tsc && vite build",
-    "build:electron": "tsc -p tsconfig.electron.json",
-    "build:all": "npm run build && npm run build:electron",
-    "dist": "npm run build:all && electron-builder --win",
-    "dist:dir": "npm run build:all && electron-builder --win --dir",
-    "electron:dev": "concurrently -k \"vite\" \"wait-on tcp:5173 && cross-env ELECTRON_RUN_AS_NODE= electron .\"",
-    "start": "cmd /c \"set ELECTRON_RUN_AS_NODE=&& node_modules\\electron\\dist\\electron.exe .\""
-  },
-  "build": {
-    "appId": "com.bondhufund.desktop",
-    "productName": "Bondhu Fund",
-    "copyright": "Copyright © 2024 Bondhu Fund Union",
-    "directories": {
-      "output": "release"
-    },
-    "files": [
-      "dist/**/*",
-      "dist-electron/**/*",
-      "package.json"
-    ],
-    "extraResources": [
-      {
-        "from": "public/sql-wasm.wasm",
-        "to": "sql-wasm.wasm"
-      }
-    ],
-    "win": {
-      "target": [
-        {
-          "target": "nsis",
-          "arch": [
-            "x64"
-          ]
-        }
-      ]
-    },
-    "nsis": {
-      "oneClick": false,
-      "allowToChangeInstallationDirectory": true,
-      "createDesktopShortcut": true,
-      "createStartMenuShortcut": true,
-      "shortcutName": "Bondhu Fund"
-    }
-  },
-  "dependencies": {
-    "lucide-react": "^1.16.0",
-    "react": "^18.3.1",
-    "react-dom": "^18.3.1",
-    "recharts": "^2.13.0",
-    "sql.js": "^1.12.0"
-  },
-  "devDependencies": {
-    "@types/node": "^20.11.0",
-    "@types/react": "^18.3.5",
-    "@types/react-dom": "^18.3.0",
-    "@types/sql.js": "^1.4.9",
-    "@vitejs/plugin-react": "^4.3.1",
-    "autoprefixer": "^10.4.20",
-    "concurrently": "^8.2.2",
-    "cross-env": "^7.0.3",
-    "echarts": "^5.5.1",
-    "electron": "^29.4.0",
-    "electron-builder": "^26.18.0",
-    "postcss": "^8.4.47",
-    "tailwindcss": "^3.4.13",
-    "typescript": "^5.5.4",
-    "vite": "^5.4.2",
-    "wait-on": "^7.2.0"
-  }
+    "name":  "bondhu-fund-desktop",
+    "version":  "2.0.0",
+    "description":  "Bondhu Fund - offline fund management for member savings groups",
+    "main":  "dist-electron/main.js",
+    "scripts":  {
+                    "dev":  "vite",
+                    "build":  "tsc \u0026\u0026 vite build",
+                    "build:electron":  "tsc -p tsconfig.electron.json",
+                    "build:all":  "npm run build \u0026\u0026 npm run build:electron",
+                    "dist":  "npm run build:all \u0026\u0026 electron-builder --win nsis portable --x64",
+                    "dist:dir":  "npm run build:all \u0026\u0026 electron-builder --win --dir",
+                    "electron:dev":  "npm run build:electron \u0026\u0026 concurrently -k \"vite\" \"wait-on tcp:5173 \u0026\u0026 cross-env NODE_ENV=development ELECTRON_RUN_AS_NODE= electron .\"",
+                    "start":  "cmd /c \"set ELECTRON_RUN_AS_NODE=\u0026\u0026 node_modules\\electron\\dist\\electron.exe .\"",
+                    "typecheck":  "tsc --noEmit \u0026\u0026 tsc -p tsconfig.electron.json --noEmit"
+                },
+    "build":  {
+                  "appId":  "org.bondhufund.desktop",
+                  "productName":  "Bondhu Fund",
+                  "copyright":  "Copyright (c) 2026 Bondhu Fund",
+                  "directories":  {
+                                      "output":  "release",
+                                      "buildResources":  "build"
+                                  },
+                  "files":  [
+                                "dist/**/*",
+                                "dist-electron/**/*",
+                                "package.json",
+                                "!dist-electron/**/*.map",
+                                "!dist/sql-wasm.wasm"
+                            ],
+                  "extraResources":  [
+                                         {
+                                             "from":  "node_modules/sql.js/dist/sql-wasm.wasm",
+                                             "to":  "sql-wasm.wasm"
+                                         }
+                                     ],
+                  "asar":  true,
+                  "compression":  "maximum",
+                  "win":  {
+                              "icon":  "build/icon.ico",
+                              "target":  [
+                                             {
+                                                 "target":  "nsis",
+                                                 "arch":  [
+                                                              "x64"
+                                                          ]
+                                             },
+                                             {
+                                                 "target":  "portable",
+                                                 "arch":  [
+                                                              "x64"
+                                                          ]
+                                             }
+                                         ]
+                          },
+                  "nsis":  {
+                               "oneClick":  false,
+                               "perMachine":  false,
+                               "allowElevation":  true,
+                               "allowToChangeInstallationDirectory":  true,
+                               "createDesktopShortcut":  "always",
+                               "createStartMenuShortcut":  true,
+                               "shortcutName":  "Bondhu Fund",
+                               "runAfterFinish":  true,
+                               "deleteAppDataOnUninstall":  false,
+                               "artifactName":  "BondhuFund-Setup-${version}.exe",
+                               "installerIcon":  "build/icon.ico",
+                               "uninstallerIcon":  "build/icon.ico"
+                           },
+                  "portable":  {
+                                   "artifactName":  "BondhuFund-Portable-${version}.exe"
+                               }
+              },
+    "dependencies":  {
+                         "sql.js":  "^1.12.0"
+                     },
+    "devDependencies":  {
+                            "@fontsource/inter":  "^5.1.0",
+                            "@fontsource/noto-sans-bengali":  "^5.1.0",
+                            "@types/node":  "^20.11.0",
+                            "@types/react":  "^18.3.5",
+                            "@types/react-dom":  "^18.3.0",
+                            "@types/sql.js":  "^1.4.9",
+                            "@vitejs/plugin-react":  "^4.3.1",
+                            "autoprefixer":  "^10.4.20",
+                            "concurrently":  "^8.2.2",
+                            "cross-env":  "^7.0.3",
+                            "echarts":  "^5.5.1",
+                            "electron":  "^29.4.0",
+                            "electron-builder":  "^26.18.0",
+                            "lucide-react":  "^1.16.0",
+                            "postcss":  "^8.4.47",
+                            "react":  "^18.3.1",
+                            "react-dom":  "^18.3.1",
+                            "recharts":  "^2.13.0",
+                            "tailwindcss":  "^3.4.13",
+                            "typescript":  "^5.5.4",
+                            "vite":  "^5.4.2",
+                            "wait-on":  "^7.2.0"
+                        },
+    "author":  "Bondhu Fund"
 }

@@ -25,7 +25,7 @@ interface ElectronAPI {
   snapshotNow: () => Promise<Result<string>>;
   openBackupsFolder: () => Promise<Result<string>>;
   saveText: (name: string, content: string, filters?: { name: string; extensions: string[] }[]) => Promise<Result<{ canceled: boolean; filePath?: string }>>;
-  savePdf: (name: string) => Promise<Result<{ canceled: boolean; filePath?: string }>>;
+  savePdf: (name: string, landscape?: boolean) => Promise<Result<{ canceled: boolean; filePath?: string }>>;
 }
 
 declare global {
@@ -64,7 +64,7 @@ export const updateMember = (id: number, d: Partial<Member>) => call<void>('upda
 export const deleteMember = (id: number) => call<void>('deleteMember', id);
 export const getMemberHistory = (memberId: number) => call<CollectionRecord[]>('getMemberHistory', memberId);
 export const getMemberStatement = (memberId: number) => call<MemberStatement>('getMemberStatement', memberId);
-export const bulkAddMembers = (list: Array<{ name: string; phone?: string; email?: string; monthly_due?: number; join_date?: string }>) => call<number>('bulkAddMembers', list);
+export const bulkAddMembers = (list: Array<{ name: string; phone?: string; email?: string; monthly_due?: number; join_date?: string; designation?: string; opening_balance?: number; notes?: string }>) => call<number>('bulkAddMembers', list);
 
 // Collections ----------------------------------------------------------------
 export const getCollections = (month?: string, statusTab = 'All', startDate?: string, endDate?: string, search = '', sortBy = 'newest') =>
@@ -151,8 +151,8 @@ export async function restoreSnapshot(fileName: string) {
 export async function saveTextFile(name: string, content: string, filters?: { name: string; extensions: string[] }[]) {
   return unwrap(bridge().saveText(name, content, filters));
 }
-export async function savePdf(name: string) {
-  return unwrap(bridge().savePdf(name));
+export async function savePdf(name: string, landscape = false) {
+  return unwrap(bridge().savePdf(name, landscape));
 }
 
 /** Builds RFC-4180 CSV. */

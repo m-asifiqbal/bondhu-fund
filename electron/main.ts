@@ -28,11 +28,23 @@ if (!app.requestSingleInstanceLock()) {
   });
 }
 
+// One fixed data folder for dev and installed builds: %APPDATA%\Bondhu Fund
+app.setName('Bondhu Fund');
+app.commandLine.appendSwitch('lang', 'en-GB'); // dd/mm/yyyy date inputs
+app.setPath('userData', path.join(app.getPath('appData'), 'Bondhu Fund'));
+
 function initPaths() {
   dataDir = path.join(app.getPath('userData'), 'database');
   backupsDir = path.join(dataDir, 'backups');
   fs.mkdirSync(backupsDir, { recursive: true });
   dbFile = path.join(dataDir, 'bondhu_fund.db');
+
+  // First run of v2: carry over data from the prototype's folder (it is migrated on open).
+  const legacy = path.join(app.getPath('appData'), 'bondhu-fund-desktop', 'database', 'bondhu_fund.db');
+  if (!fs.existsSync(dbFile) && fs.existsSync(legacy)) {
+    fs.copyFileSync(legacy, dbFile);
+    fs.copyFileSync(legacy, path.join(backupsDir, `Legacy_v1_${new Date().toISOString().slice(0, 10)}.db`));
+  }
 }
 
 function readWasm(): Buffer {
@@ -130,7 +142,11 @@ function createWindow() {
     if (/^https?:/.test(url)) shell.openExternal(url);
     return { action: 'deny' };
   });
-  mainWindow.webContents.on('will-navigate', e => e.preventDefault());
+  // Allow reloading the app itself (error screen "Reload"); block navigation anywhere else.
+  mainWindow.webContents.on('will-navigate', (e, url) => {
+    const own = url.split('#')[0] === mainWindow?.webContents.getURL().split('#')[0];
+    if (!own) e.preventDefault();
+  });
   mainWindow.on('closed', () => { mainWindow = null; });
 }
 
@@ -218,19 +234,19 @@ function registerIpc() {
     });
     if (res.canceled || !res.filePath) return { canceled: true };
     // BOM so Excel opens UTF-8 (Bangla) correctly
-    fs.writeFileSync(res.filePath, (res.filePath.endsWith('.csv') ? '﻿' : '') + String(content ?? ''), 'utf8');
+    fs.writeFileSync(res.filePath, (res.filePath.endsWith('.csv') ? 'ï»¿' : '') + String(content ?? ''), 'utf8');
     return { canceled: false, filePath: res.filePath };
   }));
 
   /** Print-quality PDF of the current window (reports). */
-  ipcMain.handle('file:save-pdf', (_e, defaultName: string) => wrap(async () => {
+  ipcMain.handle('file:save-pdf', (_e, defaultName: string, landscape?: boolean) => wrap(async () => {
     const res = await dialog.showSaveDialog(mainWindow!, {
       title: 'Save PDF',
       defaultPath: path.join(app.getPath('documents'), path.basename(String(defaultName || 'report.pdf'))),
       filters: [{ name: 'PDF', extensions: ['pdf'] }],
     });
     if (res.canceled || !res.filePath) return { canceled: true };
-    const pdf = await mainWindow!.webContents.printToPDF({ printBackground: true, pageSize: 'A4', landscape: false });
+    const pdf = await mainWindow!.webContents.printToPDF({ printBackground: true, pageSize: 'A4', landscape: !!landscape, margins: { marginType: 'default' } });
     fs.writeFileSync(res.filePath, pdf);
     shell.openPath(res.filePath);
     return { canceled: false, filePath: res.filePath };

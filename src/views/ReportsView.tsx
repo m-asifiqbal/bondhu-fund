@@ -1,1078 +1,531 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  FileSpreadsheet,
-  Download,
-  Calendar,
-  Users,
-  TrendingUp,
-  Receipt,
-  Database,
-  Clock,
-  Layers,
-  SlidersHorizontal,
-  Search,
-  RotateCcw,
-  Table,
-  Coins,
+  FileSpreadsheet, FileText, Calendar, Users, TrendingUp, Receipt, Clock, Layers, Columns3,
+  AlertTriangle, ShieldCheck, Loader2, Inbox, RefreshCw, ChevronDown, Check,
 } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 import {
-  getMembers,
-  getCollections,
-  getInvestments,
-  getExpenses,
-  getMemberHistory,
-  getOverviewMetrics,
-  matchesDateRange,
+  getAppSettings, getAllMembersLite, getMasterData, saveTextFile, savePdf, toCsv,
 } from '../services/db';
-import { Member, CollectionRecord, Investment, Expense } from '../types';
 import { MonthPicker } from '../components/common/MonthPicker';
 import { SearchableSelect, SelectOption } from '../components/common/SearchableSelect';
+import { BUILDERS, ReportData, ReportId, ColumnDef } from '../components/reports/reportBuilders';
+import { ReportTableView, formatCell, totalsFor, Formatters } from '../components/reports/ReportTableView';
+import { addMonths, currentMonthKey, fiscalYearRange, toMonthKey, todayISO, monthKeyToName } from '../utils/date';
 
-type EntityType = 'collections' | 'members' | 'expenses' | 'investments';
+type Scope = 'range' | 'month' | 'member' | 'none';
+type Preset = 'today' | 'this_month' | 'last_month' | 'this_fy' | 'last_12' | 'custom';
 
-interface ColumnDef {
-  key: string;
-  label: string;
-  default: boolean;
+interface ReportDef {
+  id: ReportId; title: string; bn: string; desc: string; descBn: string; file: string;
+  icon: React.ElementType; scope: Scope;
 }
 
-const ENTITY_COLUMNS: Record<EntityType, ColumnDef[]> = {
-  collections: [
-    { key: 'member_code', label: 'Member ID', default: true },
-    { key: 'member_name', label: 'Member Name', default: true },
-    { key: 'payment_month', label: 'Month', default: true },
-    { key: 'due_date', label: 'Due Date', default: false },
-    { key: 'payment_date', label: 'Payment Date', default: true },
-    { key: 'contribution_amount', label: 'Contribution (TK)', default: true },
-    { key: 'late_fee', label: 'Late Fee (TK)', default: true },
-    { key: 'total_amount', label: 'Total (TK)', default: true },
-    { key: 'status', label: 'Status', default: true },
-    { key: 'payment_method', label: 'Method', default: false },
-    { key: 'trx_id', label: 'TRX ID', default: true },
-    { key: 'note', label: 'Note', default: false },
-  ],
-  members: [
-    { key: 'member_code', label: 'Member Code', default: true },
-    { key: 'name', label: 'Full Name', default: true },
-    { key: 'phone', label: 'Phone', default: true },
-    { key: 'email', label: 'Email', default: false },
-    { key: 'status', label: 'Status', default: true },
-    { key: 'monthly_due', label: 'Monthly Due (TK)', default: true },
-    { key: 'join_date', label: 'Join Date', default: true },
-    { key: 'total_contributed', label: 'Lifetime Contributed (TK)', default: true },
-  ],
-  expenses: [
-    { key: 'title', label: 'Expense Title', default: true },
-    { key: 'category', label: 'Category', default: true },
-    { key: 'amount', label: 'Amount (TK)', default: true },
-    { key: 'expense_date', label: 'Date', default: true },
-    { key: 'payee', label: 'Disbursed To', default: true },
-    { key: 'receipt_ref', label: 'Receipt Ref', default: true },
-    { key: 'status', label: 'Audit Status', default: true },
-    { key: 'notes', label: 'Notes', default: false },
-  ],
-  investments: [
-    { key: 'name', label: 'Asset Name', default: true },
-    { key: 'sector', label: 'Sector', default: true },
-    { key: 'purchase_date', label: 'Purchase Date', default: true },
-    { key: 'invested_amount', label: 'Invested Cost (TK)', default: true },
-    { key: 'current_estimated_value', label: 'Current Value (TK)', default: true },
-    { key: 'gain_loss', label: 'Unrealized Gain (TK)', default: true },
-    { key: 'status', label: 'Status', default: true },
-    { key: 'review_date', label: 'Review Date', default: false },
-    { key: 'location_details', label: 'Location Details', default: false },
-    { key: 'notes', label: 'Notes', default: false },
-  ],
+const REPORTS: ReportDef[] = [
+  { id: 'cashbook', title: 'Cash Book', bn: 'ক্যাশ বই', desc: 'Day / date-range ledger with running balance', descBn: 'তারিখভিত্তিক লেজার ও চলমান ব্যালেন্স', file: 'CashBook', icon: Clock, scope: 'range' },
+  { id: 'collections', title: 'Monthly Collection Sheet', bn: 'মাসিক আদায় শিট', desc: 'All members due: paid, pending, overdue', descBn: 'সকল সদস্যের মাসিক চাঁদার অবস্থা', file: 'CollectionSheet', icon: Calendar, scope: 'month' },
+  { id: 'fiscal', title: 'Fiscal-Year Statement', bn: 'অর্থবছর বিবরণী', desc: 'Month totals and member-wise yearly contribution', descBn: 'মাসভিত্তিক মোট ও সদস্যভিত্তিক বার্ষিক চাঁদা', file: 'FiscalYear', icon: Layers, scope: 'month' },
+  { id: 'member', title: 'Member Statement', bn: 'সদস্য বিবরণী', desc: 'Month-by-month history incl. unpaid months', descBn: 'অপরিশোধিত মাসসহ মাসভিত্তিক ইতিহাস', file: 'MemberStatement', icon: Users, scope: 'member' },
+  { id: 'defaulters', title: 'Defaulters / Arrears', bn: 'বকেয়াদার তালিকা', desc: 'Members with unpaid months and amounts', descBn: 'অপরিশোধিত মাস ও বকেয়ার পরিমাণ', file: 'Arrears', icon: AlertTriangle, scope: 'month' },
+  { id: 'expenses', title: 'Expenses Report', bn: 'খরচের রিপোর্ট', desc: 'Expenses with category subtotals', descBn: 'ক্যাটাগরিভিত্তিক মোটসহ খরচ', file: 'Expenses', icon: Receipt, scope: 'range' },
+  { id: 'investments', title: 'Investment Portfolio', bn: 'বিনিয়োগ পোর্টফোলিও', desc: 'Active and sold assets with gains', descBn: 'সক্রিয় ও বিক্রিত সম্পদ এবং লাভ', file: 'Investments', icon: TrendingUp, scope: 'none' },
+  { id: 'audit', title: 'Audit Trail', bn: 'অডিট ট্রেইল', desc: 'Who changed what, and when', descBn: 'কে, কখন, কী পরিবর্তন করেছেন', file: 'AuditTrail', icon: ShieldCheck, scope: 'range' },
+];
+
+const PRESETS: Array<{ id: Preset; en: string; bn: string }> = [
+  { id: 'today', en: 'Today', bn: 'আজ' },
+  { id: 'this_month', en: 'This month', bn: 'চলতি মাস' },
+  { id: 'last_month', en: 'Last month', bn: 'গত মাস' },
+  { id: 'this_fy', en: 'This fiscal year', bn: 'চলতি অর্থবছর' },
+  { id: 'last_12', en: 'Last 12 months', bn: 'গত ১২ মাস' },
+  { id: 'custom', en: 'Custom', bn: 'কাস্টম' },
+];
+
+const monthEnd = (key: string) => {
+  const [y, m] = key.split('-').map(Number);
+  return `${key}-${String(new Date(y, m, 0).getDate()).padStart(2, '0')}`;
 };
 
+function presetRange(p: Preset, fyStart: number): { start: string; end: string } | null {
+  const today = todayISO();
+  const cur = currentMonthKey();
+  switch (p) {
+    case 'today': return { start: today, end: today };
+    case 'this_month': return { start: `${cur}-01`, end: monthEnd(cur) };
+    case 'last_month': { const k = addMonths(cur, -1); return { start: `${k}-01`, end: monthEnd(k) }; }
+    case 'this_fy': { const fy = fiscalYearRange(cur, fyStart); return { start: fy.start, end: fy.end }; }
+    case 'last_12': return { start: `${addMonths(cur, -11)}-01`, end: today };
+    default: return null;
+  }
+}
+
+const defaultCols = (cols: ColumnDef[]) => new Set(cols.filter(c => c.default !== false).map(c => c.key));
+
 export const ReportsView: React.FC = () => {
-  const { showToast, selectedMonth, language, t, formatCurrency, toBanglaDigits } = useApp();
+  const { t, language, formatCurrency, formatDate, formatMonth, toBanglaDigits, selectedMonth, showToast, refreshKey } = useApp();
+  const bn = language === 'bn';
+  /** Translation key if available, else inline Bangla/English. */
+  const L = useCallback((key: string, en: string, bnText: string) => {
+    const v = t(key, '');
+    return v && v !== key ? v : bn ? bnText : en;
+  }, [t, bn]);
 
-  // State for all data
-  const [members, setMembers] = useState<Member[]>([]);
-  const [selectedMemberId, setSelectedMemberId] = useState<number>(1);
-  const [reportDate, setReportDate] = useState('28 Jun 2024');
-  const [reportMonth, setReportMonth] = useState('June 2024');
-  const [fiscalYear, setFiscalYear] = useState('2024');
-  const [expenseCategory, setExpenseCategory] = useState('All');
+  const [reportId, setReportId] = useState<ReportId>('cashbook');
+  const def = REPORTS.find(r => r.id === reportId)!;
 
-  const memberOptions: SelectOption[] = members.map(m => ({
-    value: m.id,
-    label: m.name,
-    subLabel: m.phone,
-    badge: m.member_code,
-    badgeColor: 'bg-purple-100 dark:bg-purple-950/80 text-purple-700 dark:text-purple-300',
-  }));
+  // Settings & lookups
+  const [orgName, setOrgName] = useState('');
+  const [fyStart, setFyStart] = useState(7);
+  const [members, setMembers] = useState<SelectOption[]>([]);
+  const [categories, setCategories] = useState<string[]>([]);
+  const [lookupsLoading, setLookupsLoading] = useState(true);
 
-  // Custom Report Builder States
-  const [customEntity, setCustomEntity] = useState<EntityType>('collections');
-  const [customSearch, setCustomSearch] = useState('');
-  const [customStatus, setCustomStatus] = useState('All');
-  const [customStartDate, setCustomStartDate] = useState('');
-  const [customEndDate, setCustomEndDate] = useState('');
-  const [selectedColumns, setSelectedColumns] = useState<Record<string, boolean>>({});
+  // Filters
+  const [preset, setPreset] = useState<Preset>('this_month');
+  const initial = presetRange('this_month', 7)!;
+  const [start, setStart] = useState(initial.start);
+  const [end, setEnd] = useState(initial.end);
+  const [month, setMonth] = useState(() => selectedMonth || monthKeyToName(currentMonthKey()));
+  const [memberId, setMemberId] = useState<number | null>(null);
+  const [filters, setFilters] = useState<Record<string, string>>({});
+  const setFilter = (k: string, v: string) => setFilters(prev => ({ ...prev, [k]: v }));
 
-  // Raw dataset cache for dynamic preview
-  const [rawCollections, setRawCollections] = useState<CollectionRecord[]>([]);
-  const [rawMembers, setRawMembers] = useState<Member[]>([]);
-  const [rawExpenses, setRawExpenses] = useState<Expense[]>([]);
-  const [rawInvestments, setRawInvestments] = useState<Investment[]>([]);
+  // Data
+  const [data, setData] = useState<ReportData | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [visible, setVisible] = useState<Record<string, Set<string>>>({});
+  const [chooserOpen, setChooserOpen] = useState(false);
+  const [exporting, setExporting] = useState<'csv' | 'pdf' | null>(null);
+  const [generatedAt, setGeneratedAt] = useState(todayISO());
+  const chooserRef = useRef<HTMLDivElement>(null);
 
+  // Lookups
   useEffect(() => {
-    getMembers('', 'All', 1, 100).then(res => {
-      setMembers(res.members);
-      setRawMembers(res.members);
-      if (res.members.length > 0) setSelectedMemberId(res.members[0].id);
-    });
-    getCollections(selectedMonth, 'All').then(res => setRawCollections(res.records));
-    getExpenses().then(setRawExpenses);
-    getInvestments().then(setRawInvestments);
-  }, [selectedMonth]);
+    let alive = true;
+    (async () => {
+      setLookupsLoading(true);
+      try {
+        const [s, ms, cats] = await Promise.all([getAppSettings(), getAllMembersLite(), getMasterData('expense_category')]);
+        if (!alive) return;
+        setOrgName(s.organization_name || '');
+        setFyStart(Number(s.fiscal_year_start_month) || 7);
+        setMembers(ms.map(m => ({
+          value: m.id, label: m.name, subLabel: `${m.member_code}${m.phone ? ' · ' + m.phone : ''}`,
+          badge: m.status, badgeColor: m.status === 'Active' ? 'emerald' : 'slate',
+        })));
+        setCategories(cats.map(c => c.name));
+      } catch (e: any) {
+        showToast(e.message, 'error');
+      } finally {
+        if (alive) setLookupsLoading(false);
+      }
+    })();
+    return () => { alive = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [refreshKey]);
 
-  // Sync columns when entity changes
+  // Re-apply preset when fiscal-year start becomes known
   useEffect(() => {
-    const defaultCols: Record<string, boolean> = {};
-    ENTITY_COLUMNS[customEntity].forEach(col => {
-      defaultCols[col.key] = col.default;
-    });
-    setSelectedColumns(defaultCols);
-  }, [customEntity]);
+    const r = presetRange(preset, fyStart);
+    if (r) { setStart(r.start); setEnd(r.end); }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [fyStart]);
 
-  // Compute filtered dataset for custom report builder
-  const customDataset = useMemo(() => {
-    switch (customEntity) {
-      case 'collections': {
-        return rawCollections.filter(item => {
-          if (customStatus !== 'All' && item.status !== customStatus) return false;
-          if (customStartDate || customEndDate) {
-            if (!matchesDateRange(item.payment_date, customStartDate, customEndDate)) return false;
-          }
-          if (customSearch) {
-            const q = customSearch.toLowerCase();
-            const matches =
-              item.member_name.toLowerCase().includes(q) ||
-              (item.member_code && item.member_code.toLowerCase().includes(q)) ||
-              (item.trx_id && item.trx_id.toLowerCase().includes(q));
-            if (!matches) return false;
-          }
-          return true;
-        });
-      }
-      case 'members': {
-        return rawMembers.filter(item => {
-          if (customStatus !== 'All' && item.status !== customStatus) return false;
-          if (customStartDate || customEndDate) {
-            if (!matchesDateRange(item.join_date, customStartDate, customEndDate)) return false;
-          }
-          if (customSearch) {
-            const q = customSearch.toLowerCase();
-            const matches =
-              item.name.toLowerCase().includes(q) ||
-              item.member_code.toLowerCase().includes(q) ||
-              item.phone.toLowerCase().includes(q);
-            if (!matches) return false;
-          }
-          return true;
-        });
-      }
-      case 'expenses': {
-        return rawExpenses.filter(item => {
-          if (customStatus !== 'All' && item.status !== customStatus) return false;
-          if (customStartDate || customEndDate) {
-            if (!matchesDateRange(item.expense_date, customStartDate, customEndDate)) return false;
-          }
-          if (customSearch) {
-            const q = customSearch.toLowerCase();
-            const matches =
-              item.title.toLowerCase().includes(q) ||
-              item.payee.toLowerCase().includes(q) ||
-              item.category.toLowerCase().includes(q) ||
-              item.receipt_ref.toLowerCase().includes(q);
-            if (!matches) return false;
-          }
-          return true;
-        });
-      }
-      case 'investments': {
-        return rawInvestments.filter(item => {
-          if (customStatus !== 'All' && item.status !== customStatus) return false;
-          if (customStartDate || customEndDate) {
-            if (!matchesDateRange(item.purchase_date, customStartDate, customEndDate)) return false;
-          }
-          if (customSearch) {
-            const q = customSearch.toLowerCase();
-            const matches =
-              item.name.toLowerCase().includes(q) ||
-              item.sector.toLowerCase().includes(q) ||
-              (item.location_details && item.location_details.toLowerCase().includes(q));
-            if (!matches) return false;
-          }
-          return true;
-        });
-      }
+  const applyPreset = (p: Preset) => {
+    setPreset(p);
+    const r = presetRange(p, fyStart);
+    if (r) { setStart(r.start); setEnd(r.end); }
+  };
+
+  // Load the report
+  const monthKey = toMonthKey(month);
+  const rangeValid = !!start && !!end && start <= end;
+  useEffect(() => {
+    if (def.scope === 'range' && !rangeValid) { setData(null); setError(L('reports.invalid_range', 'Start date must be on or before end date.', 'শুরুর তারিখ শেষের তারিখের আগে হতে হবে।')); return; }
+    if (def.scope === 'member' && !memberId) { setData(null); setError(null); return; }
+    let alive = true;
+    setLoading(true);
+    setError(null);
+    BUILDERS[reportId]({
+      start, end, month: monthKey, memberId, fyStartMonth: fyStart, filters,
+      fmtDate: formatDate, fmtMonth: formatMonth, bn,
+    }).then(d => {
+      if (!alive) return;
+      setData(d);
+      setGeneratedAt(todayISO());
+      setVisible(prev => (prev[reportId] ? prev : { ...prev, [reportId]: defaultCols(d.columns) }));
+    }).catch((e: any) => {
+      if (!alive) return;
+      setData(null);
+      setError(e.message);
+      showToast(e.message, 'error');
+    }).finally(() => { if (alive) setLoading(false); });
+    return () => { alive = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [reportId, start, end, monthKey, memberId, fyStart, filters, refreshKey, language]);
+
+  // Close column chooser on outside click
+  useEffect(() => {
+    if (!chooserOpen) return;
+    const h = (e: MouseEvent) => { if (chooserRef.current && !chooserRef.current.contains(e.target as Node)) setChooserOpen(false); };
+    document.addEventListener('mousedown', h);
+    return () => document.removeEventListener('mousedown', h);
+  }, [chooserOpen]);
+
+  const visibleSet = visible[reportId];
+  const shownColumns = useMemo(
+    () => (data ? data.columns.filter(c => (visibleSet ? visibleSet.has(c.key) : c.default !== false)) : []),
+    [data, visibleSet],
+  );
+
+  const toggleCol = (key: string) => {
+    if (!data) return;
+    setVisible(prev => {
+      const s = new Set(prev[reportId] || defaultCols(data.columns));
+      if (s.has(key)) { if (s.size > 1) s.delete(key); } else s.add(key);
+      return { ...prev, [reportId]: s };
+    });
+  };
+
+  const fmt: Formatters = { bn, formatCurrency, formatDate, formatMonth, toBanglaDigits };
+  const title = bn ? def.bn : def.title;
+  const fileBase = data ? `BondhuFund_${def.file}_${data.fileTag}`.replace(/[\\/:*?"<>|\s]+/g, '_') : '';
+
+  // ---- Export ---------------------------------------------------------------
+  const csvSection = (cols: ColumnDef[], rows: Record<string, any>[]) => {
+    const body = rows.map(r => cols.map(c => r[c.key] ?? ''));
+    if (cols.some(c => c.total) && rows.length) {
+      const tot = totalsFor(cols, rows);
+      body.push(cols.map((c, i) => (c.total ? tot[c.key] : i === 0 ? 'TOTAL' : '')));
+    }
+    return toCsv(cols.map(c => c.label), body);
+  };
+
+  const exportCsv = async () => {
+    if (!data || !data.rows.length) return;
+    setExporting('csv');
+    try {
+      const meta = toCsv([], [
+        [orgName || 'Bondhu Fund'],
+        [def.title],
+        ['Period', data.fileTag],
+        ['Generated', generatedAt],
+        ...data.summary.map(s => [s.label, s.value]),
+      ]).replace(/^\r\n/, '');
+      const parts = [meta, csvSection(shownColumns, data.rows)];
+      for (const x of data.extra || []) if (x.rows.length) parts.push(toCsv([x.title], []).trim() + '\r\n' + csvSection(x.columns, x.rows));
+      const res = await saveTextFile(`${fileBase}.csv`, parts.join('\r\n\r\n'), [{ name: 'CSV (Excel)', extensions: ['csv'] }]);
+      if (!res.canceled) showToast(L('reports.csv_saved', 'CSV saved', 'CSV সংরক্ষিত হয়েছে') + (res.filePath ? `: ${res.filePath}` : ''), 'success');
+    } catch (e: any) {
+      showToast(e.message, 'error');
+    } finally {
+      setExporting(null);
+    }
+  };
+
+  const exportPdf = async () => {
+    if (!data) return;
+    setExporting('pdf');
+    setChooserOpen(false);
+    try {
+      // Wide tables print in landscape so columns aren't squeezed.
+      const res = await savePdf(`${fileBase}.pdf`, shownColumns.length > 6);
+      if (!res.canceled) showToast(L('reports.pdf_saved', 'PDF saved', 'PDF সংরক্ষিত হয়েছে') + (res.filePath ? `: ${res.filePath}` : ''), 'success');
+    } catch (e: any) {
+      showToast(e.message, 'error');
+    } finally {
+      setExporting(null);
+    }
+  };
+
+  // ---- Filter controls --------------------------------------------------------
+  const selectCls = 'form-select !w-auto !py-2';
+  const perReportFilters = () => {
+    switch (reportId) {
+      case 'cashbook':
+        return (
+          <select className={selectCls} value={filters.ledgerType || 'All'} onChange={e => setFilter('ledgerType', e.target.value)}>
+            <option value="All">{L('reports.all_types', 'All transactions', 'সকল লেনদেন')}</option>
+            <option value="collection">{L('reports.collections_only', 'Collections only', 'শুধু সংগ্রহ')}</option>
+            <option value="expense">{L('reports.expenses_only', 'Expenses only', 'শুধু খরচ')}</option>
+            <option value="investment">{L('reports.investments_only', 'Investments only', 'শুধু বিনিয়োগ')}</option>
+          </select>
+        );
+      case 'collections':
+        return (
+          <select className={selectCls} value={filters.status || 'All'} onChange={e => setFilter('status', e.target.value)}>
+            <option value="All">{L('reports.all_status', 'All statuses', 'সকল অবস্থা')}</option>
+            <option value="Paid">{bn ? 'পরিশোধিত' : 'Paid'}</option>
+            <option value="Pending">{bn ? 'বাকি' : 'Pending'}</option>
+            <option value="Overdue">{bn ? 'মেয়াদোত্তীর্ণ' : 'Overdue'}</option>
+          </select>
+        );
+      case 'expenses':
+        return (
+          <>
+            <select className={selectCls} value={filters.category || 'All'} onChange={e => setFilter('category', e.target.value)}>
+              <option value="All">{L('reports.all_categories', 'All categories', 'সকল ক্যাটাগরি')}</option>
+              {categories.map(c => <option key={c} value={c}>{c}</option>)}
+            </select>
+            <select className={selectCls} value={filters.status || 'All'} onChange={e => setFilter('status', e.target.value)}>
+              <option value="All">{L('reports.all_status', 'All statuses', 'সকল অবস্থা')}</option>
+              <option value="Verified">{bn ? 'যাচাইকৃত' : 'Verified'}</option>
+              <option value="Needs receipt">{bn ? 'রসিদ প্রয়োজন' : 'Needs receipt'}</option>
+            </select>
+          </>
+        );
+      case 'investments':
+        return (
+          <select className={selectCls} value={filters.status || 'All'} onChange={e => setFilter('status', e.target.value)}>
+            <option value="All">{L('reports.all_status', 'All statuses', 'সকল অবস্থা')}</option>
+            <option value="Growing">{bn ? 'বর্ধনশীল' : 'Growing'}</option>
+            <option value="Review">{bn ? 'পর্যালোচনা' : 'Review'}</option>
+            <option value="Sold">{bn ? 'বিক্রিত' : 'Sold'}</option>
+          </select>
+        );
+      case 'audit':
+        return (
+          <input className="form-input !w-56 !py-2" placeholder={L('reports.search_audit', 'Search user, action, details…', 'ব্যবহারকারী, কার্যক্রম খুঁজুন…')}
+            value={filters.search || ''} onChange={e => setFilter('search', e.target.value)} />
+        );
       default:
-        return [];
+        return null;
     }
-  }, [customEntity, rawCollections, rawMembers, rawExpenses, rawInvestments, customStatus, customStartDate, customEndDate, customSearch]);
-
-  const triggerDownload = (fileName: string, content: string) => {
-    const blob = new Blob([content], { type: 'text/csv;charset=utf-8;' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = fileName;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
-    showToast(`Downloaded: ${fileName}`);
   };
 
-  // 1. Day-wise Report
-  const handleDownloadDayWise = async () => {
-    showToast(`Generating Daily Ledger Report for ${reportDate}...`);
-    const collRes = await getCollections(selectedMonth, 'All');
-    const allExpenses = await getExpenses();
-
-    const dayCollections = collRes.records.filter(r =>
-      r.payment_date?.toLowerCase().includes(reportDate.toLowerCase())
-    );
-    const dayExpenses = allExpenses.filter(e =>
-      e.expense_date?.toLowerCase().includes(reportDate.toLowerCase())
-    );
-
-    const totalCollected = dayCollections.reduce((sum, r) => sum + r.contribution_amount + r.late_fee, 0);
-    const totalExp = dayExpenses.reduce((sum, e) => sum + e.amount, 0);
-
-    const lines: string[] = [
-      `BONDHU FUND - UNION FINANCE DESK`,
-      `DAILY TRANSACTION & AUDIT REPORT FOR: "${reportDate}"`,
-      `Generated On: ${new Date().toLocaleString()}`,
-      `Total Collections: TK ${totalCollected.toLocaleString()}`,
-      `Total Operating Expenses: TK ${totalExp.toLocaleString()}`,
-      `Net Daily Movement: TK ${(totalCollected - totalExp).toLocaleString()}`,
-      ``,
-      `--- MONEY RECEIVED (COLLECTIONS) ---`,
-      `Member ID,Member Name,Payment Month,Due Date,Payment Date,Contribution (TK),Late Fee (TK),Total (TK),Method,TRX ID,Status,Notes`,
-    ];
-
-    if (dayCollections.length > 0) {
-      dayCollections.forEach(r => {
-        lines.push(
-          `"${r.member_code || ''}","${r.member_name || ''}","${r.payment_month}","${r.due_date}","${r.payment_date}",${r.contribution_amount},${r.late_fee},${r.contribution_amount + r.late_fee},"${r.payment_method}","${r.trx_id}","${r.status}","${r.note || ''}"`
-        );
-      });
-    } else {
-      lines.push(`"No payments recorded for this date."`);
-    }
-
-    lines.push(``);
-    lines.push(`--- OPERATING EXPENSES DISBURSED ---`);
-    lines.push(`Expense Title,Category,Amount (TK),Expense Date,Payee,Receipt Voucher,Status,Notes`);
-
-    if (dayExpenses.length > 0) {
-      dayExpenses.forEach(e => {
-        lines.push(
-          `"${e.title}","${e.category}",${e.amount},"${e.expense_date}","${e.payee}","${e.receipt_ref}","${e.status}","${e.notes || ''}"`
-        );
-      });
-    } else {
-      lines.push(`"No expenses recorded for this date."`);
-    }
-
-    triggerDownload(`BondhuFund_Day_Report_${reportDate.replace(/\s+/g, '_')}.csv`, lines.join('\n'));
+  const changeReport = (id: ReportId) => {
+    if (id === reportId) return;
+    setReportId(id);
+    setFilters({});
+    setData(null);
+    setChooserOpen(false);
   };
 
-  // 2. Month-wise Report
-  const handleDownloadMonthWise = async () => {
-    showToast(`Generating Monthly Financial Statement for ${reportMonth}...`);
-    const collRes = await getCollections(reportMonth, 'All');
-    const allExpenses = await getExpenses();
-    const monthExpenses = allExpenses.filter(e =>
-      e.expense_date?.toLowerCase().includes(reportMonth.toLowerCase().split(' ')[0].toLowerCase())
-    );
+  const toneCls = (tone?: string) =>
+    tone === 'good' ? 'text-emerald-700 dark:text-emerald-400'
+      : tone === 'bad' ? 'text-rose-600 dark:text-rose-400'
+        : tone === 'brand' ? 'text-[#0f4a3c] dark:text-emerald-300'
+          : 'text-slate-900 dark:text-white';
 
-    const totalCollected = collRes.stats.collectedAmount;
-    const totalLateFees = collRes.stats.lateFeeAmount;
-    const totalDuesExpected = collRes.stats.expectedAmount;
-    const totalExpenses = monthExpenses.reduce((sum, e) => sum + e.amount, 0);
-
-    const lines: string[] = [
-      `BONDHU FUND - UNION FINANCE DESK`,
-      `MONTHLY FINANCIAL LEDGER STATEMENT: "${reportMonth}"`,
-      `Generated On: ${new Date().toLocaleString()}`,
-      `Total Members Enrolled: ${collRes.stats.totalMembers}`,
-      `Paid Members: ${collRes.stats.paidCount} | Pending: ${collRes.stats.pendingCount} | Overdue: ${collRes.stats.overdueCount}`,
-      `Collection Rate: ${collRes.stats.percentage}%`,
-      `Total Expected Dues: TK ${totalDuesExpected.toLocaleString()}`,
-      `Total Collected: TK ${totalCollected.toLocaleString()}`,
-      `Total Late Penalty Fees: TK ${totalLateFees.toLocaleString()}`,
-      `Total Operating Expenses: TK ${totalExpenses.toLocaleString()}`,
-      `Net Monthly Surplus: TK ${(totalCollected + totalLateFees - totalExpenses).toLocaleString()}`,
-      ``,
-      `Member Code,Member Name,Payment Month,Due Date,Payment Date,Contribution (TK),Late Fee (TK),Total Paid (TK),Status,Method,Transaction ID,Note`,
-    ];
-
-    collRes.records.forEach(r => {
-      lines.push(
-        `"${r.member_code || ''}","${r.member_name || ''}","${r.payment_month}","${r.due_date}","${r.payment_date || '-'}",${r.contribution_amount},${r.late_fee},${r.total_amount || (r.contribution_amount + r.late_fee)},"${r.status}","${r.payment_method}","${r.trx_id || '-'}","${r.note || ''}"`
-      );
-    });
-
-    triggerDownload(`BondhuFund_Monthly_Ledger_${reportMonth.replace(/\s+/g, '_')}.csv`, lines.join('\n'));
-  };
-
-  // 3. Year-wise Report
-  const handleDownloadYearWise = async () => {
-    showToast(`Generating Annual Financial Report for Year ${fiscalYear}...`);
-    const membersRes = await getMembers('', 'All', 1, 100);
-    const investments = await getInvestments();
-    const expenses = await getExpenses();
-
-    const totalContributed = membersRes.members.reduce((s, m) => s + (m.total_contributed || 0), 0);
-    const totalInvested = investments.reduce((s, i) => s + i.invested_amount, 0);
-    const currentEstValue = investments.reduce((s, i) => s + i.current_estimated_value, 0);
-    const totalExpenses = expenses.reduce((s, e) => s + e.amount, 0);
-
-    const lines: string[] = [
-      `BONDHU FUND - UNION FINANCE DESK`,
-      `ANNUAL CONSOLIDATED FINANCIAL REPORT (FISCAL YEAR ${fiscalYear})`,
-      `Generated On: ${new Date().toLocaleString()}`,
-      `Total Active Members: ${membersRes.total}`,
-      `Total Member Lifetime Equity/Savings: TK ${totalContributed.toLocaleString()}`,
-      `Total Invested Portfolio Capital: TK ${totalInvested.toLocaleString()}`,
-      `Current Portfolio Market Valuation: TK ${currentEstValue.toLocaleString()}`,
-      `Net Unrealized Asset Appreciation: TK ${(currentEstValue - totalInvested).toLocaleString()}`,
-      `Total Operational Expenses: TK ${totalExpenses.toLocaleString()}`,
-      `Consolidated Net Fund Worth: TK ${(totalContributed + (currentEstValue - totalInvested) - totalExpenses).toLocaleString()}`,
-      ``,
-      `--- MEMBER CONTRIBUTION ROSTER ---`,
-      `Member ID,Member Name,Phone,Email,Status,Monthly Due (TK),Join Date,Lifetime Contributed (TK)`,
-    ];
-
-    membersRes.members.forEach(m => {
-      lines.push(
-        `"${m.member_code}","${m.name}","${m.phone}","${m.email}","${m.status}",${m.monthly_due},"${m.join_date}",${m.total_contributed}`
-      );
-    });
-
-    lines.push(``);
-    lines.push(`--- INVESTMENT PORTFOLIO ASSETS ---`);
-    lines.push(`Asset Name,Sector,Purchase Date,Invested Cost (TK),Market Valuation (TK),Unrealized Gain (TK),Status,Review Date`);
-
-    investments.forEach(i => {
-      lines.push(
-        `"${i.name}","${i.sector}","${i.purchase_date}",${i.invested_amount},${i.current_estimated_value},${i.gain_loss},"${i.status}","${i.review_date || '-'}"`
-      );
-    });
-
-    triggerDownload(`BondhuFund_Annual_Financial_Report_${fiscalYear}.csv`, lines.join('\n'));
-  };
-
-  // 4. Member-wise Report
-  const handleDownloadMemberWise = async () => {
-    const targetMember = members.find(m => m.id === selectedMemberId) || members[0];
-    if (!targetMember) return;
-
-    showToast(`Generating Ledger Statement for ${targetMember.name}...`);
-    const history = await getMemberHistory(targetMember.id);
-
-    const lines: string[] = [
-      `BONDHU FUND - UNION FINANCE DESK`,
-      `INDIVIDUAL MEMBER AUDIT STATEMENT: "${targetMember.name.toUpperCase()}"`,
-      `Member ID: ${targetMember.member_code}`,
-      `Phone: ${targetMember.phone}`,
-      `Email: ${targetMember.email}`,
-      `Enrolled Since: ${targetMember.join_date}`,
-      `Monthly Obligation: TK ${targetMember.monthly_due.toLocaleString()}`,
-      `Lifetime Contributed: TK ${targetMember.total_contributed.toLocaleString()}`,
-      `Current Standing: ${targetMember.current_month_status || 'Active'}`,
-      `Generated On: ${new Date().toLocaleString()}`,
-      ``,
-      `Payment Month,Due Date,Payment Date,Contribution (TK),Late Fine (TK),Total Paid (TK),Payment Method,Transaction ID,Status,Notes`,
-    ];
-
-    if (history.length > 0) {
-      history.forEach(r => {
-        lines.push(
-          `"${r.payment_month}","${r.due_date}","${r.payment_date || 'Awaiting Payment'}",${r.contribution_amount},${r.late_fee},${r.total_amount || (r.contribution_amount + r.late_fee)},"${r.payment_method}","${r.trx_id || '-'}","${r.status}","${r.note || ''}"`
-        );
-      });
-    } else {
-      lines.push(`"No past payment records registered."`);
-    }
-
-    triggerDownload(
-      `BondhuFund_Member_${targetMember.member_code}_${targetMember.name.replace(/\s+/g, '_')}.csv`,
-      lines.join('\n')
-    );
-  };
-
-  // 5. Investment Report
-  const handleDownloadInvestments = async () => {
-    showToast('Exporting Investment Portfolio Valuation Audit...');
-    const investments = await getInvestments();
-    const totalCost = investments.reduce((s, i) => s + i.invested_amount, 0);
-    const totalVal = investments.reduce((s, i) => s + i.current_estimated_value, 0);
-
-    const lines: string[] = [
-      `BONDHU FUND - UNION FINANCE DESK`,
-      `INVESTMENT PORTFOLIO VALUATION REPORT`,
-      `Generated On: ${new Date().toLocaleString()}`,
-      `Total Assets Held: ${investments.length}`,
-      `Total Capital Invested: TK ${totalCost.toLocaleString()}`,
-      `Total Current Market Value: TK ${totalVal.toLocaleString()}`,
-      `Total Unrealized Capital Gain: TK ${(totalVal - totalCost).toLocaleString()}`,
-      ``,
-      `Asset Name,Sector,Purchase Date,Invested Cost (TK),Estimated Valuation (TK),Capital Gain (TK),Status,Review Schedule,Location Details,Notes`,
-    ];
-
-    investments.forEach(i => {
-      lines.push(
-        `"${i.name}","${i.sector}","${i.purchase_date}",${i.invested_amount},${i.current_estimated_value},${i.gain_loss},"${i.status}","${i.review_date || '-'}","${i.location_details || '-'}","${i.notes || ''}"`
-      );
-    });
-
-    triggerDownload(`BondhuFund_Investment_Portfolio_${new Date().toISOString().slice(0, 10)}.csv`, lines.join('\n'));
-  };
-
-  // 6. Expenses Report
-  const handleDownloadExpenses = async () => {
-    showToast('Exporting Operating Expenses Audit Log...');
-    const expenses = await getExpenses(expenseCategory);
-    const totalExp = expenses.reduce((s, e) => s + e.amount, 0);
-
-    const lines: string[] = [
-      `BONDHU FUND - UNION FINANCE DESK`,
-      `OPERATING EXPENSES DISBURSEMENT AUDIT (CATEGORY: ${expenseCategory})`,
-      `Generated On: ${new Date().toLocaleString()}`,
-      `Total Transactions: ${expenses.length}`,
-      `Total Disbursed: TK ${totalExp.toLocaleString()}`,
-      ``,
-      `Expense Title,Category,Amount (TK),Date,Payee / Vendor,Receipt Voucher Ref,Audit Status,Notes`,
-    ];
-
-    expenses.forEach(e => {
-      lines.push(
-        `"${e.title}","${e.category}",${e.amount},"${e.expense_date}","${e.payee}","${e.receipt_ref || '-'}","${e.status}","${e.notes || ''}"`
-      );
-    });
-
-    triggerDownload(`BondhuFund_Operating_Expenses_${expenseCategory}_${new Date().toISOString().slice(0, 10)}.csv`, lines.join('\n'));
-  };
-
-  // 7. Full SQLite Database Master Dump
-  const handleDownloadFullDatabaseReport = async () => {
-    showToast('Compiling Full Master Audit Dump across entire SQLite database...');
-    const metrics = await getOverviewMetrics(selectedMonth);
-    const membersRes = await getMembers('', 'All', 1, 100);
-    const collRes = await getCollections(selectedMonth, 'All');
-    const investments = await getInvestments();
-    const expenses = await getExpenses();
-
-    const lines: string[] = [
-      `================================================================================`,
-      `BONDHU FUND - UNION FINANCE DESK (COMPLETE MASTER AUDIT DUMP)`,
-      `Generated On: ${new Date().toLocaleString()}`,
-      `Fund Balance: TK ${metrics.total_fund_balance.toLocaleString()}`,
-      `Invested Assets: TK ${metrics.invested_assets.toLocaleString()}`,
-      `Active Members: ${metrics.active_members}`,
-      `================================================================================`,
-      ``,
-      `[SECTION 1: MEMBERS REGISTRY]`,
-      `Member ID,Name,Phone,Email,Status,Monthly Due,Join Date,Total Contributed`,
-    ];
-
-    membersRes.members.forEach(m => {
-      lines.push(`"${m.member_code}","${m.name}","${m.phone}","${m.email}","${m.status}",${m.monthly_due},"${m.join_date}",${m.total_contributed}`);
-    });
-
-    lines.push(``);
-    lines.push(`[SECTION 2: COLLECTIONS LEDGER - ${selectedMonth}]`);
-    lines.push(`Member ID,Member Name,Month,Due Date,Payment Date,Contribution,Late Fee,Total,Status,Method,TRX ID,Note`);
-
-    collRes.records.forEach(r => {
-      lines.push(`"${r.member_code}","${r.member_name}","${r.payment_month}","${r.due_date}","${r.payment_date || '-'}",${r.contribution_amount},${r.late_fee},${r.total_amount || (r.contribution_amount + r.late_fee)},"${r.status}","${r.payment_method}","${r.trx_id || '-'}","${r.note || ''}"`);
-    });
-
-    lines.push(``);
-    lines.push(`[SECTION 3: INVESTMENTS]`);
-    lines.push(`Name,Sector,Purchase Date,Invested,Valuation,Gain,Status,Review Date`);
-
-    investments.forEach(i => {
-      lines.push(`"${i.name}","${i.sector}","${i.purchase_date}",${i.invested_amount},${i.current_estimated_value},${i.gain_loss},"${i.status}","${i.review_date || '-'}"`);
-    });
-
-    lines.push(``);
-    lines.push(`[SECTION 4: EXPENSES]`);
-    lines.push(`Title,Category,Amount,Date,Payee,Receipt Voucher,Status`);
-
-    expenses.forEach(e => {
-      lines.push(`"${e.title}","${e.category}",${e.amount},"${e.expense_date}","${e.payee}","${e.receipt_ref || '-'}","${e.status}"`);
-    });
-
-    triggerDownload(`BondhuFund_Master_Audit_Dump_${new Date().toISOString().slice(0, 10)}.csv`, lines.join('\n'));
-  };
+  const hasRows = !!data && (data.rows.length > 0 || (data.extra || []).some(x => x.rows.length > 0));
 
   return (
-    <div className="p-8 space-y-6 max-w-7xl mx-auto">
-      {/* Top Header */}
-      <div className="flex flex-wrap items-center justify-between gap-4">
+    <div className="report-page p-8 space-y-6 max-w-7xl mx-auto">
+      {/* Header */}
+      <div className="no-print flex flex-wrap items-center justify-between gap-4">
         <div>
           <h1 className="text-2xl font-black text-slate-900 dark:text-white tracking-tight flex items-center gap-2">
             <FileSpreadsheet size={24} className="text-[#0f4a3c] dark:text-emerald-400" />
-            <span>Reports & Data Export Center</span>
+            <span>{t('nav.reports', 'Reports & Export')}</span>
           </h1>
           <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
-            Download comprehensive financial reports in universal CSV format for Day, Month, Year, and Member-wise audits.
+            {L('reports.subtitle', 'Preview any report, choose columns, then export to Excel (CSV) or PDF.', 'যেকোনো রিপোর্ট দেখুন, কলাম বাছাই করুন, তারপর এক্সেল (CSV) বা PDF-এ রপ্তানি করুন।')}
           </p>
         </div>
-
-        {/* Master Export Button */}
-        <button
-          onClick={handleDownloadFullDatabaseReport}
-          className="flex items-center gap-2 px-4 py-2.5 bg-[#0f4a3c] hover:bg-[#145c4b] dark:bg-emerald-700 dark:hover:bg-emerald-600 text-white rounded-xl text-xs font-bold shadow-md hover:shadow-lg transition-all active:scale-[0.98]"
-        >
-          <Database size={15} />
-          <span>Full Master Audit Export (CSV)</span>
-        </button>
-      </div>
-
-      {/* Grid of Report Generators */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-        {/* Card 1: Day-wise Report */}
-        <div className="card-base p-6 flex flex-col justify-between space-y-4">
-          <div>
-            <div className="w-10 h-10 rounded-xl bg-emerald-50 dark:bg-emerald-950 text-[#0f4a3c] dark:text-emerald-400 flex items-center justify-center mb-3 border border-emerald-200 dark:border-emerald-800">
-              <Clock size={20} />
-            </div>
-            <h3 className="text-sm font-bold text-slate-900 dark:text-white">Day-wise Daily Ledger</h3>
-            <p className="text-xs text-slate-500 dark:text-slate-400 mt-1 leading-relaxed">
-              Detailed breakdown of all money received and operating expenses disbursed on a specific calendar date.
-            </p>
-          </div>
-
-          <div className="space-y-3 pt-2">
-            <div>
-              <label className="form-label">Select / Enter Date</label>
-              <input
-                type="text"
-                value={reportDate}
-                onChange={e => setReportDate(e.target.value)}
-                placeholder="e.g. 28 Jun 2024"
-                className="form-input"
-              />
-            </div>
-
-            <button
-              onClick={handleDownloadDayWise}
-              className="w-full flex items-center justify-center gap-2 py-2.5 bg-[#0f4a3c] hover:bg-[#145c4b] dark:bg-emerald-700 dark:hover:bg-emerald-600 text-white rounded-xl text-xs font-bold transition-colors shadow-sm"
-            >
-              <Download size={14} />
-              <span>Download Day Report (.csv)</span>
-            </button>
-          </div>
-        </div>
-
-        {/* Card 2: Month-wise Report */}
-        <div className="card-base p-6 flex flex-col justify-between space-y-4">
-          <div>
-            <div className="w-10 h-10 rounded-xl bg-amber-50 dark:bg-amber-950 text-amber-700 dark:text-amber-400 flex items-center justify-center mb-3 border border-amber-200 dark:border-amber-800">
-              <Calendar size={20} />
-            </div>
-            <h3 className="text-sm font-bold text-slate-900 dark:text-white">Month-wise Ledger Statement</h3>
-            <p className="text-xs text-slate-500 dark:text-slate-400 mt-1 leading-relaxed">
-              Complete monthly balance sheet with expected contributions, collections, late fees, and expenses.
-            </p>
-          </div>
-
-          <div className="space-y-3 pt-2">
-            <div>
-              <label className="form-label mb-1.5 block">
-                {language === 'bn' ? 'মাস নির্বাচন করুন' : 'Select Month'}
-              </label>
-              <MonthPicker
-                value={reportMonth}
-                onChange={setReportMonth}
-                align="left"
-                className="w-full"
-              />
-            </div>
-
-            <button
-              onClick={handleDownloadMonthWise}
-              className="w-full flex items-center justify-center gap-2 py-2.5 bg-amber-600 hover:bg-amber-700 text-white rounded-xl text-xs font-bold transition-colors shadow-sm"
-            >
-              <Download size={14} />
-              <span>Download Month Report (.csv)</span>
-            </button>
-          </div>
-        </div>
-
-        {/* Card 3: Year-wise Report */}
-        <div className="card-base p-6 flex flex-col justify-between space-y-4">
-          <div>
-            <div className="w-10 h-10 rounded-xl bg-blue-50 dark:bg-blue-950 text-blue-700 dark:text-blue-400 flex items-center justify-center mb-3 border border-blue-200 dark:border-blue-800">
-              <Layers size={20} />
-            </div>
-            <h3 className="text-sm font-bold text-slate-900 dark:text-white">Fiscal Year-wise Annual Summary</h3>
-            <p className="text-xs text-slate-500 dark:text-slate-400 mt-1 leading-relaxed">
-              Annual consolidated audit across all 48 members, all asset holdings, total returns, and operational costs.
-            </p>
-          </div>
-
-          <div className="space-y-3 pt-2">
-            <div>
-              <label className="form-label">Select Fiscal Year</label>
-              <select
-                value={fiscalYear}
-                onChange={e => setFiscalYear(e.target.value)}
-                className="form-select font-semibold"
-              >
-                <option value="2024">Fiscal Year 2024</option>
-                <option value="2023">Fiscal Year 2023</option>
-                <option value="2025">Fiscal Year 2025 (Forecast)</option>
-              </select>
-            </div>
-
-            <button
-              onClick={handleDownloadYearWise}
-              className="w-full flex items-center justify-center gap-2 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold transition-colors shadow-sm"
-            >
-              <Download size={14} />
-              <span>Download Annual Audit (.csv)</span>
-            </button>
-          </div>
-        </div>
-
-        {/* Card 4: Member-wise Individual Statement */}
-        <div className="card-base p-6 flex flex-col justify-between space-y-4">
-          <div>
-            <div className="w-10 h-10 rounded-xl bg-purple-50 dark:bg-purple-950 text-purple-700 dark:text-purple-400 flex items-center justify-center mb-3 border border-purple-200 dark:border-purple-800">
-              <Users size={20} />
-            </div>
-            <h3 className="text-sm font-bold text-slate-900 dark:text-white">Member-wise Ledger Statement</h3>
-            <p className="text-xs text-slate-500 dark:text-slate-400 mt-1 leading-relaxed">
-              Export the full lifetime payment history, total contributions, and overdue standing for a specific member.
-            </p>
-          </div>
-
-          <div className="space-y-3 pt-2">
-            <div>
-              <SearchableSelect
-                label={language === 'bn' ? 'সদস্য নির্বাচন করুন' : 'Select Member'}
-                required
-                options={memberOptions}
-                value={selectedMemberId}
-                onChange={val => setSelectedMemberId(Number(val))}
-                placeholder={language === 'bn' ? 'সদস্য খুঁজুন...' : 'Search member...'}
-              />
-            </div>
-
-            <button
-              onClick={handleDownloadMemberWise}
-              className="w-full flex items-center justify-center gap-2 py-2.5 bg-purple-600 hover:bg-purple-700 text-white rounded-xl text-xs font-bold transition-colors shadow-sm"
-            >
-              <Download size={14} />
-              <span>Download Member Statement (.csv)</span>
-            </button>
-          </div>
-        </div>
-
-        {/* Card 5: Investment Portfolio Valuation */}
-        <div className="card-base p-6 flex flex-col justify-between space-y-4">
-          <div>
-            <div className="w-10 h-10 rounded-xl bg-emerald-50 dark:bg-emerald-950 text-[#0f4a3c] dark:text-emerald-400 flex items-center justify-center mb-3 border border-emerald-200 dark:border-emerald-800">
-              <TrendingUp size={20} />
-            </div>
-            <h3 className="text-sm font-bold text-slate-900 dark:text-white">Investment Portfolio Report</h3>
-            <p className="text-xs text-slate-500 dark:text-slate-400 mt-1 leading-relaxed">
-              Export all active properties, plots, and assets with original cost basis, latest market values, and gains.
-            </p>
-          </div>
-
-          <div className="space-y-3 pt-2">
-            <p className="text-[11px] text-slate-500 dark:text-slate-400">Includes Land purchase, Flat purchase, Plot purchase & Assets.</p>
-            <button
-              onClick={handleDownloadInvestments}
-              className="w-full flex items-center justify-center gap-2 py-2.5 bg-[#0f4a3c] hover:bg-[#145c4b] dark:bg-emerald-700 dark:hover:bg-emerald-600 text-white rounded-xl text-xs font-bold transition-colors shadow-sm"
-            >
-              <Download size={14} />
-              <span>Download Portfolio Valuation (.csv)</span>
-            </button>
-          </div>
-        </div>
-
-        {/* Card 6: Operating Expenses Report */}
-        <div className="card-base p-6 flex flex-col justify-between space-y-4">
-          <div>
-            <div className="w-10 h-10 rounded-xl bg-rose-50 dark:bg-rose-950 text-rose-700 dark:text-rose-400 flex items-center justify-center mb-3 border border-rose-200 dark:border-rose-800">
-              <Receipt size={20} />
-            </div>
-            <h3 className="text-sm font-bold text-slate-900 dark:text-white">Operating Expenses Audit</h3>
-            <p className="text-xs text-slate-500 dark:text-slate-400 mt-1 leading-relaxed">
-              Export all operating disbursements with voucher references, payees, audit verification flags, and notes.
-            </p>
-          </div>
-
-          <div className="space-y-3 pt-2">
-            <div>
-              <label className="form-label">Expense Category</label>
-              <select
-                value={expenseCategory}
-                onChange={e => setExpenseCategory(e.target.value)}
-                className="form-select font-semibold"
-              >
-                <option value="All">All Categories</option>
-                <option value="Meetup & Events">Meetup & Events</option>
-                <option value="Office Supplies">Office Supplies</option>
-                <option value="Legal & Documentation">Legal & Documentation</option>
-                <option value="Maintenance">Maintenance</option>
-              </select>
-            </div>
-
-            <button
-              onClick={handleDownloadExpenses}
-              className="w-full flex items-center justify-center gap-2 py-2.5 bg-rose-700 hover:bg-rose-800 text-white rounded-xl text-xs font-bold transition-colors shadow-sm"
-            >
-              <Download size={14} />
-              <span>Download Expenses Audit (.csv)</span>
-            </button>
-          </div>
+        <div className="flex items-center gap-2">
+          <button onClick={exportCsv} disabled={!data || !data.rows.length || !!exporting || loading}
+            className="flex items-center gap-2 px-4 py-2.5 bg-white dark:bg-[#142026] border border-slate-300 dark:border-[#283d47] text-slate-800 dark:text-slate-100 hover:border-[#0f4a3c] rounded-xl text-xs font-bold shadow-sm disabled:opacity-50 disabled:cursor-not-allowed">
+            {exporting === 'csv' ? <Loader2 size={15} className="animate-spin" /> : <FileSpreadsheet size={15} className="text-emerald-600" />}
+            <span>{L('reports.export_csv', 'Export CSV', 'CSV রপ্তানি')}</span>
+          </button>
+          <button onClick={exportPdf} disabled={!data || !!exporting || loading}
+            className="flex items-center gap-2 px-4 py-2.5 bg-[#0f4a3c] hover:bg-[#145c4b] dark:bg-emerald-700 dark:hover:bg-emerald-600 text-white rounded-xl text-xs font-bold shadow-md disabled:opacity-50 disabled:cursor-not-allowed">
+            {exporting === 'pdf' ? <Loader2 size={15} className="animate-spin" /> : <FileText size={15} />}
+            <span>{L('reports.save_pdf', 'Save PDF', 'PDF সংরক্ষণ')}</span>
+          </button>
         </div>
       </div>
 
-      {/* ========================================================= */}
-      {/* ADVANCED CUSTOM REPORT BUILDER & DYNAMIC EXPORTER         */}
-      {/* ========================================================= */}
-      <div className="card-base p-6 space-y-6">
-        <div className="flex flex-wrap items-center justify-between gap-4 pb-4 border-b border-slate-200 dark:border-slate-800">
-          <div>
-            <div className="flex items-center gap-2">
-              <div className="w-8 h-8 rounded-lg bg-emerald-50 dark:bg-emerald-950 text-[#0f4a3c] dark:text-emerald-400 flex items-center justify-center border border-emerald-200 dark:border-emerald-800">
-                <SlidersHorizontal size={16} />
+      {/* Report picker */}
+      <div className="no-print grid grid-cols-2 lg:grid-cols-4 gap-3">
+        {REPORTS.map(r => {
+          const Icon = r.icon;
+          const active = r.id === reportId;
+          return (
+            <button key={r.id} onClick={() => changeReport(r.id)}
+              className={`text-left p-3.5 rounded-2xl border transition-all flex items-start gap-3 ${active
+                ? 'bg-[#0f4a3c] border-[#0f4a3c] text-white shadow-md dark:bg-emerald-800 dark:border-emerald-700'
+                : 'card-base hover:border-[#0f4a3c]/50 dark:hover:border-emerald-700'}`}>
+              <div className={`w-9 h-9 shrink-0 rounded-xl flex items-center justify-center border ${active
+                ? 'bg-white/15 border-white/20 text-white'
+                : 'bg-emerald-50 dark:bg-emerald-950 text-[#0f4a3c] dark:text-emerald-400 border-emerald-200 dark:border-emerald-800'}`}>
+                <Icon size={17} />
               </div>
-              <h2 className="text-base font-bold text-slate-900 dark:text-white">Custom Report Builder & Exporter</h2>
-            </div>
-            <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
-              Select data model, apply dynamic date ranges & filters, select specific columns, and preview live before exporting.
-            </p>
-          </div>
-
-          <div className="flex items-center gap-3">
-            <span className="px-3 py-1 rounded-full text-xs font-bold bg-emerald-100 dark:bg-emerald-950 text-emerald-800 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800">
-              {customDataset.length} records matching
-            </span>
-            <button
-              onClick={() => {
-                const activeCols = ENTITY_COLUMNS[customEntity].filter(c => selectedColumns[c.key]);
-                if (activeCols.length === 0) {
-                  showToast('Please select at least one column for the custom report.', 'error');
-                  return;
-                }
-                if (customDataset.length === 0) {
-                  showToast('No records match your criteria to export.', 'error');
-                  return;
-                }
-
-                const header = activeCols.map(c => `"${c.label}"`).join(',');
-                const rows = customDataset.map(item => {
-                  return activeCols
-                    .map(c => {
-                      let val = (item as any)[c.key];
-                      if (val === undefined || val === null) val = '';
-                      if (typeof val === 'number') return val;
-                      return `"${String(val).replace(/"/g, '""')}"`;
-                    })
-                    .join(',');
-                });
-
-                const lines = [
-                  `BONDHU FUND - CUSTOM ${customEntity.toUpperCase()} REPORT`,
-                  `Export Timestamp: ${new Date().toLocaleString()}`,
-                  `Total Filtered Records: ${customDataset.length}`,
-                  ...(customStartDate || customEndDate ? [`Date Range: ${customStartDate || 'Start'} to ${customEndDate || 'Current'}`] : []),
-                  ...(customStatus !== 'All' ? [`Status Filter: ${customStatus}`] : []),
-                  ``,
-                  header,
-                  ...rows,
-                ];
-
-                const entityName = customEntity.charAt(0).toUpperCase() + customEntity.slice(1);
-                triggerDownload(`BondhuFund_Custom_${entityName}_${new Date().toISOString().slice(0, 10)}.csv`, lines.join('\n'));
-              }}
-              className="flex items-center gap-2 px-4 py-2 bg-[#0f4a3c] hover:bg-[#145c4b] dark:bg-emerald-700 dark:hover:bg-emerald-600 text-white rounded-xl text-xs font-bold shadow-md hover:shadow-lg transition-all active:scale-[0.98]"
-            >
-              <Download size={14} />
-              <span>Download Custom CSV</span>
+              <div className="min-w-0">
+                <div className={`text-xs font-bold ${active ? 'text-white' : 'text-slate-900 dark:text-white'}`}>{bn ? r.bn : r.title}</div>
+                <div className={`text-[11px] leading-snug mt-0.5 ${active ? 'text-emerald-100' : 'text-slate-500 dark:text-slate-400'}`}>{bn ? r.descBn : r.desc}</div>
+              </div>
             </button>
+          );
+        })}
+      </div>
+
+      {/* Filter bar */}
+      <div className="no-print card-base p-4 flex flex-wrap items-end gap-3">
+        {def.scope === 'range' && (
+          <>
+            <div>
+              <label className="form-label">{L('reports.period', 'Period', 'সময়কাল')}</label>
+              <div className="flex flex-wrap gap-1">
+                {PRESETS.map(p => (
+                  <button key={p.id} onClick={() => applyPreset(p.id)}
+                    className={`px-2.5 py-2 rounded-lg text-[11px] font-bold border ${preset === p.id
+                      ? 'bg-[#0f4a3c] text-white border-[#0f4a3c] dark:bg-emerald-700 dark:border-emerald-700'
+                      : 'bg-white dark:bg-[#101b21] text-slate-600 dark:text-slate-300 border-slate-200 dark:border-[#283d47] hover:border-[#0f4a3c]'}`}>
+                    {bn ? p.bn : p.en}
+                  </button>
+                ))}
+              </div>
+            </div>
+            <div>
+              <label className="form-label">{L('reports.from', 'From', 'হতে')}</label>
+              <input type="date" className="form-input !w-40 !py-2" value={start} max={end || undefined}
+                onChange={e => { setPreset('custom'); setStart(e.target.value); }} />
+            </div>
+            <div>
+              <label className="form-label">{L('reports.to', 'To', 'পর্যন্ত')}</label>
+              <input type="date" className="form-input !w-40 !py-2" value={end} min={start || undefined}
+                onChange={e => { setPreset('custom'); setEnd(e.target.value); }} />
+            </div>
+          </>
+        )}
+        {def.scope === 'month' && (
+          <div>
+            <label className="form-label">{reportId === 'fiscal' ? L('reports.fy_containing', 'Fiscal year containing', 'যে মাসের অর্থবছর') : L('reports.month', 'Month', 'মাস')}</label>
+            <MonthPicker value={month} onChange={setMonth} align="left" />
+          </div>
+        )}
+        {def.scope === 'member' && (
+          <div className="w-80 max-w-full">
+            <label className="form-label">{L('reports.member', 'Member', 'সদস্য')}</label>
+            <SearchableSelect options={members} value={memberId ?? ''} onChange={v => setMemberId(v ? Number(v) : null)}
+              isLoading={lookupsLoading}
+              placeholder={L('reports.select_member', 'Select a member…', 'সদস্য নির্বাচন করুন…')}
+              searchPlaceholder={L('reports.search_member', 'Search name, ID or phone…', 'নাম, আইডি বা ফোন খুঁজুন…')} />
+          </div>
+        )}
+        {perReportFilters() && (
+          <div>
+            <label className="form-label">{L('reports.filter', 'Filter', 'ফিল্টার')}</label>
+            <div className="flex flex-wrap gap-2">{perReportFilters()}</div>
+          </div>
+        )}
+
+        <div className="ml-auto flex items-end gap-2">
+          {data && (
+            <div className="relative" ref={chooserRef}>
+              <button onClick={() => setChooserOpen(o => !o)}
+                className="flex items-center gap-1.5 px-3 py-2 rounded-xl border border-slate-300 dark:border-[#283d47] bg-white dark:bg-[#101b21] text-xs font-bold text-slate-700 dark:text-slate-200 hover:border-[#0f4a3c]">
+                <Columns3 size={14} />
+                <span>{L('reports.columns', 'Columns', 'কলাম')} ({bn ? toBanglaDigits(shownColumns.length) : shownColumns.length}/{bn ? toBanglaDigits(data.columns.length) : data.columns.length})</span>
+                <ChevronDown size={13} />
+              </button>
+              {chooserOpen && (
+                <div className="absolute right-0 mt-2 w-60 z-30 card-base p-2 shadow-xl max-h-80 overflow-y-auto">
+                  {data.columns.map(c => {
+                    const on = shownColumns.some(s => s.key === c.key);
+                    return (
+                      <label key={c.key} className="flex items-center gap-2 px-2 py-1.5 rounded-lg hover:bg-slate-50 dark:hover:bg-[#1a2b34] cursor-pointer text-xs text-slate-700 dark:text-slate-200">
+                        <span className={`w-4 h-4 rounded border flex items-center justify-center ${on ? 'bg-[#0f4a3c] border-[#0f4a3c] text-white' : 'border-slate-300 dark:border-slate-600'}`}>
+                          {on && <Check size={11} />}
+                        </span>
+                        <input type="checkbox" className="hidden" checked={on} onChange={() => toggleCol(c.key)} />
+                        <span>{bn ? c.bn : c.label}</span>
+                      </label>
+                    );
+                  })}
+                  <button onClick={() => setVisible(prev => ({ ...prev, [reportId]: defaultCols(data.columns) }))}
+                    className="w-full mt-1 px-2 py-1.5 text-[11px] font-bold text-[#0f4a3c] dark:text-emerald-400 hover:underline text-left">
+                    {L('reports.reset_columns', 'Reset to default', 'ডিফল্টে ফেরত')}
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Preview (this is what prints to PDF) */}
+      <div id="report-print-area" className="card-base p-6 space-y-5">
+        <div className="flex flex-wrap items-start justify-between gap-3 border-b border-slate-200 dark:border-[#22353f] pb-4">
+          <div>
+            <div className="text-[11px] font-bold uppercase tracking-wider text-[#0f4a3c] dark:text-emerald-400">{orgName || 'Bondhu Fund'}</div>
+            <h2 className="text-lg font-black text-slate-900 dark:text-white">{title}</h2>
+            <div className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+              {L('reports.period', 'Period', 'সময়কাল')}: <span className="font-semibold text-slate-700 dark:text-slate-200">
+                {data?.periodLabel || (def.scope === 'member' ? '—' : def.scope === 'month' ? formatMonth(monthKey) : `${formatDate(start)} – ${formatDate(end)}`)}
+              </span>
+            </div>
+          </div>
+          <div className="text-right text-[11px] text-slate-500 dark:text-slate-400">
+            <div>{L('reports.generated', 'Generated', 'প্রস্তুতের তারিখ')}: <span className="font-semibold">{formatDate(generatedAt)}</span></div>
+            {data && <div>{L('reports.records', 'Records', 'রেকর্ড')}: <span className="font-semibold">{bn ? toBanglaDigits(data.rows.length) : data.rows.length}</span></div>}
+            {loading && <div className="no-print flex items-center justify-end gap-1 mt-1 text-[#0f4a3c] dark:text-emerald-400"><RefreshCw size={11} className="animate-spin" /> {L('reports.updating', 'Updating…', 'হালনাগাদ হচ্ছে…')}</div>}
           </div>
         </div>
 
-        {/* Step 1: Entity Selector Tabs */}
-        <div>
-          <label className="block text-[11px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400 mb-2">
-            Step 1: Choose Data Entity
-          </label>
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-            {[
-              { id: 'collections' as EntityType, name: 'Collections & Dues', desc: 'Monthly member fee records', icon: Coins },
-              { id: 'members' as EntityType, name: 'Member Registry', desc: 'Accounts & total savings', icon: Users },
-              { id: 'expenses' as EntityType, name: 'Operating Expenses', desc: 'Disbursements & vouchers', icon: Receipt },
-              { id: 'investments' as EntityType, name: 'Investment Assets', desc: 'Land, flats & valuations', icon: TrendingUp },
-            ].map(tab => {
-              const Icon = tab.icon || Table;
-              const isSelected = customEntity === tab.id;
-              return (
-                <button
-                  key={tab.id}
-                  onClick={() => setCustomEntity(tab.id)}
-                  className={`p-3.5 rounded-xl border text-left transition-all ${
-                    isSelected
-                      ? 'border-[#0f4a3c] dark:border-emerald-500 bg-emerald-50/70 dark:bg-[#173027] shadow-sm'
-                      : 'border-slate-200 dark:border-slate-800 bg-white dark:bg-[#131f26] hover:bg-slate-50 dark:hover:bg-[#182830]'
-                  }`}
-                >
-                  <div className="flex items-center gap-2 mb-1">
-                    <Icon size={16} className={isSelected ? 'text-[#0f4a3c] dark:text-emerald-400' : 'text-slate-500 dark:text-slate-400'} />
-                    <span className={`text-xs font-bold ${isSelected ? 'text-[#0f4a3c] dark:text-emerald-400' : 'text-slate-900 dark:text-white'}`}>
-                      {tab.name}
-                    </span>
+        {loading && !data ? (
+          <div className="py-16 flex flex-col items-center gap-2 text-slate-500 dark:text-slate-400 text-xs">
+            <Loader2 size={24} className="animate-spin text-[#0f4a3c] dark:text-emerald-400" />
+            {L('reports.loading', 'Preparing report…', 'রিপোর্ট প্রস্তুত হচ্ছে…')}
+          </div>
+        ) : def.scope === 'member' && !memberId ? (
+          <EmptyState icon={Users} text={L('reports.pick_member', 'Select a member above to view their statement.', 'বিবরণী দেখতে উপরে একজন সদস্য নির্বাচন করুন।')} />
+        ) : error ? (
+          <EmptyState icon={AlertTriangle} text={error} tone="bad" />
+        ) : data ? (
+          <>
+            {/* Summary */}
+            <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-5 gap-3 report-summary">
+              {data.summary.map((s, i) => (
+                <div key={i} className="rounded-xl border border-slate-200 dark:border-[#22353f] bg-slate-50/60 dark:bg-[#101b21] px-3.5 py-2.5">
+                  <div className="text-[10px] font-bold uppercase tracking-wide text-slate-500 dark:text-slate-400">{bn ? s.bn : s.label}</div>
+                  <div className={`text-sm font-black mt-0.5 tabular-nums ${toneCls(s.tone)}`}>
+                    {s.kind ? formatCell(s.value, s.kind, fmt) : String(s.value)}
                   </div>
-                  <p className="text-[11px] text-slate-500 dark:text-slate-400">{tab.desc}</p>
-                </button>
-              );
-            })}
-          </div>
-        </div>
-
-        {/* Step 2: Filter Parameters */}
-        <div>
-          <label className="block text-[11px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400 mb-2">
-            Step 2: Filter Parameters (Date Range & Status)
-          </label>
-          <div className="p-4 bg-slate-50 dark:bg-[#121f26] rounded-xl border border-slate-200 dark:border-slate-800 flex flex-wrap items-center gap-3 text-xs">
-            <div className="relative flex-1 min-w-[180px]">
-              <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 dark:text-slate-500" />
-              <input
-                type="text"
-                placeholder="Search keywords..."
-                value={customSearch}
-                onChange={e => setCustomSearch(e.target.value)}
-                className="form-input pl-8"
-              />
+                </div>
+              ))}
             </div>
 
-            {/* Dynamic Status Filter */}
-            <div className="w-40">
-              <select
-                value={customStatus}
-                onChange={e => setCustomStatus(e.target.value)}
-                className="form-select font-semibold"
-              >
-                <option value="All">All Statuses</option>
-                {customEntity === 'collections' && (
-                  <>
-                    <option value="Paid">Paid</option>
-                    <option value="Pending">Pending</option>
-                    <option value="Overdue">Overdue</option>
-                  </>
+            {hasRows ? (
+              <>
+                {data.rows.length > 0 ? (
+                  <ReportTableView columns={shownColumns} rows={data.rows} f={fmt} totalLabel={L('reports.total', 'Total', 'মোট')} />
+                ) : (
+                  <EmptyState icon={Inbox} text={L('reports.no_rows', 'No records for this period.', 'এই সময়ের কোনো রেকর্ড নেই।')} />
                 )}
-                {customEntity === 'members' && (
-                  <>
-                    <option value="Active">Active</option>
-                    <option value="Inactive">Inactive</option>
-                  </>
-                )}
-                {customEntity === 'expenses' && (
-                  <>
-                    <option value="Verified">Verified</option>
-                    <option value="Needs receipt">Needs receipt</option>
-                  </>
-                )}
-                {customEntity === 'investments' && (
-                  <>
-                    <option value="Growing">Growing</option>
-                    <option value="Review">Review</option>
-                  </>
-                )}
-              </select>
-            </div>
-
-            {/* Date Range Inputs */}
-            <div className="flex items-center gap-2">
-              <span className="text-slate-600 dark:text-slate-400 font-bold text-[11px]">From:</span>
-              <input
-                type="date"
-                value={customStartDate}
-                onChange={e => setCustomStartDate(e.target.value)}
-                className="px-2 py-1.5 bg-white dark:bg-[#101b21] border border-slate-300 dark:border-[#283d47] rounded-xl text-xs text-slate-800 dark:text-slate-100 font-medium focus:outline-none focus:ring-2 focus:ring-[#0f4a3c]"
-              />
-              <span className="text-slate-600 dark:text-slate-400 font-bold text-[11px]">To:</span>
-              <input
-                type="date"
-                value={customEndDate}
-                onChange={e => setCustomEndDate(e.target.value)}
-                className="px-2 py-1.5 bg-white dark:bg-[#101b21] border border-slate-300 dark:border-[#283d47] rounded-xl text-xs text-slate-800 dark:text-slate-100 font-medium focus:outline-none focus:ring-2 focus:ring-[#0f4a3c]"
-              />
-            </div>
-
-            {(customSearch || customStatus !== 'All' || customStartDate || customEndDate) && (
-              <button
-                type="button"
-                onClick={() => {
-                  setCustomSearch('');
-                  setCustomStatus('All');
-                  setCustomStartDate('');
-                  setCustomEndDate('');
-                }}
-                className="flex items-center gap-1 px-3 py-1.5 bg-white dark:bg-[#182830] hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-300 border border-slate-300 dark:border-slate-700 rounded-xl text-xs font-bold transition-colors"
-                title="Reset filters"
-              >
-                <RotateCcw size={12} />
-                <span>Reset</span>
-              </button>
+                {(data.extra || []).filter(x => x.rows.length).map(x => (
+                  <div key={x.title} className="space-y-2 report-section">
+                    <h3 className="text-sm font-bold text-slate-900 dark:text-white">{bn ? x.bn : x.title}</h3>
+                    <ReportTableView columns={x.columns} rows={x.rows} f={fmt} totalLabel={L('reports.total', 'Total', 'মোট')} />
+                  </div>
+                ))}
+              </>
+            ) : (
+              <EmptyState icon={Inbox}
+                text={L('reports.no_data', 'No records found for the selected filters. Try a wider period, or add data from the Entry Center.', 'নির্বাচিত ফিল্টারে কোনো রেকর্ড পাওয়া যায়নি। সময়কাল বাড়ান অথবা এন্ট্রি সেন্টার থেকে তথ্য যোগ করুন।')} />
             )}
-          </div>
-        </div>
 
-        {/* Step 3: Column Selection */}
-        <div>
-          <div className="flex items-center justify-between mb-2">
-            <label className="block text-[11px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">
-              Step 3: Select Columns for CSV ({Object.values(selectedColumns).filter(Boolean).length} of {ENTITY_COLUMNS[customEntity].length} selected)
-            </label>
-            <div className="flex items-center gap-2 text-xs">
-              <button
-                type="button"
-                onClick={() => {
-                  const allOn: Record<string, boolean> = {};
-                  ENTITY_COLUMNS[customEntity].forEach(c => { allOn[c.key] = true; });
-                  setSelectedColumns(allOn);
-                }}
-                className="text-[#0f4a3c] dark:text-emerald-400 hover:underline font-bold"
-              >
-                Select All
-              </button>
-              <span className="text-slate-300 dark:text-slate-600">|</span>
-              <button
-                type="button"
-                onClick={() => {
-                  const allOff: Record<string, boolean> = {};
-                  ENTITY_COLUMNS[customEntity].forEach(c => { allOff[c.key] = false; });
-                  setSelectedColumns(allOff);
-                }}
-                className="text-slate-500 dark:text-slate-400 hover:underline font-bold"
-              >
-                Clear All
-              </button>
-              <span className="text-slate-300 dark:text-slate-600">|</span>
-              <button
-                type="button"
-                onClick={() => {
-                  const def: Record<string, boolean> = {};
-                  ENTITY_COLUMNS[customEntity].forEach(c => { def[c.key] = c.default; });
-                  setSelectedColumns(def);
-                }}
-                className="text-slate-500 dark:text-slate-400 hover:underline font-bold"
-              >
-                Defaults
-              </button>
+            <div className="print-only text-[10px] text-slate-500 pt-2 border-t border-slate-200">
+              {orgName || 'Bondhu Fund'} · {title} · {formatDate(generatedAt)}
             </div>
-          </div>
-
-          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-2">
-            {ENTITY_COLUMNS[customEntity].map(col => {
-              const isChecked = !!selectedColumns[col.key];
-              return (
-                <label
-                  key={col.key}
-                  className={`flex items-center gap-2 p-2.5 rounded-xl border text-xs cursor-pointer select-none transition-all ${
-                    isChecked
-                      ? 'border-[#0f4a3c] dark:border-emerald-500 bg-emerald-50/70 dark:bg-[#1a332a] text-[#0f4a3c] dark:text-emerald-300 font-bold'
-                      : 'border-slate-200 dark:border-slate-800 bg-white dark:bg-[#142026] text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-[#1a2b34]'
-                  }`}
-                >
-                  <input
-                    type="checkbox"
-                    checked={isChecked}
-                    onChange={e => {
-                      setSelectedColumns(prev => ({
-                        ...prev,
-                        [col.key]: e.target.checked,
-                      }));
-                    }}
-                    className="rounded text-[#0f4a3c] focus:ring-[#0f4a3c] h-3.5 w-3.5"
-                  />
-                  <span className="truncate">{col.label}</span>
-                </label>
-              );
-            })}
-          </div>
-        </div>
-
-        {/* Step 4: Live Data Preview */}
-        <div>
-          <div className="flex items-center justify-between mb-2">
-            <label className="block text-[11px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">
-              Step 4: Live Data Preview (First 5 Matching Records)
-            </label>
-            <span className="text-xs text-slate-500 dark:text-slate-400 font-bold">
-              {customDataset.length} total records will be exported to CSV
-            </span>
-          </div>
-
-          <div className="border border-slate-200 dark:border-slate-800 rounded-xl overflow-hidden card-base">
-            <div className="overflow-x-auto w-full">
-              <table className="w-full min-w-[750px] text-left text-xs text-slate-800 dark:text-slate-200">
-                <thead className="bg-slate-50 dark:bg-[#111e24] border-b border-slate-200 dark:border-slate-800 text-slate-600 dark:text-slate-400 font-bold uppercase text-[10px]">
-                  <tr>
-                    {ENTITY_COLUMNS[customEntity]
-                      .filter(c => selectedColumns[c.key])
-                      .map(c => (
-                        <th key={c.key} className="py-2.5 px-3 whitespace-nowrap">
-                          {c.label}
-                        </th>
-                      ))}
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-100 dark:divide-slate-800/80 font-medium">
-                  {customDataset.length === 0 ? (
-                    <tr>
-                      <td
-                        colSpan={ENTITY_COLUMNS[customEntity].filter(c => selectedColumns[c.key]).length || 1}
-                        className="py-6 text-center text-slate-400 dark:text-slate-500"
-                      >
-                        No records match the filter criteria.
-                      </td>
-                    </tr>
-                  ) : (
-                    customDataset.slice(0, 5).map((row: any, idx) => (
-                      <tr key={idx} className="hover:bg-slate-50/80 dark:hover:bg-[#1a2b34]">
-                        {ENTITY_COLUMNS[customEntity]
-                          .filter(c => selectedColumns[c.key])
-                          .map(c => {
-                            let val = row[c.key];
-                            if (val === undefined || val === null) val = '-';
-                            if (typeof val === 'number') {
-                              val = val.toLocaleString();
-                            }
-                            return (
-                              <td key={c.key} className="py-2.5 px-3 whitespace-nowrap">
-                                {String(val)}
-                              </td>
-                            );
-                          })}
-                      </tr>
-                    ))
-                  )}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        </div>
+          </>
+        ) : null}
       </div>
     </div>
   );
 };
+
+const EmptyState: React.FC<{ icon: React.ElementType; text: string; tone?: 'bad' }> = ({ icon: Icon, text, tone }) => (
+  <div className="py-14 flex flex-col items-center text-center gap-2">
+    <div className={`w-12 h-12 rounded-2xl flex items-center justify-center ${tone === 'bad'
+      ? 'bg-rose-50 text-rose-500 dark:bg-rose-950/40'
+      : 'bg-emerald-50 text-[#0f4a3c] dark:bg-emerald-950/40 dark:text-emerald-400'}`}>
+      <Icon size={22} />
+    </div>
+    <p className="text-xs text-slate-500 dark:text-slate-400 max-w-sm">{text}</p>
+  </div>
+);
+
+export default ReportsView;

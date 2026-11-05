@@ -73,3 +73,62 @@ button, a, input, select, textarea {
   transition: all 0.15s ease-in-out;
 }
 
+
+/* ------------------------------------------------------------------ */
+/* Print / PDF export (Reports). savePdf() prints the current window.  */
+/* ------------------------------------------------------------------ */
+.print-only { display: none; }
+
+@media print {
+  @page { size: A4; margin: 12mm 10mm; }
+
+  .no-print { display: none !important; }
+  .print-only { display: block !important; }
+
+  html, body, #root {
+    height: auto !important;
+    overflow: visible !important;
+    background: #fff !important;
+    color: #000 !important;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+  /* Let the app shell grow so every page of the report prints */
+  .h-screen, .overflow-hidden, .overflow-y-auto, .overflow-x-auto, main {
+    height: auto !important;
+    max-height: none !important;
+    overflow: visible !important;
+  }
+  .report-page { padding: 0 !important; max-width: none !important; margin: 0 !important; }
+
+  #report-print-area {
+    width: 100% !important;
+    max-width: none !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    border: none !important;
+    border-radius: 0 !important;
+    box-shadow: none !important;
+    background: #fff !important;
+  }
+  #report-print-area,
+  #report-print-area * {
+    color: #000 !important;
+    border-color: #cbd5e1 !important;
+    box-shadow: none !important;
+  }
+  .dark #report-print-area * { background-color: transparent !important; }
+  #report-print-area h2 { color: #0f4a3c !important; }
+  #report-print-area .report-summary > div { background: #f8fafc !important; break-inside: avoid; }
+  #report-print-area .report-table-wrap { border-radius: 0 !important; }
+  #report-print-area .report-table { font-size: 9px !important; }
+  #report-print-area .report-table th,
+  #report-print-area .report-table td { padding: 3px 5px !important; }
+  #report-print-area .report-table thead tr { background: #e6f3ee !important; }
+  #report-print-area .report-table tfoot tr { background: #f1f5f9 !important; }
+  #report-print-area .report-table tbody tr { background: #fff !important; }
+  thead { display: table-header-group; }
+  tfoot { display: table-row-group; }
+  tr { break-inside: avoid; page-break-inside: avoid; }
+  .report-section { break-before: auto; }
+}

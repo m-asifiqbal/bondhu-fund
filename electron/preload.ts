@@ -12,5 +12,5 @@ contextBridge.exposeInMainWorld('electronAPI', {
   openBackupsFolder: () => ipcRenderer.invoke('app:open-backups-folder'),
   saveText: (name: string, content: string, filters?: { name: string; extensions: string[] }[]) =>
     ipcRenderer.invoke('file:save-text', name, content, filters),
-  savePdf: (name: string) => ipcRenderer.invoke('file:save-pdf', name),
+  savePdf: (name: string, landscape?: boolean) => ipcRenderer.invoke('file:save-pdf', name, landscape),
 });

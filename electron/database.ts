@@ -654,10 +654,11 @@ function bulkAddMembers(list: any[]) {
       if (!name) continue;
       const code = getNextMemberCode(batch);
       batch.push(code);
-      run(`INSERT INTO members (member_code, name, phone, email, designation, status, monthly_due, join_date, avatar_initials)
-           VALUES (?,?,?,?, 'Member','Active',?,?,?)`,
-        [code, name, String(m.phone || '').trim(), String(m.email || '').trim(),
-          Number(m.monthly_due) || Number(s.default_monthly_due), toISODate(m.join_date) || todayISO(), initials(name)]);
+      run(`INSERT INTO members (member_code, name, phone, email, designation, status, monthly_due, join_date, avatar_initials, opening_balance, notes)
+           VALUES (?,?,?,?,?,'Active',?,?,?,?,?)`,
+        [code, name, String(m.phone || '').trim(), String(m.email || '').trim(), String(m.designation || 'Member').trim(),
+          Number(m.monthly_due) || Number(s.default_monthly_due), toISODate(m.join_date) || todayISO(), initials(name),
+          Number(m.opening_balance) || 0, String(m.notes || '')]);
       c++;
     }
     audit('import', 'member', null, `${c} members imported`);
@@ -825,6 +826,7 @@ function updateInvestment(id: number, d: any) {
   };
   if (f.status === 'Sold' && !(f.sold_amount ?? cur.sold_amount)) fail('Enter the sale amount to mark an investment as sold.');
   if (f.status === 'Sold' && !(f.sold_date ?? cur.sold_date)) f.sold_date = todayISO();
+  if (f.status && f.status !== 'Sold' && cur.status === 'Sold') { f.sold_amount = null; f.sold_date = null; }
   const keys = Object.keys(f).filter(k => f[k] !== undefined);
   if (!keys.length) return;
   tx(() => {
@@ -889,6 +891,8 @@ function updateExpense(id: number, d: any) {
     amount: d.amount !== undefined ? Number(d.amount) : undefined, expense_date: d.expense_date ? toISODate(d.expense_date) : undefined,
   };
   if (f.amount !== undefined && !(f.amount > 0)) fail('Amount must be greater than zero.');
+  // receipt reference drives verification status unless the caller sets it explicitly
+  if (f.status === undefined && d.receipt_ref !== undefined) f.status = String(d.receipt_ref).trim() ? 'Verified' : 'Needs receipt';
   const keys = Object.keys(f).filter(k => f[k] !== undefined);
   if (!keys.length) return;
   tx(() => { run(`UPDATE expenses SET ${keys.map(k => `${k} = ?`).join(', ')} WHERE id = ?`, [...keys.map(k => f[k]), id]); audit('update', 'expense', id, keys.join(', ')); });
@@ -1075,7 +1079,7 @@ function getOverviewData(month?: string) {
       UNION ALL SELECT 'expense', id, title, category, -amount, expense_date, created_at FROM expenses
       UNION ALL SELECT 'investment', id, name, sector, -invested_amount, purchase_date, created_at FROM investments
       UNION ALL SELECT 'member', id, name || ' joined', member_code, 0, join_date, created_at FROM members
-    ) ORDER BY created_at DESC, date DESC LIMIT 10`);
+    ) ORDER BY date DESC, created_at DESC LIMIT 10`);
 
   const in30 = todayISO(new Date(Date.now() + 30 * 864e5));
   return {
@@ -1225,9 +1229,9 @@ function loadDemoData() {
            VALUES (?,?,?,?,?,?,?,?,?)`,
         [`BF-${pad4(i + 1)}`, name, `01${7 + (i % 3)}${String(10000000 + Math.floor(rnd() * 89999999)).slice(0, 8)}`,
           `${name.toLowerCase().replace(/\s+/g, '.')}@example.com`, i === 29 ? 'Inactive' : 'Active', due, `${join}-0${1 + (i % 9)}`,
-          initials(name), i < 20 ? due * 6 : 0]);
+          initials(name), i < 20 ? due * 18 : 0]);
       const mid = lastId();
-      for (let k = join; k <= cur; k = addMonths(k, 1)) {
+      for (let k = join; k <= (i === 29 ? addMonths(cur, -4) : cur); k = addMonths(k, 1)) {
         const dueDate = dueDateOf(k, dd);
         const isCur = k === cur;
         if (isCur && todayISO() < dueDate && rnd() > 0.55) continue;
