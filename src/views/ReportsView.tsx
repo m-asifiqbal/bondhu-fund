@@ -330,12 +330,12 @@ export const ReportsView: React.FC = () => {
         </div>
         <div className="flex flex-wrap items-center gap-2">
           <button onClick={exportCsv} disabled={!data || !data.rows.length || !!exporting || loading}
-            className="flex items-center gap-2 px-4 py-2.5 bg-white dark:bg-[#142026] border border-slate-300 dark:border-[#283d47] text-slate-800 dark:text-slate-100 hover:border-[#0f4a3c] rounded-xl text-xs font-bold shadow-sm disabled:opacity-50 disabled:cursor-not-allowed">
+            className="btn btn-outline">
             {exporting === 'csv' ? <Loader2 size={15} className="animate-spin" /> : <FileSpreadsheet size={15} className="text-emerald-600" />}
             <span>{t('reports.export_csv', 'Export CSV')}</span>
           </button>
           <button onClick={exportPdf} disabled={!data || !!exporting || loading}
-            className="flex items-center gap-2 px-4 py-2.5 bg-[#0f4a3c] hover:bg-[#145c4b] dark:bg-emerald-700 dark:hover:bg-emerald-600 text-white rounded-xl text-xs font-bold shadow-md disabled:opacity-50 disabled:cursor-not-allowed">
+            className="btn btn-primary">
             {exporting === 'pdf' ? <Loader2 size={15} className="animate-spin" /> : <FileText size={15} />}
             <span>{t('reports.save_pdf', 'Save PDF')}</span>
           </button>
@@ -421,7 +421,7 @@ export const ReportsView: React.FC = () => {
           {data && (
             <div className="relative" ref={chooserRef}>
               <button onClick={() => setChooserOpen(o => !o)} aria-expanded={chooserOpen}
-                className="flex items-center gap-1.5 px-3 py-2 rounded-xl border border-slate-300 dark:border-[#283d47] bg-white dark:bg-[#101b21] text-xs font-bold text-slate-700 dark:text-slate-200 hover:border-[#0f4a3c] whitespace-nowrap">
+                className="btn btn-outline">
                 <Columns3 size={14} />
                 <span>{t('reports.columns', 'Columns')} ({num(shownColumns.length)}/{num(data.columns.length)})</span>
                 <ChevronDown size={13} />
@@ -441,7 +441,7 @@ export const ReportsView: React.FC = () => {
                     );
                   })}
                   <button onClick={() => setVisible(prev => ({ ...prev, [reportId]: defaultCols(data.columns) }))}
-                    className="w-full mt-1 px-2 py-1.5 text-[11px] font-bold text-[#0f4a3c] dark:text-emerald-400 hover:underline text-left">
+                    className="btn btn-outline btn-sm w-full mt-1">
                     {t('reports.reset_columns', 'Reset to default')}
                   </button>
                 </div>

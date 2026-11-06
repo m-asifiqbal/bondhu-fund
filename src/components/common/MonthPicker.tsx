@@ -7,6 +7,8 @@ interface MonthPickerProps {
   onChange: (monthStr: string) => void;
   className?: string;
   align?: 'left' | 'right';
+  /** 'field' = full-width form control (same outline and 44px height as inputs); 'pill' = compact toolbar button */
+  variant?: 'pill' | 'field';
 }
 
 const MONTH_NAMES = [
@@ -44,6 +46,7 @@ export const MonthPicker: React.FC<MonthPickerProps> = ({
   onChange,
   className = '',
   align = 'right',
+  variant = 'pill',
 }) => {
   const { language, toBanglaDigits, t } = useApp();
   const [isOpen, setIsOpen] = useState(false);
@@ -116,23 +119,25 @@ export const MonthPicker: React.FC<MonthPickerProps> = ({
   };
 
   return (
-    <div className={`relative inline-block ${className}`} ref={containerRef}>
+    <div className={`relative ${variant === 'field' ? 'block' : 'inline-block'} ${className}`} ref={containerRef}>
       {/* Trigger Pill Button */}
       <button
         type="button"
         onClick={() => setIsOpen(!isOpen)}
-        className={`flex items-center gap-2 px-3.5 py-2 bg-white dark:bg-[#16252d] border rounded-xl text-xs font-bold transition-all shadow-sm ${
+        className={`flex items-center gap-2 bg-white border-[1.5px] rounded-xl font-bold transition-[border-color,box-shadow] duration-150 shadow-sm ${
+          variant === 'field' ? 'w-full h-11 px-3.5 text-[13px] font-semibold dark:bg-[#101b21]' : 'px-3.5 py-2 text-xs dark:bg-[#16252d]'
+        } ${
           isOpen
-            ? 'border-emerald-600 dark:border-emerald-500 ring-2 ring-emerald-500/10 text-slate-900 dark:text-white'
-            : 'border-slate-300 dark:border-[#283e4a] text-slate-700 dark:text-slate-200 hover:border-slate-400 dark:hover:border-slate-600'
+            ? 'border-[#0f6b50] dark:border-emerald-500 ring-[3px] ring-[#0f6b50]/15 text-slate-900 dark:text-white'
+            : 'border-[#a9b7c3] dark:border-[#3a5463] text-slate-700 dark:text-slate-200 hover:border-[#7f93a3] dark:hover:border-[#52717f]'
         }`}
         title={t('monthpicker.select', 'Select month')}
         aria-label={t('monthpicker.select', 'Select month')}
         aria-expanded={isOpen}
       >
         <Calendar size={14} className="text-[#0f4a3c] dark:text-emerald-400 shrink-0" />
-        <span className="font-bold">{displayLabel()}</span>
-        <span className="text-[10px] text-slate-400" aria-hidden>▾</span>
+        <span className={variant === 'field' ? 'flex-1 text-left text-slate-900 dark:text-slate-100' : 'font-bold'}>{displayLabel()}</span>
+        <span className={`text-[10px] text-slate-400 transition-transform duration-200 ${isOpen ? 'rotate-180' : ''}`} aria-hidden>▾</span>
       </button>
 
       {/* Month Picker Calendar Grid Popover */}

@@ -17,6 +17,7 @@ import {
   AlertTriangle,
 } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
+import { SegmentedTabs } from '../common/SegmentedTabs';
 import { ProfileMenu, UserAvatar, useOutsideClose } from './Sidebar';
 import type { AppNotification, NavTab } from '../../types';
 
@@ -69,7 +70,7 @@ export const TopBar: React.FC = () => {
   const [showProfileMenu, setShowProfileMenu] = useState(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [notifFilter, setNotifFilter] = useState<'all' | 'warning' | 'info'>('all');
-  const [isNotifExpanded, setIsNotifExpanded] = useState(false);
+  const [isNotifExpanded, setIsNotifExpanded] = useState(true);   // notification centre opens expanded
 
   const notificationRef = useRef<HTMLDivElement>(null);
   const profileRef = useRef<HTMLDivElement>(null);
@@ -140,7 +141,7 @@ export const TopBar: React.FC = () => {
             aria-label={t('topbar.search_placeholder', 'Search members or payment...')}
             value={searchTerm}
             onChange={e => setSearchTerm(e.target.value)}
-            className="w-52 2xl:w-64 h-9 pl-9 pr-4 bg-slate-50 dark:bg-[#16252d] rounded-xl border border-slate-300 dark:border-[#2d424e] text-xs text-slate-900 dark:text-slate-100 placeholder-slate-400 dark:placeholder-slate-500 font-medium focus:outline-none focus:ring-2 focus:ring-[#0f4a3c]/20 focus:border-[#0f4a3c] dark:focus:border-emerald-500 shadow-sm"
+            className="w-52 2xl:w-64 h-9 pl-9 pr-4 bg-slate-50 dark:bg-[#16252d] rounded-xl border-[1.5px] border-[#a9b7c3] dark:border-[#3a5463] hover:border-[#7f93a3] text-xs text-slate-900 dark:text-slate-100 placeholder-slate-400 dark:placeholder-slate-500 font-medium focus:outline-none focus:ring-2 focus:ring-[#0f4a3c]/20 focus:border-[#0f4a3c] dark:focus:border-emerald-500 shadow-sm"
           />
         </form>
 
@@ -244,22 +245,13 @@ export const TopBar: React.FC = () => {
                 </div>
               </div>
 
-              <div className="flex items-center gap-1 pt-2.5 pb-2 text-[11px]">
-                {([
-                  ['all', `${t('common.all', 'All')} (${num((notifications || []).length)})`, 'bg-slate-900 dark:bg-white text-white dark:text-slate-900'],
-                  ['warning', t('shell.attention', 'Attention'), 'bg-amber-600 text-white'],
-                  ['info', t('shell.updates', 'Updates'), 'bg-emerald-600 text-white'],
-                ] as const).map(([key, label, activeCls]) => (
-                  <button
-                    key={key}
-                    onClick={() => setNotifFilter(key)}
-                    className={`px-2.5 py-1 rounded-lg font-bold transition-colors ${
-                      notifFilter === key ? activeCls : 'text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800'
-                    }`}
-                  >
-                    {label}
-                  </button>
-                ))}
+              <div className="pt-3 pb-2">
+                <SegmentedTabs size="sm" value={notifFilter} onChange={setNotifFilter} ariaLabel={t('topbar.notifications', 'System Notifications')}
+                  items={[
+                    { key: 'all' as const, label: t('common.all', 'All'), count: num((notifications || []).length) },
+                    { key: 'warning' as const, label: t('shell.attention', 'Attention'), accent: 'text-amber-700 dark:text-amber-400' },
+                    { key: 'info' as const, label: t('shell.updates', 'Updates') },
+                  ]} />
               </div>
 
               <div className={`space-y-2.5 mt-1 overflow-y-auto pr-1 ${isNotifExpanded ? 'max-h-[460px]' : 'max-h-[340px]'}`}>
@@ -324,7 +316,7 @@ export const TopBar: React.FC = () => {
         {/* Record payment */}
         <button
           onClick={() => setOpenRecordModal(true)}
-          className="h-9 flex items-center justify-center gap-1.5 px-4 bg-slate-900 hover:bg-slate-800 dark:bg-emerald-600 dark:hover:bg-emerald-500 text-white rounded-xl text-xs font-bold shadow-sm transition-all active:scale-[0.98]"
+          className="btn btn-primary !h-9 !px-4 !text-xs"
         >
           <Plus size={15} strokeWidth={2.5} />
           <span>{t('topbar.record_payment', 'Record payment')}</span>

@@ -95,7 +95,7 @@ export const LoginScreen: React.FC = () => {
 
             {error && <div role="alert" className="mt-4 rounded-xl border border-rose-200 dark:border-rose-900/60 bg-rose-50 dark:bg-rose-950/40 px-3.5 py-2.5 text-xs font-semibold text-rose-700 dark:text-rose-300">{error}</div>}
 
-            <button type="submit" disabled={busy} className="mt-6 w-full flex items-center justify-center gap-2 py-3 rounded-xl bg-brand hover:bg-brand-hover text-white text-sm font-bold disabled:opacity-60">
+            <button type="submit" disabled={busy} className="btn btn-primary btn-lg btn-block mt-6">
               {busy ? <Loader2 size={16} className="animate-spin" /> : <LogIn size={16} />}{t('auth.sign_in', 'Sign in')}
             </button>
             <p className="mt-6 text-[11px] text-slate-400 text-center">{t('auth.help', 'Forgot your password? Ask an administrator to set a new one.')}</p>
@@ -130,8 +130,8 @@ export const ChangePasswordPrompt: React.FC<{ open: boolean; onDone: () => void;
       title={t('auth.change_title', 'Change your password')}
       subtitle={forced ? t('auth.change_default', 'You are using the default password. Please choose a new one.') : undefined}
       footer={<>
-        <button type="button" onClick={onDone} disabled={busy} className="btn-secondary-modal">{forced ? t('auth.later', 'Later') : t('common.cancel', 'Cancel')}</button>
-        <button type="button" onClick={save} disabled={busy || !cur || !next} className="btn-primary-modal">{busy && <Loader2 size={14} className="animate-spin" />}{t('auth.change_btn', 'Change password')}</button>
+        <button type="button" onClick={onDone} disabled={busy} className="btn btn-cancel">{forced ? t('auth.later', 'Later') : t('common.cancel', 'Cancel')}</button>
+        <button type="button" onClick={save} disabled={busy || !cur || !next} className="btn btn-primary">{busy && <Loader2 size={14} className="animate-spin" />}{t('auth.change_btn', 'Change password')}</button>
       </>}>
       <div className="space-y-3.5">
         <div><label className="form-label">{t('auth.current', 'Current password')}</label><input type="password" className="form-input" value={cur} onChange={e => setCur(e.target.value)} autoComplete="current-password" /></div>

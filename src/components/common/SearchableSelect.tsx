@@ -120,7 +120,7 @@ export const SearchableSelect: React.FC<SearchableSelectProps> = ({
     else if (e.key === 'Tab') setOpen(false);
   };
 
-  const h = size === 'sm' ? 'min-h-[38px] py-2 text-xs' : 'min-h-[44px] py-2.5 text-[13px]';
+  const h = size === 'sm' ? 'h-[38px] text-xs' : 'h-11 text-[13px]';
 
   return (
     <div className={`relative ${className}`}>
@@ -138,8 +138,8 @@ export const SearchableSelect: React.FC<SearchableSelectProps> = ({
         onKeyDown={onKey}
         aria-haspopup="listbox"
         aria-expanded={open}
-        className={`w-full flex items-center gap-2 px-3.5 ${h} text-left bg-white dark:bg-[#101b21] border rounded-xl font-semibold shadow-sm
-          ${open ? 'border-brand dark:border-emerald-500 ring-2 ring-brand/15 dark:ring-emerald-500/20' : 'border-slate-300 dark:border-[#283d47] hover:border-slate-400 dark:hover:border-[#36505d]'}
+        className={`w-full flex items-center gap-2 px-3.5 ${h} text-left bg-white dark:bg-[#101b21] border-[1.5px] rounded-xl font-semibold shadow-sm transition-[border-color,box-shadow] duration-150
+          ${open ? 'border-[#0f6b50] dark:border-emerald-500 ring-[3px] ring-[#0f6b50]/15 dark:ring-emerald-500/20' : 'border-[#a9b7c3] dark:border-[#3a5463] hover:border-[#7f93a3] dark:hover:border-[#52717f]'}
           ${disabled ? 'opacity-60 cursor-not-allowed' : 'cursor-pointer'} text-slate-900 dark:text-slate-100`}
       >
         {icon && <span className="shrink-0 text-slate-400">{icon}</span>}

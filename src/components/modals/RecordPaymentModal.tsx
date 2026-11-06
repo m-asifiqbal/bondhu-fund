@@ -151,115 +151,101 @@ export const RecordPaymentModal: React.FC = () => {
       open={openRecordModal}
       onClose={handleClose}
       locked={isSubmitting}
-      size="md"
-      icon={<Receipt size={18} />}
+      size="lg"
+      icon={<Receipt size={20} />}
       title={t('members.pay_title', 'Record member payment')}
       subtitle={t('members.pay_subtitle', 'Record a monthly contribution for a member')}
       footer={
         <>
-          <button
-            type="button"
-            onClick={handleClose}
-            disabled={isSubmitting}
-            className="px-4 py-2 border border-slate-300 dark:border-slate-700 text-slate-700 dark:text-slate-300 rounded-xl hover:bg-slate-100 dark:hover:bg-slate-800 font-bold text-xs disabled:opacity-50"
-          >
+          <button type="button" onClick={handleClose} disabled={isSubmitting} className="btn btn-cancel min-w-[7.5rem]">
             {t('common.cancel', 'Cancel')}
           </button>
-          <button
-            type="submit"
-            form="record-payment-form"
-            disabled={isSubmitting || loading}
-            className="flex items-center gap-1.5 px-5 py-2 bg-slate-900 hover:bg-slate-800 dark:bg-emerald-600 dark:hover:bg-emerald-500 text-white rounded-xl font-bold text-xs shadow-md transition-all disabled:opacity-50"
-          >
-            <Check size={16} strokeWidth={2.5} />
+          <button type="submit" form="record-payment-form" disabled={isSubmitting || loading} className="btn btn-primary min-w-[10.5rem]">
+            <Check size={16} strokeWidth={2.6} />
             <span>{isSubmitting ? t('common.saving', 'Saving...') : t('members.pay_confirm', 'Confirm & save')}</span>
           </button>
         </>
       }
     >
-      <form id="record-payment-form" onSubmit={handleSubmit} className="space-y-4" noValidate>
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-          <div>
-            <SearchableSelect
-              label={t('members.pay_member', 'Select member')}
-              required
-              isLoading={loading}
-              options={memberOptions}
-              value={selectedMemberId}
-              onChange={val => handleMemberChange(Number(val))}
-              placeholder={t('members.pay_member_ph', 'Search by name or code…')}
-              searchPlaceholder={t('members.pay_member_search', 'Type member name or code…')}
-            />
-          </div>
-          <div>
-            <label className="form-label mb-1.5 block">{t('members.pay_month', 'Payment month')} <span className="text-rose-500">*</span></label>
-            <MonthPicker value={paymentMonth} onChange={setPaymentMonth} className="w-full" align="left" />
-          </div>
+      {/* Eight fields in two equal columns: same label row, same 44px control height, same width. */}
+      <form id="record-payment-form" onSubmit={handleSubmit} className="grid grid-cols-1 sm:grid-cols-2 gap-x-5 gap-y-4 items-start" noValidate>
+        <SearchableSelect
+          label={t('members.pay_member', 'Select member')}
+          required
+          isLoading={loading}
+          options={memberOptions}
+          value={selectedMemberId}
+          onChange={val => handleMemberChange(Number(val))}
+          placeholder={t('members.pay_member_ph', 'Search by name or code…')}
+          searchPlaceholder={t('members.pay_member_search', 'Type member name or code…')}
+        />
+        <div>
+          <label className="form-label">{t('members.pay_month', 'Payment month')} <span className="text-rose-500">*</span></label>
+          <MonthPicker variant="field" value={paymentMonth} onChange={setPaymentMonth} className="w-full" align="left" />
         </div>
 
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-          <div>
-            <DatePicker
-              label={t('members.pay_date', 'Payment date')}
-              required
-              clearable={false}
-              value={paymentDate}
-              max={todayISO()}
-              onChange={setPaymentDate}
-            />
-          </div>
-          <div>
-            <SearchableSelect
-              label={t('members.pay_method', 'Payment method')}
-              required
-              isLoading={loading}
-              options={paymentMethodOptions}
-              value={paymentMethod}
-              onChange={val => setPaymentMethod(String(val ?? ''))}
-              placeholder={t('members.pay_method_ph', 'Select method…')}
-            />
-          </div>
+        <DatePicker
+          label={t('members.pay_date', 'Payment date')}
+          required
+          clearable={false}
+          value={paymentDate}
+          max={todayISO()}
+          onChange={setPaymentDate}
+        />
+        <SearchableSelect
+          label={t('members.pay_method', 'Payment method')}
+          required
+          isLoading={loading}
+          options={paymentMethodOptions}
+          value={paymentMethod}
+          onChange={val => setPaymentMethod(String(val ?? ''))}
+          placeholder={t('members.pay_method_ph', 'Select method…')}
+        />
+
+        <div>
+          <label className="form-label">{t('members.pay_contribution', 'Contribution')} <span className="text-rose-500">*</span></label>
+          <input
+            type="number"
+            min={0}
+            value={amount}
+            onChange={e => setAmount(e.target.value === '' ? '' : Number(e.target.value))}
+            className="form-input font-bold tabular-nums"
+            required
+          />
+        </div>
+        <div>
+          <label className="form-label flex items-baseline justify-between gap-2">
+            <span>{t('members.late_fee', 'Late fee')}</span>
+            <span className="text-[11px] font-medium text-slate-500 dark:text-slate-400 truncate">{t('members.pay_late_fee_hint', 'Suggested from settings; you can change it.')}</span>
+          </label>
+          <input
+            type="number"
+            min={0}
+            value={lateFee}
+            onChange={e => setLateFee(e.target.value === '' ? '' : Number(e.target.value))}
+            className="form-input font-semibold tabular-nums"
+          />
         </div>
 
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-          <div>
-            <label className="form-label">{t('members.pay_contribution', 'Contribution')} <span className="text-rose-500">*</span></label>
-            <input
-              type="number"
-              min={0}
-              value={amount}
-              onChange={e => setAmount(e.target.value === '' ? '' : Number(e.target.value))}
-              className="form-input font-bold"
-              required
-            />
-          </div>
-          <div>
-            <label className="form-label">{t('members.late_fee', 'Late fee')}</label>
-            <input
-              type="number"
-              min={0}
-              value={lateFee}
-              onChange={e => setLateFee(e.target.value === '' ? '' : Number(e.target.value))}
-              className="form-input font-semibold"
-            />
-            <p className="text-[10px] text-slate-400 mt-1">{t('members.pay_late_fee_hint', 'Suggested from settings; you can change it.')}</p>
-          </div>
+        <div>
+          <label className="form-label">{t('members.trx', 'Transaction / Ref ID')}</label>
+          <input type="text" value={trxId} onChange={e => setTrxId(e.target.value)} className="form-input font-mono" />
+        </div>
+        <div>
+          <label className="form-label">{t('members.note', 'Note')}</label>
+          <input type="text" value={note} onChange={e => setNote(e.target.value)} className="form-input" />
         </div>
 
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-          <div>
-            <label className="form-label">{t('members.trx', 'Transaction / Ref ID')}</label>
-            <input type="text" value={trxId} onChange={e => setTrxId(e.target.value)} className="form-input font-mono" />
+        <div className="sm:col-span-2 rounded-xl border-[1.5px] border-emerald-300 dark:border-emerald-800 bg-emerald-50 dark:bg-emerald-950/40 px-5 py-3 flex flex-wrap items-center justify-between gap-x-6 gap-y-2">
+          <div className="text-xs font-semibold text-slate-600 dark:text-slate-300 tabular-nums">
+            {t('members.pay_contribution', 'Contribution')} {formatCurrency(Number(amount) || 0)}
+            <span className="mx-2 text-slate-400">+</span>
+            {t('members.late_fee', 'Late fee')} {formatCurrency(Number(lateFee) || 0)}
           </div>
-          <div>
-            <label className="form-label">{t('members.note', 'Note')}</label>
-            <input type="text" value={note} onChange={e => setNote(e.target.value)} className="form-input" />
+          <div className="flex items-baseline gap-3">
+            <span className="text-xs font-bold text-slate-700 dark:text-slate-300">{t('members.pay_total', 'Total amount to record')}</span>
+            <span className="text-2xl font-black text-emerald-800 dark:text-emerald-300 tabular-nums">{formatCurrency(total)}</span>
           </div>
-        </div>
-
-        <div className="p-3.5 bg-emerald-50 dark:bg-emerald-950/50 rounded-xl border border-emerald-200 dark:border-emerald-800/80 flex items-center justify-between gap-3">
-          <span className="text-slate-700 dark:text-slate-300 font-bold text-xs">{t('members.pay_total', 'Total amount to record')}</span>
-          <span className="text-base font-black text-emerald-800 dark:text-emerald-300">{formatCurrency(total)}</span>
         </div>
       </form>
     </Modal>

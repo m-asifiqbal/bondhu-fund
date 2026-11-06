@@ -110,7 +110,7 @@ const AccountDialogs: React.FC = () => {
   return (
     <>
       <ChangePasswordPrompt open={pwOpen} onDone={() => setPwOpen(false)} />
-      <Modal open={confirmOut} onClose={() => setConfirmOut(false)} locked={busy} size="sm" icon={<LogOut size={18} />}
+      <Modal open={confirmOut} onClose={() => setConfirmOut(false)} locked={busy} size="sm" tone="warning" icon={<LogOut size={18} />}
         title={t('shell.sign_out_title', 'Sign out?')}
         subtitle={t('shell.sign_out_msg', 'You will need your username and password to sign in again.')}
         footer={<>

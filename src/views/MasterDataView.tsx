@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { Plus, Trash2, Tag, Briefcase, CreditCard, Pencil, Check, X } from 'lucide-react';
+import { SegmentedTabs } from '../components/common/SegmentedTabs';
 import { useApp } from '../context/AppContext';
 import { getMasterData, addMasterItem, updateMasterItem, deleteMasterItem } from '../services/db';
 import { MasterCategory } from '../types';
@@ -140,27 +141,8 @@ export const MasterDataView: React.FC = () => {
         </p>
       </div>
 
-      <div className="flex flex-wrap items-center gap-2 card-base p-1.5 w-max max-w-full" role="tablist">
-        {tabs.map(tab => {
-          const Icon = tab.icon;
-          return (
-            <button
-              key={tab.id}
-              role="tab"
-              aria-selected={activeType === tab.id}
-              onClick={() => setActiveType(tab.id)}
-              className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition-all ${
-                activeType === tab.id
-                  ? 'bg-brand dark:bg-emerald-700 text-white shadow-sm'
-                  : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800'
-              }`}
-            >
-              <Icon size={14} />
-              <span>{tab.label}</span>
-            </button>
-          );
-        })}
-      </div>
+      <SegmentedTabs ariaLabel={t('nav.master', 'Master data')} value={activeType} onChange={setActiveType}
+        items={tabs.map(tab => { const Icon = tab.icon; return { key: tab.id, label: tab.label, icon: <Icon size={14} /> }; })} />
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         <div className="card-base p-6 h-max">
@@ -188,7 +170,7 @@ export const MasterDataView: React.FC = () => {
             <button
               type="submit"
               disabled={busyId === 'add' || !newName.trim()}
-              className="w-full flex items-center justify-center gap-2 py-2.5 bg-brand hover:bg-brand-hover dark:bg-emerald-700 dark:hover:bg-emerald-600 text-white rounded-xl text-xs font-bold shadow-md transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+              className="btn btn-primary btn-block"
             >
               <Plus size={15} />
               <span>{busyId === 'add' ? t('common.saving', 'Saving…') : t('common.add', 'Add')}</span>
@@ -261,7 +243,7 @@ export const MasterDataView: React.FC = () => {
                           <Check size={15} />
                         </button>
                         <button onClick={() => setEditId(null)} disabled={busy} title={t('common.cancel', 'Cancel')} aria-label={t('common.cancel', 'Cancel')}
-                          className="w-8 h-8 rounded-lg text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800 flex items-center justify-center">
+                          className="btn btn-cancel w-8 justify-center">
                           <X size={15} />
                         </button>
                       </>
@@ -279,11 +261,11 @@ export const MasterDataView: React.FC = () => {
                           <span className={`absolute top-0.5 left-0.5 w-4 h-4 rounded-full bg-white shadow transition-transform ${item.is_active ? 'translate-x-4' : ''}`} />
                         </button>
                         <button onClick={() => startEdit(item)} disabled={busy} title={t('finance.master_rename', 'Rename / edit')} aria-label={t('finance.master_rename', 'Rename / edit')}
-                          className="w-8 h-8 rounded-lg text-slate-400 hover:text-slate-800 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800 flex items-center justify-center">
+                          className="btn btn-outline w-8 justify-center">
                           <Pencil size={14} />
                         </button>
                         <button onClick={() => setConfirmDelete(item)} disabled={busy} title={t('common.delete', 'Delete')} aria-label={t('common.delete', 'Delete')}
-                          className="w-8 h-8 rounded-lg text-slate-400 hover:text-rose-600 dark:hover:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/40 flex items-center justify-center disabled:opacity-50">
+                          className="btn btn-danger-outline w-8 justify-center">
                           <Trash2 size={15} />
                         </button>
                       </>
@@ -305,17 +287,17 @@ export const MasterDataView: React.FC = () => {
         open={!!confirmDelete}
         onClose={() => !deleting && setConfirmDelete(null)}
         locked={deleting}
-        size="sm"
+        size="sm" tone="danger"
         icon={<Trash2 size={18} />}
         title={t('finance.master_delete_title', 'Delete item?')}
         footer={
           <div className="flex items-center justify-end gap-2">
             <button type="button" onClick={() => setConfirmDelete(null)} disabled={deleting}
-              className="px-4 py-2 border border-slate-300 dark:border-slate-700 text-slate-700 dark:text-slate-300 rounded-xl text-xs font-bold disabled:opacity-50">
+              className="btn btn-cancel">
               {t('common.cancel', 'Cancel')}
             </button>
             <button type="button" onClick={handleDelete} disabled={deleting}
-              className="px-4 py-2 bg-rose-600 hover:bg-rose-500 text-white rounded-xl text-xs font-bold shadow-md disabled:opacity-50">
+              className="btn btn-danger">
               {deleting ? t('finance.deleting', 'Deleting…') : t('common.delete', 'Delete')}
             </button>
           </div>

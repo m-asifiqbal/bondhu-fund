@@ -208,7 +208,7 @@ export const UserProfileView: React.FC = () => {
           <UserRound size={36} className="mx-auto text-slate-300 dark:text-slate-600 mb-3" />
           <h2 className="text-base font-black text-slate-900 dark:text-white">{t('admin.profile_not_found', 'Profile not available')}</h2>
           <p className="text-slate-500 dark:text-slate-400 mt-1">{error || t('admin.profile_not_found_desc', 'This user could not be found. It may have been deleted.')}</p>
-          <button onClick={() => setActiveTab('users')} className="mt-4 px-4 py-2 rounded-xl font-bold text-white bg-brand hover:bg-brand-hover dark:bg-emerald-700">
+          <button onClick={() => setActiveTab('users')} className="btn btn-outline mt-4">
             {t('admin.go_users', 'Go to Users & Roles')}
           </button>
         </div>
@@ -234,8 +234,8 @@ export const UserProfileView: React.FC = () => {
     { icon: FileText, label: t('admin.bio', 'About'), value: user.bio, multiline: true },
   ];
 
-  const btnSoft = 'flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-bold border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800/60 text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800 disabled:opacity-50 disabled:cursor-not-allowed transition-colors';
-  const btnPrimary = 'flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-bold text-white bg-brand hover:bg-brand-hover dark:bg-emerald-700 dark:hover:bg-emerald-600 shadow-sm disabled:opacity-50 disabled:cursor-not-allowed transition-colors';
+  const btnSoft = 'btn btn-outline';
+  const btnPrimary = 'btn btn-primary';
 
   return (
     <div className="p-6 lg:p-8 space-y-6 max-w-7xl mx-auto text-xs">
@@ -268,7 +268,7 @@ export const UserProfileView: React.FC = () => {
 
             <div className="flex flex-wrap gap-2 pb-1">
               {user.avatar && (
-                <button type="button" onClick={() => setConfirmRemove(true)} disabled={photoBusy} className={btnSoft}>
+                <button type="button" onClick={() => setConfirmRemove(true)} disabled={photoBusy} className="btn btn-danger-outline">
                   <Trash2 size={14} /> {t('admin.remove_photo', 'Remove photo')}
                 </button>
               )}
@@ -283,7 +283,7 @@ export const UserProfileView: React.FC = () => {
                 </button>
               )}
               {canEdit && (
-                <button type="button" onClick={openEdit} className={btnPrimary}>
+                <button type="button" onClick={openEdit} className="btn btn-primary">
                   <Pencil size={14} /> {t('admin.edit_profile', 'Edit profile')}
                 </button>
               )}
@@ -334,7 +334,7 @@ export const UserProfileView: React.FC = () => {
               <h3 className="text-sm font-bold text-slate-900 dark:text-white flex items-center gap-2">
                 <UserRound size={16} className="text-brand dark:text-emerald-400" />{t('admin.contact_details', 'Contact & details')}
               </h3>
-              <button type="button" onClick={openEdit} className="p-1.5 rounded-lg text-slate-400 hover:text-slate-800 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800"
+              <button type="button" onClick={openEdit} className="btn btn-outline"
                 title={t('common.edit', 'Edit')} aria-label={t('common.edit', 'Edit')}>
                 <Pencil size={14} />
               </button>
@@ -483,8 +483,8 @@ export const UserProfileView: React.FC = () => {
         subtitle={user.full_name}
         footer={
           <>
-            <button type="button" onClick={() => setEditOpen(false)} disabled={saving} className={btnSoft}>{t('common.cancel', 'Cancel')}</button>
-            <button type="submit" form="profile-edit-form" disabled={saving || !form.full_name.trim()} className={btnPrimary}>
+            <button type="button" onClick={() => setEditOpen(false)} disabled={saving} className="btn btn-cancel">{t('common.cancel', 'Cancel')}</button>
+            <button type="submit" form="profile-edit-form" disabled={saving || !form.full_name.trim()} className="btn btn-primary">
               {saving ? t('common.saving', 'Saving…') : t('common.save_changes', 'Save changes')}
             </button>
           </>
@@ -525,14 +525,14 @@ export const UserProfileView: React.FC = () => {
         open={confirmRemove}
         onClose={() => setConfirmRemove(false)}
         locked={photoBusy}
-        size="sm"
+        size="sm" tone="danger"
         icon={<Trash2 size={18} />}
         title={t('admin.remove_photo', 'Remove photo')}
         footer={
           <>
-            <button type="button" onClick={() => setConfirmRemove(false)} disabled={photoBusy} className={btnSoft}>{t('common.cancel', 'Cancel')}</button>
+            <button type="button" onClick={() => setConfirmRemove(false)} disabled={photoBusy} className="btn btn-cancel">{t('common.cancel', 'Cancel')}</button>
             <button type="button" onClick={removePhoto} disabled={photoBusy}
-              className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-bold text-white bg-rose-600 hover:bg-rose-700 disabled:opacity-50">
+              className="btn btn-danger">
               {t('common.remove', 'Remove')}
             </button>
           </>

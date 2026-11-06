@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { History, Check, RotateCcw, Coins, Receipt, TrendingUp, Info } from 'lucide-react';
+import { SegmentedTabs } from '../components/common/SegmentedTabs';
 import { useApp } from '../context/AppContext';
 import { getAllMembersLite, recordPayment, addExpense, addInvestment, suggestLateFee } from '../services/db';
 import { Member, MasterCategory } from '../types';
@@ -217,19 +218,6 @@ export const EntryCenterView: React.FC = () => {
   const totalMoneyReceived = (Number(contributionAmount) || 0) + (Number(lateFee) || 0);
   const effectiveEstVal = invEstVal === '' ? Number(invAmount) || 0 : Number(invEstVal);
 
-  const tabBtn = (type: EntryType, icon: React.ReactNode, label: string, active: string) => (
-    <button
-      type="button"
-      onClick={() => setEntryType(type)}
-      className={`flex items-center gap-2 px-4 lg:px-6 py-2.5 rounded-lg text-xs font-bold transition-all ${entryType === type
-        ? `bg-white dark:bg-[#182830] ${active} shadow-sm`
-        : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'}`}
-    >
-      {icon}
-      <span>{label}</span>
-    </button>
-  );
-
   const Row: React.FC<{ label: string; value: React.ReactNode }> = ({ label, value }) => (
     <div className="flex justify-between items-center gap-3 text-slate-600 dark:text-slate-400">
       <span className="shrink-0">{label}</span>
@@ -249,7 +237,7 @@ export const EntryCenterView: React.FC = () => {
         <button
           type="button"
           onClick={() => setActiveTab(entryType === 'money' ? 'collections' : entryType === 'expense' ? 'expenses' : 'investments')}
-          className="flex items-center gap-1.5 px-3.5 py-2.5 bg-white dark:bg-[#16252d] border border-slate-300 dark:border-[#283e4a] rounded-xl text-xs font-bold text-slate-700 dark:text-slate-200 shadow-sm hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors"
+          className="btn btn-outline"
         >
           <History size={14} className="text-slate-500 dark:text-slate-400" />
           <span>{t('members.entry_history', 'View entry history')}</span>
@@ -261,11 +249,12 @@ export const EntryCenterView: React.FC = () => {
           <label className="block text-xs font-black uppercase tracking-wider text-slate-700 dark:text-slate-300 mb-2">
             {t('members.entry_type', 'Entry type')}
           </label>
-          <div className="inline-flex flex-wrap bg-slate-100 dark:bg-[#111e24] p-1 rounded-xl border border-slate-200 dark:border-slate-800">
-            {tabBtn('money', <Coins size={15} />, t('members.entry_money', 'Money received'), 'text-[#0f4a3c] dark:text-emerald-400')}
-            {tabBtn('expense', <Receipt size={15} />, t('members.entry_expense', 'Expense'), 'text-rose-700 dark:text-rose-400')}
-            {tabBtn('investment', <TrendingUp size={15} />, t('members.entry_investment', 'Investment'), 'text-blue-700 dark:text-blue-400')}
-          </div>
+          <SegmentedTabs ariaLabel={t('members.entry_type', 'Entry type')} value={entryType} onChange={setEntryType}
+            items={[
+              { key: 'money', label: t('members.entry_money', 'Money received'), icon: <Coins size={15} />, accent: 'text-[#0f5a43] dark:text-emerald-300' },
+              { key: 'expense', label: t('members.entry_expense', 'Expense'), icon: <Receipt size={15} />, accent: 'text-rose-700 dark:text-rose-400' },
+              { key: 'investment', label: t('members.entry_investment', 'Investment'), icon: <TrendingUp size={15} />, accent: 'text-blue-700 dark:text-blue-400' },
+            ]} />
         </div>
 
         <form onSubmit={handleSave} noValidate>
@@ -489,7 +478,7 @@ export const EntryCenterView: React.FC = () => {
               type="button"
               onClick={() => resetForm(entryType)}
               disabled={saving}
-              className="flex items-center gap-1.5 px-4 py-2.5 border border-slate-300 dark:border-slate-700 text-slate-700 dark:text-slate-300 rounded-xl text-xs font-bold hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors disabled:opacity-50"
+              className="btn btn-outline"
             >
               <RotateCcw size={14} />
               <span>{t('members.entry_clear', 'Clear form')}</span>
@@ -497,7 +486,7 @@ export const EntryCenterView: React.FC = () => {
             <button
               type="submit"
               disabled={saving}
-              className="flex items-center gap-1.5 px-6 py-2.5 bg-[#0f4a3c] hover:bg-[#145c4b] dark:bg-emerald-700 dark:hover:bg-emerald-600 text-white rounded-xl text-xs font-bold shadow-md hover:shadow-lg transition-all disabled:opacity-50"
+              className="btn btn-primary btn-lg"
             >
               <Check size={16} strokeWidth={2.5} />
               <span>{saving ? t('common.saving', 'Saving...') : t('members.entry_save', 'Save entry')}</span>

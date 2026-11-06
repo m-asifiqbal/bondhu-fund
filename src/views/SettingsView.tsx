@@ -205,7 +205,7 @@ export const SettingsView: React.FC = () => {
                       type="button"
                       onClick={() => logoRef.current?.click()}
                       disabled={logoBusy}
-                      className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl font-bold border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800/60 text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800 disabled:opacity-50"
+                      className="btn btn-outline"
                     >
                       {logoBusy ? <Loader2 size={14} className="animate-spin" /> : <ImagePlus size={14} />}
                       {form.org_logo ? t('admin.settings_change_logo', 'Change logo') : t('admin.settings_upload_logo', 'Upload logo')}
@@ -214,7 +214,7 @@ export const SettingsView: React.FC = () => {
                       <button
                         type="button"
                         onClick={() => set('org_logo', '')}
-                        className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl font-bold border border-rose-200 dark:border-rose-900 text-rose-600 dark:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/40"
+                        className="btn btn-danger-outline"
                       >
                         <Trash2 size={14} /> {t('admin.settings_remove_logo', 'Remove logo')}
                       </button>
@@ -313,7 +313,7 @@ export const SettingsView: React.FC = () => {
             <button
               type="submit"
               disabled={!loaded || saving}
-              className="flex items-center gap-2 px-6 py-2.5 bg-brand hover:bg-brand-hover dark:bg-emerald-700 dark:hover:bg-emerald-600 text-white rounded-xl text-xs font-bold shadow-md transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+              className="btn btn-primary btn-lg"
             >
               <Save size={15} />
               <span>{saving ? t('common.saving', 'Saving...') : t('admin.settings_save', 'Save changes')}</span>

@@ -17,6 +17,7 @@ import {
   Ban,
   Users,
 } from 'lucide-react';
+import { SegmentedTabs } from '../components/common/SegmentedTabs';
 import { useApp } from '../context/AppContext';
 import { getCollections, deletePayment, saveTextFile } from '../services/db';
 import { CollectionRecord, CollectionStats, PaymentStatus } from '../types';
@@ -288,7 +289,7 @@ export const CollectionsView: React.FC = () => {
               setSelectedMemberIdForPayment(null);
               setOpenRecordModal(true);
             }}
-            className="flex items-center gap-1.5 px-4 py-2 bg-[#0f4a3c] hover:bg-[#145c4b] dark:bg-emerald-700 dark:hover:bg-emerald-600 text-white rounded-xl text-xs font-bold shadow-md transition-all"
+            className="btn btn-primary"
           >
             <PlusCircle size={14} />
             <span>{t('members.col_recordPayment', 'Record payment')}</span>
@@ -303,7 +304,7 @@ export const CollectionsView: React.FC = () => {
         </span>
         <button
           onClick={() => setActiveTab('entry')}
-          className="flex items-center gap-1.5 px-4 py-2 bg-emerald-50 hover:bg-emerald-100 dark:bg-emerald-950/60 dark:hover:bg-emerald-900/60 text-[#0f4a3c] dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800/80 rounded-xl text-xs font-bold transition-all shadow-sm"
+          className="btn btn-outline"
         >
           <span>{t('members.col_openEntry', 'Open entry center')}</span>
           <ArrowRight size={14} />
@@ -364,21 +365,8 @@ export const CollectionsView: React.FC = () => {
                 {t('members.col_ledgerSub', 'Review contribution status and payment details.')}
               </p>
             </div>
-            <div className="flex flex-wrap items-center bg-slate-100 dark:bg-[#111e24] p-1 rounded-xl border border-slate-200 dark:border-slate-800 text-xs">
-              {tabs.map(tb => (
-                <button
-                  key={tb.key}
-                  onClick={() => setSelectedTab(tb.key)}
-                  className={`px-3 py-1.5 rounded-lg font-bold transition-all ${
-                    selectedTab === tb.key
-                      ? `bg-white dark:bg-[#182830] shadow-sm ${tb.active}`
-                      : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
-                  }`}
-                >
-                  {tb.key === 'All' ? t('common.all', 'All') : tv(tb.key)} {n(tb.count)}
-                </button>
-              ))}
-            </div>
+            <SegmentedTabs ariaLabel={t('members.col_status', 'Payment status')} value={selectedTab} onChange={setSelectedTab}
+              items={tabs.map(tb => ({ key: tb.key, label: tb.key === 'All' ? t('common.all', 'All') : tv(tb.key), count: n(tb.count), accent: tb.active }))} />
           </div>
 
           {/* Filters */}
@@ -417,7 +405,7 @@ export const CollectionsView: React.FC = () => {
                   setEndDate('');
                   setSortBy('newest');
                 }}
-                className="flex items-center gap-1 px-3 py-1.5 bg-white dark:bg-[#182830] hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-300 border border-slate-300 dark:border-slate-700 rounded-xl text-xs font-bold transition-colors"
+                className="btn btn-outline btn-sm"
               >
                 <RotateCcw size={12} />
                 <span>{t('common.reset', 'Reset')}</span>
@@ -440,7 +428,7 @@ export const CollectionsView: React.FC = () => {
               </div>
               <button
                 onClick={() => setActiveTab('members')}
-                className="px-4 py-2 bg-[#0f4a3c] hover:bg-[#145c4b] dark:bg-emerald-700 dark:hover:bg-emerald-600 text-white rounded-xl text-xs font-bold shadow-md"
+                className="btn btn-outline"
               >
                 {t('members.col_goMembers', 'Go to members')}
               </button>
@@ -506,14 +494,14 @@ export const CollectionsView: React.FC = () => {
                                 <div className="flex items-center justify-end gap-1.5">
                                   <button
                                     onClick={() => setSelectedRecord(r)}
-                                    className="inline-flex items-center gap-1 px-2.5 py-1 text-[#0f4a3c] dark:text-emerald-400 bg-emerald-50/80 dark:bg-emerald-950/50 hover:bg-emerald-100 dark:hover:bg-emerald-900/50 rounded-lg font-bold transition-colors"
+                                    className="btn btn-outline btn-sm"
                                   >
                                     <Eye size={13} />
                                     <span>{t('common.view', 'View')}</span>
                                   </button>
                                   <button
                                     onClick={() => handleDownloadVoucher(r)}
-                                    className="p-1 text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800"
+                                    className="btn btn-outline btn-sm btn-icon"
                                     title={t('members.col_downloadVoucher', 'Download voucher')}
                                     aria-label={t('members.col_downloadVoucher', 'Download voucher')}
                                   >
@@ -522,7 +510,7 @@ export const CollectionsView: React.FC = () => {
                                   <button
                                     onClick={() => setConfirmVoid(r)}
                                     disabled={busyId === r.payment_id}
-                                    className="p-1 text-slate-400 hover:text-rose-600 dark:hover:text-rose-400 rounded-lg hover:bg-rose-50 dark:hover:bg-rose-950/40 disabled:opacity-40 disabled:cursor-not-allowed"
+                                    className="btn btn-danger-outline btn-sm btn-icon"
                                     title={t('members.col_voidPayment', 'Void payment')}
                                     aria-label={t('members.col_voidPayment', 'Void payment')}
                                   >
@@ -532,7 +520,7 @@ export const CollectionsView: React.FC = () => {
                               ) : (
                                 <button
                                   onClick={() => handleRecordPayment(r)}
-                                  className="inline-flex items-center gap-1 px-2.5 py-1 bg-[#0f4a3c] hover:bg-[#145c4b] dark:bg-emerald-700 dark:hover:bg-emerald-600 text-white rounded-lg font-bold transition-colors"
+                                  className="btn btn-primary btn-sm"
                                 >
                                   <PlusCircle size={13} />
                                   <span>{t('members.col_recordPayment', 'Record payment')}</span>
@@ -555,7 +543,7 @@ export const CollectionsView: React.FC = () => {
                   <button
                     onClick={() => setPage(p => Math.max(1, p - 1))}
                     disabled={safePage <= 1}
-                    className="flex items-center gap-1 px-3 py-1.5 rounded-xl border border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800 disabled:opacity-40 disabled:cursor-not-allowed font-bold text-slate-700 dark:text-slate-200"
+                    className="btn btn-outline btn-sm"
                   >
                     <ChevronLeft size={13} />
                     <span>{t('common.previous', 'Previous')}</span>
@@ -566,13 +554,13 @@ export const CollectionsView: React.FC = () => {
                   <button
                     onClick={() => setPage(p => Math.min(totalPages, p + 1))}
                     disabled={safePage >= totalPages}
-                    className="flex items-center gap-1 px-3 py-1.5 rounded-xl border border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800 disabled:opacity-40 disabled:cursor-not-allowed font-bold text-slate-700 dark:text-slate-200"
+                    className="btn btn-outline btn-sm"
                   >
                     <span>{t('common.next', 'Next')}</span>
                     <ChevronRight size={13} />
                   </button>
                 </div>
-                <button onClick={() => setActiveTab('members')} className="text-[#0f4a3c] dark:text-emerald-400 hover:underline font-bold">
+                <button onClick={() => setActiveTab('members')} className="btn btn-outline">
                   {t('members.col_viewMembers', 'View all members')}
                 </button>
               </div>
@@ -630,7 +618,7 @@ export const CollectionsView: React.FC = () => {
                       { day: n(settings.monthly_due_day) })
                 : t('common.loading', 'Loading...')}
             </p>
-            <button onClick={() => setActiveTab('settings')} className="mt-2 text-[11px] font-bold text-[#0f4a3c] dark:text-emerald-400 hover:underline">
+            <button onClick={() => setActiveTab('settings')} className="btn btn-outline btn-sm mt-2">
               {t('members.col_changeRule', 'Change in settings')}
             </button>
           </div>
@@ -650,27 +638,27 @@ export const CollectionsView: React.FC = () => {
             <button
               onClick={() => setConfirmVoid(selectedRecord)}
               disabled={busyId === selectedRecord.payment_id}
-              className="flex items-center gap-1.5 px-3.5 py-2 text-rose-700 dark:text-rose-300 bg-rose-50 dark:bg-rose-950/40 hover:bg-rose-100 dark:hover:bg-rose-900/40 rounded-xl font-bold disabled:opacity-40"
+              className="btn btn-danger"
             >
               <Ban size={14} />
               <span>{t('members.col_voidPayment', 'Void payment')}</span>
             </button>
             <button
               onClick={() => handleCopyVoucher(selectedRecord)}
-              className="px-3.5 py-2 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-200 rounded-xl font-bold"
+              className="btn btn-outline"
             >
               {t('members.copy', 'Copy')}
             </button>
             <button
               onClick={() => handleDownloadVoucher(selectedRecord)}
-              className="flex items-center gap-1.5 px-3.5 py-2 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-200 rounded-xl font-bold"
+              className="btn btn-outline"
             >
               <Download size={14} />
               <span>{t('members.download', 'Download')}</span>
             </button>
             <button
               onClick={() => setSelectedRecord(null)}
-              className="px-4 py-2 bg-[#0f4a3c] hover:bg-[#145c4b] dark:bg-emerald-700 dark:hover:bg-emerald-600 text-white rounded-xl font-bold shadow-md"
+              className="btn btn-cancel"
             >
               {t('members.done', 'Done')}
             </button>
@@ -713,7 +701,7 @@ export const CollectionsView: React.FC = () => {
         open={!!confirmVoid}
         onClose={() => busyId == null && setConfirmVoid(null)}
         locked={busyId != null}
-        size="sm"
+        size="sm" tone="danger"
         icon={<Ban size={18} />}
         title={t('members.col_voidTitle', 'Void this payment?')}
         footer={
@@ -722,7 +710,7 @@ export const CollectionsView: React.FC = () => {
               type="button"
               onClick={() => setConfirmVoid(null)}
               disabled={busyId != null}
-              className="px-4 py-2 border border-slate-300 dark:border-slate-700 text-slate-700 dark:text-slate-300 rounded-xl hover:bg-slate-100 dark:hover:bg-slate-800 font-bold text-xs disabled:opacity-50"
+              className="btn btn-cancel"
             >
               {t('common.cancel', 'Cancel')}
             </button>
@@ -730,7 +718,7 @@ export const CollectionsView: React.FC = () => {
               type="button"
               onClick={handleVoid}
               disabled={busyId != null}
-              className="flex items-center gap-1.5 px-4 py-2 bg-rose-600 hover:bg-rose-700 dark:bg-rose-700 dark:hover:bg-rose-600 text-white rounded-xl font-bold text-xs shadow-md disabled:opacity-50"
+              className="btn btn-danger"
             >
               <Ban size={14} />
               <span>{busyId != null ? t('members.col_voiding', 'Voiding…') : t('members.col_voidPayment', 'Void payment')}</span>

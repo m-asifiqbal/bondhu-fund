@@ -63,24 +63,22 @@ const ConfirmDialog: React.FC<{ state: ConfirmState; onClose: () => void }> = ({
       open
       onClose={() => !busy && onClose()}
       locked={busy}
-      size="sm"
-      icon={<AlertTriangle size={18} className={state.danger ? 'text-rose-600' : 'text-amber-600'} />}
+      size="sm" tone={state.danger ? 'danger' : 'warning'}
+      icon={<AlertTriangle size={20} />}
       title={state.title}
       footer={
         <div className="flex justify-end gap-2">
           <button
             onClick={onClose}
             disabled={busy}
-            className="px-4 py-2 rounded-xl text-xs font-bold bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 disabled:opacity-50"
+            className="btn btn-cancel"
           >
             {t('common.cancel', 'Cancel')}
           </button>
           <button
             onClick={run}
             disabled={!canConfirm}
-            className={`px-4 py-2 rounded-xl text-xs font-bold text-white disabled:opacity-50 disabled:cursor-not-allowed ${
-              state.danger ? 'bg-rose-600 hover:bg-rose-700' : 'bg-brand hover:bg-brand-hover dark:bg-emerald-700 dark:hover:bg-emerald-600'
-            }`}
+            className={`btn ${state.danger ? 'btn-danger' : 'btn-primary'}`}
           >
             {busy ? t('finance.working', 'Working…') : state.confirmLabel}
           </button>
@@ -308,8 +306,8 @@ export const BackupRestoreView: React.FC = () => {
     [t('finance.backup_audit_entries', 'Audit entries'), n(info.auditEntries)],
   ] : [];
 
-  const btnPrimary = 'flex items-center justify-center gap-2 py-2.5 px-4 bg-brand hover:bg-brand-hover dark:bg-emerald-700 dark:hover:bg-emerald-600 text-white rounded-xl text-xs font-bold shadow-sm transition-all disabled:opacity-50 disabled:cursor-not-allowed';
-  const btnSecondary = 'flex items-center justify-center gap-2 py-2.5 px-4 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-200 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-bold transition-colors disabled:opacity-50 disabled:cursor-not-allowed';
+  const btnPrimary = 'btn btn-primary';
+  const btnSecondary = 'btn btn-outline';
 
   return (
     <div className="p-6 lg:p-8 space-y-6 max-w-7xl mx-auto">
@@ -376,7 +374,7 @@ export const BackupRestoreView: React.FC = () => {
               <HardDriveDownload size={15} />
               <span>{busy === 'backup' ? t('finance.working', 'Working…') : t('finance.backup_backup_now', 'Back up now')}</span>
             </button>
-            <button onClick={handleOpenFolder} className={btnSecondary}>
+            <button onClick={handleOpenFolder} className="btn btn-outline">
               <FolderOpen size={15} />
               <span>{t('finance.backup_open_folder', 'Open backups folder')}</span>
             </button>
@@ -515,7 +513,7 @@ export const BackupRestoreView: React.FC = () => {
             <button
               onClick={askClearAll}
               disabled={!!busy}
-              className="mt-2 w-full flex items-center justify-center gap-2 py-2.5 bg-rose-600 hover:bg-rose-700 text-white rounded-xl text-xs font-bold disabled:opacity-50"
+              className="btn btn-danger-outline mt-2 w-full justify-center"
             >
               <Trash2 size={14} />
               <span>{t('finance.backup_clear_all', 'Clear all business data')}</span>

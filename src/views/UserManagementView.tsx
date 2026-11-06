@@ -16,8 +16,8 @@ interface EditForm { full_name: string; email: string; phone: string; designatio
 
 const EMPTY_ADD: AddForm = { full_name: '', username: '', email: '', phone: '', designation: '', role: 'Treasurer', password: '', avatar: '' };
 
-const btnSoft = 'flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-bold border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800/60 text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800 disabled:opacity-50 disabled:cursor-not-allowed transition-colors';
-const btnPrimary = 'flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-bold text-white bg-brand hover:bg-brand-hover dark:bg-emerald-700 dark:hover:bg-emerald-600 shadow-sm disabled:opacity-50 disabled:cursor-not-allowed transition-colors';
+const btnSoft = 'btn btn-outline';
+const btnPrimary = 'btn btn-primary';
 
 export const UserManagementView: React.FC = () => {
   const { currentUser, isAdmin, showToast, refreshKey, triggerRefresh, t, tv, openProfile, language, toBanglaDigits } = useApp();
@@ -259,7 +259,7 @@ export const UserManagementView: React.FC = () => {
                         <KeyRound size={13} /> <span className="hidden sm:inline">{t('admin.set_password', 'Set password')}</span>
                       </button>
                       <button type="button" onClick={stop(() => startEdit(u))} title={t('common.edit', 'Edit')} aria-label={t('common.edit', 'Edit')}
-                        className="p-2 text-slate-400 hover:text-slate-800 dark:hover:text-white rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800">
+                        className="btn btn-outline">
                         <Pencil size={14} />
                       </button>
                     </>
@@ -271,7 +271,7 @@ export const UserManagementView: React.FC = () => {
                     disabled={isCurrent}
                     title={isCurrent ? t('admin.cant_delete_self', 'You cannot delete the profile you are using.') : t('common.delete', 'Delete')}
                     aria-label={t('common.delete', 'Delete')}
-                    className="p-2 text-slate-400 hover:text-rose-600 dark:hover:text-rose-400 rounded-lg hover:bg-rose-50 dark:hover:bg-rose-950/40 disabled:opacity-30 disabled:cursor-not-allowed"
+                    className="btn btn-danger-outline"
                   >
                     <Trash2 size={15} />
                   </button>
@@ -342,8 +342,8 @@ export const UserManagementView: React.FC = () => {
         subtitle={t('admin.add_user_desc', 'Create a profile for someone who uses this computer.')}
         footer={
           <>
-            <button type="button" onClick={() => setAddOpen(false)} disabled={busy} className={btnSoft}>{t('common.cancel', 'Cancel')}</button>
-            <button type="submit" form="add-user-form" disabled={busy || photoBusy || !add.full_name.trim() || !USERNAME_RE.test(uname)} className={btnPrimary}>
+            <button type="button" onClick={() => setAddOpen(false)} disabled={busy} className="btn btn-cancel">{t('common.cancel', 'Cancel')}</button>
+            <button type="submit" form="add-user-form" disabled={busy || photoBusy || !add.full_name.trim() || !USERNAME_RE.test(uname)} className="btn btn-primary">
               <UserPlus size={14} /> {busy ? t('common.saving', 'Saving…') : t('admin.add_user', 'Add user')}
             </button>
           </>
@@ -358,7 +358,7 @@ export const UserManagementView: React.FC = () => {
                 <Camera size={14} /> {add.avatar ? t('admin.change_photo', 'Change photo') : t('admin.add_photo', 'Add photo (optional)')}
               </button>
               {add.avatar && (
-                <button type="button" onClick={() => setAdd(a => ({ ...a, avatar: '' }))} className={btnSoft}>
+                <button type="button" onClick={() => setAdd(a => ({ ...a, avatar: '' }))} className="btn btn-danger-outline">
                   <X size={14} /> {t('common.remove', 'Remove')}
                 </button>
               )}
@@ -417,8 +417,8 @@ export const UserManagementView: React.FC = () => {
         subtitle={editUser?.username}
         footer={
           <>
-            <button type="button" onClick={() => setEditUser(null)} disabled={busy} className={btnSoft}>{t('common.cancel', 'Cancel')}</button>
-            <button type="submit" form="edit-user-form" disabled={busy || !edit.full_name.trim()} className={btnPrimary}>
+            <button type="button" onClick={() => setEditUser(null)} disabled={busy} className="btn btn-cancel">{t('common.cancel', 'Cancel')}</button>
+            <button type="submit" form="edit-user-form" disabled={busy || !edit.full_name.trim()} className="btn btn-primary">
               {busy ? t('common.saving', 'Saving…') : t('common.save_changes', 'Save changes')}
             </button>
           </>
@@ -457,14 +457,14 @@ export const UserManagementView: React.FC = () => {
         open={!!deleteTarget}
         onClose={() => setDeleteTarget(null)}
         locked={busy}
-        size="sm"
+        size="sm" tone="danger"
         icon={<Trash2 size={18} />}
         title={t('admin.delete_user', 'Delete user')}
         footer={
           <>
-            <button type="button" onClick={() => setDeleteTarget(null)} disabled={busy} className={btnSoft}>{t('common.cancel', 'Cancel')}</button>
+            <button type="button" onClick={() => setDeleteTarget(null)} disabled={busy} className="btn btn-cancel">{t('common.cancel', 'Cancel')}</button>
             <button type="button" onClick={confirmDelete} disabled={busy}
-              className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-bold text-white bg-rose-600 hover:bg-rose-700 disabled:opacity-50">
+              className="btn btn-danger">
               <Trash2 size={14} /> {t('common.delete', 'Delete')}
             </button>
           </>
@@ -487,8 +487,8 @@ export const UserManagementView: React.FC = () => {
         title={t('admin.set_password', 'Set password')}
         subtitle={pwTarget ? `${pwTarget.full_name} (@${pwTarget.username}) — ${t('admin.pw_change_next', 'they will be asked to change it after signing in.')}` : undefined}
         footer={<>
-          <button type="button" onClick={() => setPwTarget(null)} disabled={pwBusy} className="btn-secondary-modal">{t('common.cancel', 'Cancel')}</button>
-          <button type="button" onClick={savePassword} disabled={pwBusy || !pw1} className="btn-primary-modal">{pwBusy && <Loader2 size={14} className="animate-spin" />}{t('admin.set_password', 'Set password')}</button>
+          <button type="button" onClick={() => setPwTarget(null)} disabled={pwBusy} className="btn btn-cancel">{t('common.cancel', 'Cancel')}</button>
+          <button type="button" onClick={savePassword} disabled={pwBusy || !pw1} className="btn btn-primary">{pwBusy && <Loader2 size={14} className="animate-spin" />}{t('admin.set_password', 'Set password')}</button>
         </>}>
         <div className="space-y-3.5">
           <div><label className="form-label">{t('auth.new', 'New password')}</label><input type="password" autoComplete="new-password" className="form-input" value={pw1} onChange={e => setPw1(e.target.value)} />

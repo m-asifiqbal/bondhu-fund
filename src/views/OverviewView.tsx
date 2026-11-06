@@ -322,10 +322,10 @@ export const OverviewView: React.FC = () => {
             <button disabled={busy} onClick={() => setDemoOpen(true)} className="flex flex-col items-center gap-2 p-4 rounded-2xl border border-slate-300 dark:border-[#283e4a] text-slate-800 dark:text-slate-100 hover:bg-slate-50 dark:hover:bg-slate-800 font-bold text-sm disabled:opacity-50"><Sparkles size={20} />{tr('demo')}</button>
           </div>
         </div>
-        <Modal open={demoOpen} onClose={() => setDemoOpen(false)} size="sm" locked={busy} icon={<Sparkles size={18} />} title={tr('demoTitle')}
+        <Modal open={demoOpen} onClose={() => setDemoOpen(false)} size="sm" tone="brand" locked={busy} icon={<Sparkles size={18} />} title={tr('demoTitle')}
           footer={<div className="flex flex-wrap justify-end gap-2">
-            <button disabled={busy} onClick={() => setDemoOpen(false)} className="px-4 py-2.5 rounded-xl border border-slate-300 dark:border-[#283e4a] text-xs font-bold text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800 disabled:opacity-50">{tr('cancel')}</button>
-            <button disabled={busy} onClick={startDemo} className="flex items-center gap-1.5 px-4 py-2.5 rounded-xl bg-brand hover:bg-brand-hover text-white text-xs font-bold disabled:opacity-50">{busy ? <RefreshCw size={14} className="animate-spin" /> : <Sparkles size={14} />}{tr('demoLoad')}</button>
+            <button disabled={busy} onClick={() => setDemoOpen(false)} className="btn btn-cancel">{tr('cancel')}</button>
+            <button disabled={busy} onClick={startDemo} className="btn btn-primary">{busy ? <RefreshCw size={14} className="animate-spin" /> : <Sparkles size={14} />}{tr('demoLoad')}</button>
           </div>}>
           <p className="text-sm text-slate-600 dark:text-slate-300">{tr('demoBody')}</p>
         </Modal>
@@ -347,7 +347,7 @@ export const OverviewView: React.FC = () => {
           <MonthPicker value={selectedMonth} onChange={setSelectedMonth} />
           <button onClick={load} title={tr('refresh')} aria-label={tr('refresh')} className="p-2.5 rounded-xl border border-slate-300 dark:border-[#283e4a] bg-white dark:bg-[#16252d] text-slate-600 dark:text-slate-300 hover:text-brand"><RefreshCw size={15} className={loading ? 'animate-spin' : ''} /></button>
           <button onClick={exportCsv} className="flex items-center gap-1.5 px-3.5 py-2.5 bg-white dark:bg-[#16252d] border border-slate-300 dark:border-[#283e4a] rounded-xl text-xs font-bold text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800"><Download size={14} />{tr('export')}</button>
-          <button onClick={exportPdf} className="flex items-center gap-1.5 px-3.5 py-2.5 bg-brand hover:bg-brand-hover rounded-xl text-xs font-bold text-white"><Printer size={14} />{tr('pdf')}</button>
+          <button onClick={exportPdf} className="btn btn-primary"><Printer size={14} />{tr('pdf')}</button>
         </div>
       </div>
 
@@ -487,7 +487,7 @@ export const OverviewView: React.FC = () => {
                         <td className="py-2 text-right tabular-nums font-bold text-rose-600 dark:text-rose-400">{money(a.amount)}</td>
                         <td className="py-2 text-right no-print">
                           <button onClick={() => { setSelectedMemberIdForPayment(a.id); setOpenRecordModal(true); }}
-                            className="px-2.5 py-1 rounded-lg text-[11px] font-bold bg-brand text-white hover:bg-brand-hover">{language === 'bn' ? 'আদায়' : 'Collect'}</button>
+                            className="btn btn-primary btn-sm">{language === 'bn' ? 'আদায়' : 'Collect'}</button>
                         </td>
                       </tr>
                     ))}

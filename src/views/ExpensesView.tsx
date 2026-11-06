@@ -365,14 +365,14 @@ export const ExpensesView: React.FC = () => {
           <MonthPicker value={selectedMonth} onChange={setSelectedMonth} align="right" />
           <button
             onClick={handleExport}
-            className="flex items-center gap-1.5 px-3.5 py-2 bg-white dark:bg-[#16252d] border border-slate-300 dark:border-[#283e4a] rounded-xl text-xs font-bold text-slate-700 dark:text-slate-200 shadow-sm hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors"
+            className="btn btn-outline"
           >
             <Download size={14} className="text-slate-500" />
             <span>{t('common.export_csv', 'Export CSV')}</span>
           </button>
           <button
             onClick={openAdd}
-            className="flex items-center gap-1.5 px-4 py-2 bg-[#0f4a3c] hover:bg-[#145c4b] dark:bg-emerald-700 dark:hover:bg-emerald-600 text-white rounded-xl text-xs font-bold shadow-md transition-all"
+            className="btn btn-primary"
           >
             <Plus size={15} strokeWidth={2.5} />
             <span>{t('finance.exp_record', 'Record expense')}</span>
@@ -433,7 +433,7 @@ export const ExpensesView: React.FC = () => {
             {categoryFilter !== 'All' && (
               <button
                 onClick={() => setCategoryFilter('All')}
-                className="text-xs font-bold text-rose-600 dark:text-rose-400 hover:underline flex items-center gap-1"
+                className="btn btn-outline"
               >
                 <RotateCcw size={12} />
                 <span>{t('finance.exp_clear_category', 'Clear category')} ({tv(categoryFilter)})</span>
@@ -553,7 +553,7 @@ export const ExpensesView: React.FC = () => {
             <button
               type="button"
               onClick={resetFilters}
-              className="flex items-center gap-1 px-2.5 py-1.5 bg-white dark:bg-[#182830] text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700 rounded-xl font-bold transition-colors"
+              className="btn btn-outline btn-sm"
               title={t('finance.reset_filters', 'Reset filters')}
             >
               <RotateCcw size={12} />
@@ -575,7 +575,7 @@ export const ExpensesView: React.FC = () => {
             </div>
             <button
               onClick={openAdd}
-              className="px-4 py-2 bg-[#0f4a3c] hover:bg-[#145c4b] dark:bg-emerald-700 dark:hover:bg-emerald-600 text-white rounded-xl text-xs font-bold shadow-md"
+              className="btn btn-primary"
             >
               {t('finance.exp_record', 'Record expense')}
             </button>
@@ -653,7 +653,7 @@ export const ExpensesView: React.FC = () => {
                                     setVerifyExpense(e);
                                     setReceiptVoucher('');
                                   }}
-                                  className="inline-flex items-center gap-1 px-2.5 py-1 bg-emerald-50 dark:bg-emerald-950 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800 rounded-lg text-[11px] font-bold hover:bg-emerald-100 dark:hover:bg-emerald-900 transition-colors"
+                                  className="btn btn-outline btn-sm"
                                 >
                                   <FileCheck size={12} />
                                   <span>{t('finance.exp_verify', 'Verify')}</span>
@@ -661,7 +661,7 @@ export const ExpensesView: React.FC = () => {
                               )}
                               <button
                                 onClick={() => openEdit(e)}
-                                className="p-1.5 text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800"
+                                className="btn btn-outline btn-sm btn-icon"
                                 title={t('common.edit', 'Edit')}
                                 aria-label={t('common.edit', 'Edit')}
                               >
@@ -670,7 +670,7 @@ export const ExpensesView: React.FC = () => {
                               <button
                                 onClick={() => setConfirmDelete(e)}
                                 disabled={busyId === e.id}
-                                className="p-1.5 text-slate-400 hover:text-rose-600 dark:hover:text-rose-400 rounded-lg hover:bg-rose-50 dark:hover:bg-rose-950/40 disabled:opacity-40 disabled:cursor-not-allowed"
+                                className="btn btn-danger-outline btn-sm btn-icon"
                                 title={t('common.delete', 'Delete')}
                                 aria-label={t('common.delete', 'Delete')}
                               >
@@ -699,7 +699,7 @@ export const ExpensesView: React.FC = () => {
                   disabled={safePage <= 1}
                   title={t('finance.prev_page', 'Previous page')}
                   aria-label={t('finance.prev_page', 'Previous page')}
-                  className="px-2.5 py-1 rounded-lg border border-slate-200 dark:border-slate-700 disabled:opacity-40 font-bold"
+                  className="btn btn-outline btn-sm btn-icon"
                 >
                   <ChevronLeft size={12} />
                 </button>
@@ -711,7 +711,7 @@ export const ExpensesView: React.FC = () => {
                   disabled={safePage >= totalPages}
                   title={t('finance.next_page', 'Next page')}
                   aria-label={t('finance.next_page', 'Next page')}
-                  className="px-2.5 py-1 rounded-lg border border-slate-200 dark:border-slate-700 disabled:opacity-40 font-bold"
+                  className="btn btn-outline btn-sm btn-icon"
                 >
                   <ChevronRight size={12} />
                 </button>
@@ -736,7 +736,7 @@ export const ExpensesView: React.FC = () => {
               type="button"
               onClick={closeForm}
               disabled={saving}
-              className="px-4 py-2 border border-slate-300 dark:border-slate-700 text-slate-700 dark:text-slate-300 rounded-xl text-xs font-bold disabled:opacity-50"
+              className="btn btn-cancel"
             >
               {t('common.cancel', 'Cancel')}
             </button>
@@ -744,7 +744,7 @@ export const ExpensesView: React.FC = () => {
               type="submit"
               form="expense-form"
               disabled={saving || !form.category}
-              className="px-5 py-2 bg-[#0f4a3c] hover:bg-[#145c4b] dark:bg-emerald-700 dark:hover:bg-emerald-600 text-white rounded-xl text-xs font-bold shadow-md disabled:opacity-50 disabled:cursor-not-allowed"
+              className="btn btn-primary"
             >
               {saving ? t('common.saving', 'Saving…') : t('common.save', 'Save')}
             </button>
@@ -786,7 +786,7 @@ export const ExpensesView: React.FC = () => {
                         setFormOpen(false);
                         setActiveTab('master');
                       }}
-                      className="font-bold text-[#0f4a3c] dark:text-emerald-400 hover:underline"
+                      className="btn btn-outline"
                     >
                       {t('finance.exp_add_categories', 'Add them in Master data')}
                     </button>
@@ -844,7 +844,7 @@ export const ExpensesView: React.FC = () => {
               type="button"
               onClick={() => setVerifyExpense(null)}
               disabled={saving}
-              className="px-3 py-1.5 border border-slate-300 dark:border-slate-700 text-slate-700 dark:text-slate-300 rounded-xl text-xs font-bold disabled:opacity-50"
+              className="btn btn-cancel"
             >
               {t('common.cancel', 'Cancel')}
             </button>
@@ -852,7 +852,7 @@ export const ExpensesView: React.FC = () => {
               type="submit"
               form="verify-form"
               disabled={saving || !receiptVoucher.trim()}
-              className="px-4 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-bold shadow-md disabled:opacity-50 disabled:cursor-not-allowed"
+              className="btn btn-primary"
             >
               {saving ? t('common.saving', 'Saving…') : t('finance.exp_mark_verified', 'Mark as verified')}
             </button>
@@ -885,7 +885,7 @@ export const ExpensesView: React.FC = () => {
         open={!!confirmDelete}
         onClose={() => busyId === null && setConfirmDelete(null)}
         locked={busyId !== null}
-        size="sm"
+        size="sm" tone="danger"
         icon={<Trash2 size={18} />}
         title={t('finance.exp_delete_title', 'Delete expense?')}
         footer={
@@ -894,7 +894,7 @@ export const ExpensesView: React.FC = () => {
               type="button"
               onClick={() => setConfirmDelete(null)}
               disabled={busyId !== null}
-              className="px-3 py-1.5 border border-slate-300 dark:border-slate-700 text-slate-700 dark:text-slate-300 rounded-xl text-xs font-bold disabled:opacity-50"
+              className="btn btn-cancel"
             >
               {t('common.cancel', 'Cancel')}
             </button>
@@ -902,7 +902,7 @@ export const ExpensesView: React.FC = () => {
               type="button"
               onClick={handleDelete}
               disabled={busyId !== null}
-              className="px-4 py-1.5 bg-rose-600 hover:bg-rose-500 text-white rounded-xl text-xs font-bold shadow-md disabled:opacity-50"
+              className="btn btn-danger"
             >
               {busyId !== null ? t('finance.deleting', 'Deleting…') : t('common.delete', 'Delete')}
             </button>

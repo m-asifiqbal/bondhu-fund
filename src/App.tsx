@@ -73,7 +73,7 @@ class ViewErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoundar
             </button>
             <button
               onClick={() => window.location.reload()}
-              className="flex items-center gap-1.5 px-4 py-2 rounded-xl font-bold text-white bg-brand hover:bg-brand-hover dark:bg-emerald-700 dark:hover:bg-emerald-600"
+              className="btn btn-primary"
             >
               <RotateCw size={13} /> {t('shell.reload', 'Reload')}
             </button>

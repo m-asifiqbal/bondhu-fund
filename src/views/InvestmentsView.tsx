@@ -451,9 +451,8 @@ export const InvestmentsView: React.FC = () => {
     );
   };
 
-  const btnPrimary =
-    'px-5 py-2 bg-[#0f4a3c] hover:bg-[#145c4b] dark:bg-emerald-700 dark:hover:bg-emerald-600 text-white rounded-xl text-xs font-bold shadow-md disabled:opacity-50 disabled:cursor-not-allowed';
-  const btnGhost = 'px-4 py-2 border border-slate-300 dark:border-slate-700 text-slate-700 dark:text-slate-300 rounded-xl text-xs font-bold disabled:opacity-50';
+  const btnPrimary = 'btn btn-primary';
+  const btnGhost = 'btn btn-outline';
 
   return (
     <div className="p-6 lg:p-8 space-y-6 max-w-7xl mx-auto">
@@ -473,21 +472,21 @@ export const InvestmentsView: React.FC = () => {
               setEntryCenterInitialTab('investment');
               setActiveTab('entry');
             }}
-            className="flex items-center gap-1.5 px-3.5 py-2 bg-white dark:bg-[#16252d] border border-slate-300 dark:border-[#283e4a] rounded-xl text-xs font-bold text-slate-700 dark:text-slate-200 shadow-sm hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors"
+            className="btn btn-outline"
           >
             <FileText size={14} className="text-slate-500 dark:text-slate-400" />
             <span>{t('finance.inv_detailed_form', 'Use detailed entry form')}</span>
           </button>
           <button
             onClick={handleExport}
-            className="flex items-center gap-1.5 px-3.5 py-2 bg-white dark:bg-[#16252d] border border-slate-300 dark:border-[#283e4a] rounded-xl text-xs font-bold text-slate-700 dark:text-slate-200 shadow-sm hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors"
+            className="btn btn-outline"
           >
             <Download size={14} className="text-slate-500 dark:text-slate-400" />
             <span>{t('common.export_csv', 'Export CSV')}</span>
           </button>
           <button
             onClick={openAdd}
-            className="flex items-center gap-1.5 px-4 py-2 bg-[#0f4a3c] hover:bg-[#145c4b] dark:bg-emerald-700 dark:hover:bg-emerald-600 text-white rounded-xl text-xs font-bold shadow-md transition-all"
+            className="btn btn-primary"
           >
             <Plus size={16} strokeWidth={2.5} />
             <span>{t('finance.inv_add', 'Add investment')}</span>
@@ -522,7 +521,7 @@ export const InvestmentsView: React.FC = () => {
                   </p>
                   <button
                     onClick={() => openValuation(i)}
-                    className="px-3 py-1.5 bg-white dark:bg-[#1a2830] hover:bg-amber-100 dark:hover:bg-amber-900/50 text-amber-900 dark:text-amber-300 border border-amber-300 dark:border-amber-700 rounded-xl text-[11px] font-bold shadow-sm transition-colors"
+                    className="btn btn-outline btn-sm"
                   >
                     {t('finance.inv_open_review', 'Open review')}
                   </button>
@@ -724,7 +723,7 @@ export const InvestmentsView: React.FC = () => {
               type="button"
               onClick={resetFilters}
               title={t('finance.reset_filters', 'Reset filters')}
-              className="flex items-center gap-1 px-2.5 py-1.5 bg-white dark:bg-[#182830] text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700 rounded-xl font-bold"
+              className="btn btn-outline btn-sm"
             >
               <RotateCcw size={12} />
               <span>{t('finance.reset', 'Reset')}</span>
@@ -836,7 +835,7 @@ export const InvestmentsView: React.FC = () => {
                                 </button>
                                 <button
                                   onClick={() => openSell(inv)}
-                                  className="p-1.5 text-slate-400 hover:text-blue-600 dark:hover:text-blue-400 rounded-lg hover:bg-blue-50 dark:hover:bg-blue-950/40"
+                                  className="btn btn-outline btn-sm btn-icon"
                                   title={t('finance.inv_mark_sold', 'Mark as sold')}
                                   aria-label={t('finance.inv_mark_sold', 'Mark as sold')}
                                 >
@@ -846,7 +845,7 @@ export const InvestmentsView: React.FC = () => {
                             )}
                             <button
                               onClick={() => openEdit(inv)}
-                              className="p-1.5 text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800"
+                              className="btn btn-outline btn-sm btn-icon"
                               title={t('common.edit', 'Edit')}
                               aria-label={t('common.edit', 'Edit')}
                             >
@@ -855,7 +854,7 @@ export const InvestmentsView: React.FC = () => {
                             <button
                               onClick={() => setConfirmDelete(inv)}
                               disabled={busyId === inv.id}
-                              className="p-1.5 text-slate-400 hover:text-rose-600 dark:hover:text-rose-400 rounded-lg hover:bg-rose-50 dark:hover:bg-rose-950/40 disabled:opacity-40 disabled:cursor-not-allowed"
+                              className="btn btn-danger-outline btn-sm btn-icon"
                               title={t('common.delete', 'Delete')}
                               aria-label={t('common.delete', 'Delete')}
                             >
@@ -884,10 +883,10 @@ export const InvestmentsView: React.FC = () => {
         subtitle={editing ? editing.name : t('finance.inv_add_sub', 'Record an asset the fund has bought.')}
         footer={
           <div className="flex items-center justify-end gap-2">
-            <button type="button" onClick={closeForm} disabled={saving} className={btnGhost}>
+            <button type="button" onClick={closeForm} disabled={saving} className="btn btn-cancel">
               {t('common.cancel', 'Cancel')}
             </button>
-            <button type="submit" form="investment-form" disabled={saving || !form.sector} className={btnPrimary}>
+            <button type="submit" form="investment-form" disabled={saving || !form.sector} className="btn btn-primary">
               {saving ? t('common.saving', 'Saving…') : t('common.save', 'Save')}
             </button>
           </div>
@@ -928,7 +927,7 @@ export const InvestmentsView: React.FC = () => {
                         setFormOpen(false);
                         setActiveTab('master');
                       }}
-                      className="font-bold text-[#0f4a3c] dark:text-emerald-400 hover:underline"
+                      className="btn btn-outline"
                     >
                       {t('finance.exp_add_categories', 'Add them in Master data')}
                     </button>
@@ -1035,14 +1034,14 @@ export const InvestmentsView: React.FC = () => {
                 setValuationInv(null);
                 if (inv) openEdit(inv);
               }}
-              className="mr-auto text-[11px] font-bold text-[#0f4a3c] dark:text-emerald-400 hover:underline disabled:opacity-50"
+              className="btn btn-outline mr-auto"
             >
               {t('finance.inv_edit_details', 'Edit details / review date')}
             </button>
-            <button type="button" onClick={() => setValuationInv(null)} disabled={saving} className={btnGhost}>
+            <button type="button" onClick={() => setValuationInv(null)} disabled={saving} className="btn btn-cancel">
               {t('common.cancel', 'Cancel')}
             </button>
-            <button type="submit" form="valuation-form" disabled={saving || newEstVal === ''} className={btnPrimary}>
+            <button type="submit" form="valuation-form" disabled={saving || newEstVal === ''} className="btn btn-primary">
               {saving ? t('common.saving', 'Saving…') : t('finance.inv_update_valuation', 'Update valuation')}
             </button>
           </div>
@@ -1081,10 +1080,10 @@ export const InvestmentsView: React.FC = () => {
         subtitle={sellInv ? `${sellInv.name} · ${investedLabel}: ${formatCurrency(sellInv.invested_amount)}` : undefined}
         footer={
           <div className="flex items-center justify-end gap-2">
-            <button type="button" onClick={() => setSellInv(null)} disabled={saving} className={btnGhost}>
+            <button type="button" onClick={() => setSellInv(null)} disabled={saving} className="btn btn-cancel">
               {t('common.cancel', 'Cancel')}
             </button>
-            <button type="submit" form="sell-form" disabled={saving || soldAmount === '' || !soldDate} className={btnPrimary}>
+            <button type="submit" form="sell-form" disabled={saving || soldAmount === '' || !soldDate} className="btn btn-primary">
               {saving ? t('common.saving', 'Saving…') : t('finance.inv_mark_sold', 'Mark as sold')}
             </button>
           </div>
@@ -1122,19 +1121,19 @@ export const InvestmentsView: React.FC = () => {
         open={!!confirmDelete}
         onClose={() => busyId === null && setConfirmDelete(null)}
         locked={busyId !== null}
-        size="sm"
+        size="sm" tone="danger"
         icon={<Trash2 size={18} />}
         title={t('finance.inv_delete_title', 'Delete investment?')}
         footer={
           <div className="flex items-center justify-end gap-2">
-            <button type="button" onClick={() => setConfirmDelete(null)} disabled={busyId !== null} className={btnGhost}>
+            <button type="button" onClick={() => setConfirmDelete(null)} disabled={busyId !== null} className="btn btn-cancel">
               {t('common.cancel', 'Cancel')}
             </button>
             <button
               type="button"
               onClick={handleDelete}
               disabled={busyId !== null}
-              className="px-4 py-2 bg-rose-600 hover:bg-rose-500 text-white rounded-xl text-xs font-bold shadow-md disabled:opacity-50"
+              className="btn btn-danger"
             >
               {busyId !== null ? t('finance.deleting', 'Deleting…') : t('common.delete', 'Delete')}
             </button>

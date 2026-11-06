@@ -3,6 +3,7 @@ import {
   FileSpreadsheet, Download, FolderOpen, CheckCircle2, AlertTriangle, XCircle, ArrowLeft, Upload, Users, Receipt,
   CalendarRange, Info, Loader2, ClipboardList, ShieldCheck,
 } from 'lucide-react';
+import { SegmentedTabs } from '../common/SegmentedTabs';
 import { Modal } from '../common/Modal';
 import { SearchableSelect } from '../common/SearchableSelect';
 import { useApp } from '../../context/AppContext';
@@ -100,25 +101,25 @@ export const ExcelImportModal: React.FC<Props> = ({ open, onClose, onPasteInstea
           <ClipboardList size={14} />{t('members.imp_paste_instead', 'Paste a simple list instead')}
         </button>
       )}
-      <button type="button" onClick={close} className="btn-secondary-modal">{t('common.cancel', 'Cancel')}</button>
-      <button type="button" onClick={onPick} disabled={!!busy} className="btn-primary-modal">
+      <button type="button" onClick={close} className="btn btn-cancel">{t('common.cancel', 'Cancel')}</button>
+      <button type="button" onClick={onPick} disabled={!!busy} className="btn btn-primary">
         {busy === 'pick' ? <Loader2 size={15} className="animate-spin" /> : <FolderOpen size={15} />}
         {t('members.imp_choose_file', 'Choose filled Excel file')}
       </button>
     </>
   ) : step === 'review' ? (
     <>
-      <button type="button" onClick={reset} disabled={busy === 'commit'} className="mr-auto btn-secondary-modal"><ArrowLeft size={15} />{t('members.imp_back', 'Back')}</button>
-      <button type="button" onClick={onPick} disabled={!!busy} className="btn-secondary-modal"><FolderOpen size={15} />{t('members.imp_other_file', 'Choose another file')}</button>
-      <button type="button" onClick={onCommit} disabled={!!busy || !importable} className="btn-primary-modal">
+      <button type="button" onClick={reset} disabled={busy === 'commit'} className="mr-auto btn btn-outline"><ArrowLeft size={15} />{t('members.imp_back', 'Back')}</button>
+      <button type="button" onClick={onPick} disabled={!!busy} className="btn btn-outline"><FolderOpen size={15} />{t('members.imp_other_file', 'Choose another file')}</button>
+      <button type="button" onClick={onCommit} disabled={!!busy || !importable} className="btn btn-primary">
         {busy === 'commit' ? <Loader2 size={15} className="animate-spin" /> : <Upload size={15} />}
         {s ? t('members.imp_import_btn', 'Import {m} members & {p} payments').replace('{m}', n(s.newMembers + s.updatedMembers)).replace('{p}', n(s.newPayments)) : ''}
       </button>
     </>
   ) : (
     <>
-      <button type="button" onClick={reset} className="btn-secondary-modal">{t('members.imp_import_more', 'Import another file')}</button>
-      <button type="button" onClick={() => { close(); setActiveTab('members'); }} className="btn-primary-modal"><Users size={15} />{t('members.imp_view_members', 'View members')}</button>
+      <button type="button" onClick={reset} className="btn btn-outline">{t('members.imp_import_more', 'Import another file')}</button>
+      <button type="button" onClick={() => { close(); setActiveTab('members'); }} className="btn btn-primary"><Users size={15} />{t('members.imp_view_members', 'View members')}</button>
     </>
   );
 
@@ -157,7 +158,7 @@ export const ExcelImportModal: React.FC<Props> = ({ open, onClose, onPasteInstea
               <p className="text-xs text-slate-600 dark:text-slate-300 leading-relaxed">
                 {t('members.imp_template_desc', 'An Excel file with three sheets: Instructions (English + বাংলা), Members, and Payment History. Example rows show exactly how to fill each column.')}
               </p>
-              <button type="button" onClick={onTemplate} disabled={!!busy} className="mt-4 btn-secondary-modal w-full justify-center">
+              <button type="button" onClick={onTemplate} disabled={!!busy} className="mt-4 btn btn-green-outline w-full">
                 {busy === 'template' ? <Loader2 size={15} className="animate-spin" /> : <Download size={15} />}
                 {t('members.imp_download', 'Download template (.xlsx)')}
               </button>
@@ -210,14 +211,11 @@ export const ExcelImportModal: React.FC<Props> = ({ open, onClose, onPasteInstea
           {s.examplesSkipped > 0 && <p className="text-[11px] text-slate-500">{t('members.imp_examples', '{n} example rows (codes starting with EX-) were ignored.').replace('{n}', n(s.examplesSkipped))}</p>}
 
           <div className="flex flex-wrap items-center gap-3">
-            <div className="inline-flex p-1 rounded-xl bg-slate-100 dark:bg-[#0f1a20]">
-              {(['members', 'payments'] as const).map(k => (
-                <button key={k} type="button" onClick={() => setTab(k)}
-                  className={`px-3.5 py-1.5 rounded-lg text-xs font-bold ${tab === k ? 'bg-white dark:bg-[#1b2c34] text-slate-900 dark:text-white shadow-sm' : 'text-slate-500'}`}>
-                  {k === 'members' ? `${t('members.imp_tab_members', 'Members')} (${n(preview.members.length)})` : `${t('members.imp_tab_issues', 'Payment issues')} (${n(payIssues.length)})`}
-                </button>
-              ))}
-            </div>
+            <SegmentedTabs size="sm" value={tab} onChange={setTab}
+              items={[
+                { key: 'members' as const, label: t('members.imp_tab_members', 'Members'), count: n(preview.members.length) },
+                { key: 'payments' as const, label: t('members.imp_tab_issues', 'Payment issues'), count: n(payIssues.length), accent: payIssues.length ? 'text-amber-700 dark:text-amber-400' : undefined },
+              ]} />
             {tab === 'members' && (
               <label className="flex items-center gap-2 text-xs font-semibold text-slate-600 dark:text-slate-300 cursor-pointer">
                 <input type="checkbox" checked={onlyProblems} onChange={e => setOnlyProblems(e.target.checked)} className="accent-[#0f4a3c] w-4 h-4" />

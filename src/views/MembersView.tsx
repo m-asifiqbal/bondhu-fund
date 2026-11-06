@@ -39,10 +39,10 @@ const blankForm = (due: number): MemberForm => ({
 /** Fill {placeholders} in a translated template. */
 const fill = (s: string, vars: Record<string, string | number>) => s.replace(/\{(\w+)\}/g, (_, k) => String(vars[k] ?? ''));
 
-const btnPrimary = 'flex items-center justify-center gap-1.5 px-4 py-2 bg-[#0f4a3c] hover:bg-[#145c4b] dark:bg-emerald-700 dark:hover:bg-emerald-600 text-white rounded-xl text-xs font-bold shadow-md transition-all disabled:opacity-50';
-const btnSecondary = 'flex items-center justify-center gap-1.5 px-4 py-2 bg-white dark:bg-[#16252d] border border-slate-300 dark:border-[#283e4a] rounded-xl text-xs font-bold text-slate-700 dark:text-slate-200 shadow-sm hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors disabled:opacity-50';
-const btnDanger = 'flex items-center justify-center gap-1.5 px-4 py-2 bg-rose-600 hover:bg-rose-700 dark:bg-rose-700 dark:hover:bg-rose-600 text-white rounded-xl text-xs font-bold shadow-md transition-all disabled:opacity-50';
-const iconBtn = 'inline-flex items-center justify-center w-8 h-8 rounded-lg border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 hover:text-slate-900 dark:hover:text-white transition-colors';
+const btnPrimary = 'btn btn-primary';
+const btnSecondary = 'btn btn-outline';
+const btnDanger = 'btn btn-danger';
+const iconBtn = 'btn btn-outline btn-sm btn-icon';
 
 export const MembersView: React.FC = () => {
   const {
@@ -354,12 +354,12 @@ export const MembersView: React.FC = () => {
             <span>{t('members.add', 'Add member')}</span>
           </button>
           {canUpload && (
-            <button type="button" onClick={() => setShowExcelImport(true)} className={btnSecondary}>
+            <button type="button" onClick={() => setShowExcelImport(true)} className="btn btn-outline">
               <Upload size={14} className="text-slate-500" />
               <span>{t('members.import_excel', 'Import from Excel')}</span>
             </button>
           )}
-          <button type="button" onClick={onExportExcel} className={btnSecondary}>
+          <button type="button" onClick={onExportExcel} className="btn btn-outline">
             <FileSpreadsheet size={14} className="text-slate-500" />
             <span>{t('members.export_excel', 'Export to Excel')}</span>
           </button>
@@ -419,7 +419,7 @@ export const MembersView: React.FC = () => {
               onChange={v => { setEndDate(v); setPage(1); }} />
           </div>
           {hasFilters && (
-            <button type="button" onClick={resetFilters} className="px-3 py-2 text-xs text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white underline font-bold">
+            <button type="button" onClick={resetFilters} className="btn btn-outline">
               {t('common.reset', 'Reset')}
             </button>
           )}
@@ -486,7 +486,7 @@ export const MembersView: React.FC = () => {
                         <td className="py-3 px-4" onClick={e => e.stopPropagation()}>
                           <div className="flex items-center justify-end gap-1.5">
                             {m.status === 'Active' && (
-                              <button type="button" onClick={() => recordFor(m.id)} className={`${iconBtn} text-[#0f4a3c] dark:text-emerald-400`}
+                              <button type="button" onClick={() => recordFor(m.id)} className="btn btn-green-outline btn-sm btn-icon"
                                 title={t('members.record_payment', 'Record payment')} aria-label={t('members.record_payment', 'Record payment')}>
                                 <Receipt size={14} />
                               </button>
@@ -499,7 +499,7 @@ export const MembersView: React.FC = () => {
                               title={t('common.edit', 'Edit')} aria-label={t('common.edit', 'Edit')}>
                               <Edit2 size={14} />
                             </button>
-                            <button type="button" onClick={() => setConfirmDelete(m)} className={`${iconBtn} text-rose-600 dark:text-rose-400 hover:text-rose-700`}
+                            <button type="button" onClick={() => setConfirmDelete(m)} className="btn btn-danger-outline btn-sm btn-icon"
                               title={t('common.delete', 'Delete')} aria-label={t('common.delete', 'Delete')}>
                               <Trash2 size={14} />
                             </button>
@@ -527,7 +527,7 @@ export const MembersView: React.FC = () => {
                 type="button"
                 onClick={() => setPage(p => Math.max(1, p - 1))}
                 disabled={page <= 1}
-                className="flex items-center gap-1 px-3 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800 disabled:opacity-40 disabled:pointer-events-none font-semibold text-slate-700 dark:text-slate-200"
+                className="btn btn-outline btn-sm"
               >
                 <ChevronLeft size={14} />
                 <span>{t('common.previous', 'Previous')}</span>
@@ -537,7 +537,7 @@ export const MembersView: React.FC = () => {
                 type="button"
                 onClick={() => setPage(p => Math.min(totalPages, p + 1))}
                 disabled={page >= totalPages}
-                className="flex items-center gap-1 px-3 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800 disabled:opacity-40 disabled:pointer-events-none font-semibold text-slate-700 dark:text-slate-200"
+                className="btn btn-outline btn-sm"
               >
                 <span>{t('common.next', 'Next')}</span>
                 <ChevronRight size={14} />
@@ -561,7 +561,7 @@ export const MembersView: React.FC = () => {
                 )}
               </div>
               <button type="button" onClick={() => { setStatementId(null); setStatement(null); }}
-                className="text-slate-400 hover:text-slate-700 dark:hover:text-white shrink-0"
+                className="btn btn-cancel shrink-0"
                 title={t('members.close_statement', 'Close statement')} aria-label={t('members.close_statement', 'Close statement')}>
                 <X size={16} />
               </button>
@@ -623,7 +623,7 @@ export const MembersView: React.FC = () => {
 
             {statement?.member.status === 'Active' && (
               <div className="p-4 border-t border-slate-200 dark:border-slate-800">
-                <button type="button" onClick={() => recordFor(statement.member.id)} className={`${btnPrimary} w-full`}>
+                <button type="button" onClick={() => recordFor(statement.member.id)} className="btn btn-primary w-full">
                   <Receipt size={14} />
                   <span>{t('members.record_payment', 'Record payment')}</span>
                 </button>
@@ -644,10 +644,10 @@ export const MembersView: React.FC = () => {
         subtitle={editingId != null ? form.member_code : t('members.add_subtitle', 'Dues start from the join month.')}
         footer={
           <>
-            <button type="button" onClick={() => setFormOpen(false)} disabled={saving} className={btnSecondary}>
+            <button type="button" onClick={() => setFormOpen(false)} disabled={saving} className="btn btn-cancel">
               {t('common.cancel', 'Cancel')}
             </button>
-            <button type="submit" form="member-form" disabled={saving} className={btnPrimary}>
+            <button type="submit" form="member-form" disabled={saving} className="btn btn-primary">
               {saving ? t('common.saving', 'Saving...') : editingId != null ? t('common.save_changes', 'Save changes') : t('members.save', 'Save member')}
             </button>
           </>
@@ -741,13 +741,13 @@ export const MembersView: React.FC = () => {
         open={!!confirmDelete}
         onClose={() => !busy && setConfirmDelete(null)}
         locked={busy}
-        size="sm"
+        size="sm" tone="danger"
         icon={<Trash2 size={18} />}
         title={t('members.delete_title', 'Delete member?')}
         footer={
           <>
-            <button type="button" onClick={() => setConfirmDelete(null)} disabled={busy} className={btnSecondary}>{t('common.cancel', 'Cancel')}</button>
-            <button type="button" onClick={handleDelete} disabled={busy} className={btnDanger}>
+            <button type="button" onClick={() => setConfirmDelete(null)} disabled={busy} className="btn btn-cancel">{t('common.cancel', 'Cancel')}</button>
+            <button type="button" onClick={handleDelete} disabled={busy} className="btn btn-danger">
               {busy ? t('members.deleting', 'Deleting…') : t('common.delete', 'Delete')}
             </button>
           </>
@@ -767,13 +767,13 @@ export const MembersView: React.FC = () => {
         open={!!offerInactive}
         onClose={() => !busy && setOfferInactive(null)}
         locked={busy}
-        size="sm"
+        size="sm" tone="warning"
         icon={<UserMinus size={18} />}
         title={t('members.cannot_delete', 'Member cannot be deleted')}
         footer={
           <>
-            <button type="button" onClick={() => setOfferInactive(null)} disabled={busy} className={btnSecondary}>{t('common.cancel', 'Cancel')}</button>
-            <button type="button" onClick={handleSetInactive} disabled={busy} className={btnPrimary}>
+            <button type="button" onClick={() => setOfferInactive(null)} disabled={busy} className="btn btn-cancel">{t('common.cancel', 'Cancel')}</button>
+            <button type="button" onClick={handleSetInactive} disabled={busy} className="btn btn-primary">
               {busy ? t('common.saving', 'Saving...') : t('members.set_inactive', 'Set Inactive')}
             </button>
           </>
@@ -799,10 +799,10 @@ export const MembersView: React.FC = () => {
           <div className="flex flex-wrap items-center justify-between gap-2 w-full">
             <span className="text-xs text-slate-500 dark:text-slate-400">{n(parsedImport.length)} {t('members.rows_ready', 'row(s) ready')}</span>
             <div className="flex items-center gap-2">
-              <button type="button" onClick={() => setShowImportModal(false)} disabled={importing} className={btnSecondary}>
+              <button type="button" onClick={() => setShowImportModal(false)} disabled={importing} className="btn btn-cancel">
                 {t('common.cancel', 'Cancel')}
               </button>
-              <button type="button" onClick={handleBulkImport} disabled={importing || parsedImport.length === 0} className={btnPrimary}>
+              <button type="button" onClick={handleBulkImport} disabled={importing || parsedImport.length === 0} className="btn btn-primary">
                 {importing ? t('common.saving', 'Saving...') : t('members.import_btn', 'Import members')}
               </button>
             </div>
@@ -821,7 +821,7 @@ export const MembersView: React.FC = () => {
             onChange={e => setCsvText(e.target.value)}
             placeholder={t('members.import_ph', 'Name, Phone, Email, Monthly Due, Join Date')}
             aria-label={t('members.import_title', 'Import members (CSV)')}
-            className="w-full p-3 font-mono text-[11px] bg-slate-50 dark:bg-[#101b21] border border-slate-300 dark:border-[#283d47] rounded-xl text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-[#0f4a3c]"
+            className="form-input font-mono !text-[12px]"
           />
           {parsedImport.length > 0 && (
             <div className="overflow-x-auto max-h-48 border border-slate-200 dark:border-slate-800 rounded-xl">
