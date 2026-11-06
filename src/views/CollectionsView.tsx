@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
+import { serial } from '../utils/i18n';
 import {
   ArrowRight,
   Clock,
@@ -439,6 +440,7 @@ export const CollectionsView: React.FC = () => {
                 <table className="w-full min-w-[820px] text-left text-xs text-slate-800 dark:text-slate-200">
                   <thead className="bg-slate-50 dark:bg-[#111e24] border-b border-slate-200 dark:border-slate-800 text-slate-600 dark:text-slate-400 font-bold uppercase tracking-wider text-[10px]">
                     <tr>
+<th className="py-3 px-3 w-12 text-center">{t('common.no', 'No.')}</th>
                       <th className="py-3 px-3">{t('common.member', 'Member')}</th>
                       <th className="py-3 px-3">{t('members.col_dueDate', 'Due date')}</th>
                       <th className="py-3 px-3">{t('members.col_paidOn', 'Paid on')}</th>
@@ -451,21 +453,22 @@ export const CollectionsView: React.FC = () => {
                   <tbody className="divide-y divide-slate-100 dark:divide-slate-800/80 font-medium">
                     {loading && allRecords.length === 0 ? (
                       <tr>
-                        <td colSpan={7} className="py-8 text-center text-slate-400">
+                        <td colSpan={8} className="py-8 text-center text-slate-400">
                           {t('common.loading', 'Loading...')}
                         </td>
                       </tr>
                     ) : displayedRecords.length === 0 ? (
                       <tr>
-                        <td colSpan={7} className="py-8 text-center text-slate-400">
+                        <td colSpan={8} className="py-8 text-center text-slate-400">
                           {t('members.col_noRecords', 'No collection records match your criteria.')}
                         </td>
                       </tr>
                     ) : (
-                      displayedRecords.map(r => {
+                      displayedRecords.map((r, __i) => {
                         const paid = isPaid(r);
                         return (
                           <tr key={r.id} className="hover:bg-slate-50/80 dark:hover:bg-[#1a2b34] transition-colors">
+<td className="py-3 px-3 text-center text-slate-400 dark:text-slate-500 font-semibold tabular-nums">{serial((safePage - 1) * limit + __i + 1)}</td>
                             <td className="py-3 px-3 font-bold text-slate-900 dark:text-white">
                               <span title={bnName(r.member_name) !== memberName(r) ? r.member_name : undefined}>{memberName(r)}</span>
                               {r.member_code && (

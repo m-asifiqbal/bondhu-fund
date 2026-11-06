@@ -217,6 +217,15 @@ export const Sidebar: React.FC = () => {
   const logo = settings?.org_logo;
 
   // Sliding selection pill: measured from the active item, glides between tabs.
+  // Large, readable label next to an icon when the sidebar is collapsed (native title tooltips are tiny).
+  const [tip, setTip] = useState<{ label: string; x: number; y: number } | null>(null);
+  const showTip = (label: string | undefined) => (e: React.SyntheticEvent<HTMLElement>) => {
+    if (!isCollapsed || !label) return;
+    const b = e.currentTarget.getBoundingClientRect();
+    setTip({ label, x: b.right, y: b.top + b.height / 2 });
+  };
+  const hideTip = () => setTip(null);
+  useEffect(() => { if (!isCollapsed) setTip(null); }, [isCollapsed]);
   const navRef = useRef<HTMLElement>(null);
   const itemRefs = useRef<Record<string, HTMLButtonElement | null>>({});
   const [ind, setInd] = useState<{ y: number; h: number } | null>(null);
@@ -283,7 +292,9 @@ export const Sidebar: React.FC = () => {
           <button
             onClick={toggleCollapsed}
             className="text-slate-400 hover:text-slate-700 dark:hover:text-white p-1 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors shrink-0"
-            title={isCollapsed ? t('shell.expand', 'Expand sidebar') : t('shell.collapse', 'Collapse sidebar')}
+            onMouseEnter={showTip(isCollapsed ? t('shell.expand', 'Expand sidebar') : undefined)}
+            onMouseLeave={hideTip}
+            title={isCollapsed ? undefined : t('shell.collapse', 'Collapse sidebar')}
             aria-label={isCollapsed ? t('shell.expand', 'Expand sidebar') : t('shell.collapse', 'Collapse sidebar')}
           >
             {isCollapsed ? <PanelLeftOpen size={16} /> : <PanelLeftClose size={16} />}
@@ -291,11 +302,11 @@ export const Sidebar: React.FC = () => {
         </div>
 
         {/* Categorized Nav Sections */}
-        <nav ref={navRef} className="relative p-3 space-y-4 overflow-y-auto max-h-[calc(100vh-150px)] nav-scroll">
-          <span aria-hidden className={`nav-ind ${indReady ? 'nav-ind-anim' : ''}`}
+        <nav ref={navRef} onMouseLeave={hideTip} className={`relative p-3 overflow-y-auto max-h-[calc(100vh-150px)] nav-scroll ${isCollapsed ? 'space-y-5' : 'space-y-7'}`}>
+          <span aria-hidden className={`nav-ind ${isCollapsed ? 'nav-ind-collapsed' : ''} ${indReady ? 'nav-ind-anim' : ''}`}
             style={{ transform: `translateY(${ind?.y ?? 0}px)`, height: ind?.h ?? 0, opacity: ind ? 1 : 0 }} />
-          {navSections.map(section => (
-            <div key={section.key} className="space-y-1">
+          {navSections.map((section, si) => (
+            <div key={section.key} className={`space-y-1.5 ${si > 0 ? 'nav-section-sep pt-6' : ''}`}>
               {!isCollapsed && (
                 <div className="px-3 pb-1 text-[10.8px] font-bold text-slate-400 dark:text-slate-500 tracking-wider uppercase">
                   {section.title}
@@ -309,9 +320,12 @@ export const Sidebar: React.FC = () => {
                     key={item.id}
                     ref={el => { itemRefs.current[item.id] = el; }}
                     onClick={() => setActiveTab(item.id)}
-                    title={isCollapsed ? item.label : undefined}
+                    aria-label={isCollapsed ? item.label : undefined}
+                    onMouseEnter={showTip(item.label)}
+                    onFocus={showTip(item.label)}
+                    onBlur={hideTip}
                     aria-current={isActive ? 'page' : undefined}
-                    className={`nav-item relative z-[1] w-full flex items-center ${isCollapsed ? 'justify-center px-2' : 'gap-3 px-3'} py-2.5 rounded-xl text-[13px] font-semibold ${isActive ? 'nav-item-active font-bold' : 'text-slate-600 dark:text-slate-400'}`}
+                    className={`nav-item ${isCollapsed ? 'nav-item-collapsed' : ''} relative z-[1] flex items-center ${isCollapsed ? 'justify-center' : 'w-full gap-3 px-3'} py-2.5 rounded-xl text-[13px] font-semibold ${isActive ? 'nav-item-active font-bold' : 'text-slate-600 dark:text-slate-400'}`}
                   >
                     <Icon size={17} strokeWidth={isActive ? 2.4 : 1.9} className="nav-icon shrink-0" />
                     {!isCollapsed && <span className="truncate">{item.label}</span>}
@@ -328,7 +342,10 @@ export const Sidebar: React.FC = () => {
         <button
           type="button"
           onClick={() => setShowUserMenu(v => !v)}
-          title={isCollapsed ? currentUser?.full_name : t('shell.profile_menu', 'Profile & switch user')}
+          title={isCollapsed ? undefined : t('shell.profile_menu', 'Profile & switch user')}
+          aria-label={currentUser?.full_name}
+          onMouseEnter={showTip(currentUser?.full_name)}
+          onMouseLeave={hideTip}
           aria-haspopup="menu"
           aria-expanded={showUserMenu}
           className={`w-full flex items-center ${isCollapsed ? 'justify-center' : 'justify-between'} p-2 rounded-xl cursor-pointer transition-colors border ${
@@ -356,6 +373,9 @@ export const Sidebar: React.FC = () => {
           />
         )}
       </div>
+      {isCollapsed && tip && (
+        <div role="tooltip" className="nav-tip" style={{ left: tip.x + 14, top: tip.y }}>{tip.label}</div>
+      )}
       <AccountDialogs />
     </aside>
   );

@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { serial } from '../utils/i18n';
 import {
   Wallet, Landmark, HandCoins, AlertTriangle, Building2, Receipt, TrendingUp, TrendingDown, Minus,
   Download, Printer, RefreshCw, Users, CalendarDays, PieChart as PieIcon, Activity, BellRing,
@@ -359,20 +360,20 @@ export const OverviewView: React.FC = () => {
 
       {/* KPI tiles */}
       <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 min-[1800px]:grid-cols-6 min-[2200px]:grid-cols-8 gap-4">
-        <Kpi icon={<Wallet size={16} />} label={tr('netWorth')} value={money(k.netWorth)} delta={pct(k.fundBalance, k.prevFundBalance)} deltaLabel={tr('vsLast')} digits={digits} />
-        <Kpi icon={<Landmark size={16} />} label={tr('cash')} value={money(k.cashInHand)} delta={pct(k.cashInHand, k.prevCashInHand)} deltaLabel={tr('vsLast')} digits={digits} />
-        <Kpi icon={<HandCoins size={16} />} label={tr('collected')} value={money(k.monthCollected)}
+        <Kpi accent="purple" icon={<Wallet size={16} />} label={tr('netWorth')} value={money(k.netWorth)} delta={pct(k.fundBalance, k.prevFundBalance)} deltaLabel={tr('vsLast')} digits={digits} />
+        <Kpi accent="blue" icon={<Landmark size={16} />} label={tr('cash')} value={money(k.cashInHand)} delta={pct(k.cashInHand, k.prevCashInHand)} deltaLabel={tr('vsLast')} digits={digits} />
+        <Kpi accent="green" icon={<HandCoins size={16} />} label={tr('collected')} value={money(k.monthCollected)}
           foot={<Progress value={k.collectionRate} label={`${digits(k.collectionRate)}% ${tr('of')} ${money(k.monthExpected)}`} />} />
-        <Kpi icon={<AlertTriangle size={16} />} label={tr('outstanding')} value={money(k.outstanding)} tone={k.outstanding > 0 ? 'warn' : undefined}
+        <Kpi accent="amber" icon={<AlertTriangle size={16} />} label={tr('outstanding')} value={money(k.outstanding)} tone={k.outstanding > 0 ? 'warn' : undefined}
           foot={<span className="text-[11px] text-slate-500 dark:text-slate-400">{digits(k.pending + k.overdue)} {tr('members_n')} · {language === 'bn' ? 'মোট বকেয়া' : 'total arrears'} {money(k.totalArrears)}</span>}
           onClick={() => goCollections('Overdue')} />
-        <Kpi icon={<Building2 size={16} />} label={tr('portfolio')} value={money(k.portfolioValue)}
+        <Kpi accent="teal" icon={<Building2 size={16} />} label={tr('portfolio')} value={money(k.portfolioValue)}
           foot={<span className={`text-[11px] font-bold ${k.unrealizedGain >= 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-rose-600 dark:text-rose-400'}`}>{k.unrealizedGain >= 0 ? '+' : '−'}{money(Math.abs(k.unrealizedGain))} {k.unrealizedGain >= 0 ? tr('gain') : tr('loss')}</span>}
           onClick={() => setActiveTab('investments')} />
-        <Kpi icon={<Receipt size={16} />} label={tr('expenses')} value={money(k.monthExpenses)} delta={pct(k.monthExpenses, k.prevMonthExpenses)} deltaLabel={tr('vsLast')} invertDelta digits={digits}
+        <Kpi accent="rose" icon={<Receipt size={16} />} label={tr('expenses')} value={money(k.monthExpenses)} delta={pct(k.monthExpenses, k.prevMonthExpenses)} deltaLabel={tr('vsLast')} invertDelta digits={digits}
           onClick={() => setActiveTab('expenses')} />
         {/* Late fees: this month + year to date */}
-        <button onClick={() => goCollections('All')} className="card-base p-4 text-left flex flex-col gap-3 min-w-0 sm:col-span-2 hover:shadow-md hover:-translate-y-0.5 cursor-pointer">
+        <button onClick={() => goCollections('All')} className="card-base accent-amber p-4 text-left flex flex-col gap-3 min-w-0 sm:col-span-2 hover:shadow-md hover:-translate-y-0.5 cursor-pointer">
           <div className="flex items-center justify-between gap-2">
             <span className="text-[11px] font-bold text-slate-500 dark:text-slate-400 truncate">{tr('lateFees')}</span>
             <span className="w-7 h-7 shrink-0 rounded-lg bg-amber-50 dark:bg-amber-950/50 text-amber-600 dark:text-amber-400 flex items-center justify-center"><Timer size={16} /></span>
@@ -475,14 +476,16 @@ export const OverviewView: React.FC = () => {
               <div className="overflow-x-auto">
                 <table className="w-full text-xs">
                   <thead><tr className="text-slate-500 dark:text-slate-400 border-b border-slate-200 dark:border-[#22353f]">
+                    <th className="text-center py-2 font-bold w-10">{language === 'bn' ? 'নং' : 'No.'}</th>
                     <th className="text-left py-2 font-bold">{language === 'bn' ? 'সদস্য' : 'Member'}</th>
                     <th className="text-right py-2 font-bold">{language === 'bn' ? 'বকেয়া মাস' : 'Unpaid months'}</th>
                     <th className="text-right py-2 font-bold">{language === 'bn' ? 'পরিমাণ' : 'Amount'}</th>
                     <th className="py-2" />
                   </tr></thead>
                   <tbody>
-                    {data.arrears.slice(0, 8).map(a => (
+                    {data.arrears.slice(0, 8).map((a, __i) => (
                       <tr key={a.id} className="border-b border-slate-100 dark:border-[#1b2c34] last:border-0">
+                        <td className="py-2 text-center text-slate-400 dark:text-slate-500 font-semibold tabular-nums">{serial(__i + 1)}</td>
                         <td className="py-2">
                           <div className="flex items-center gap-2.5">
                             <span className="w-7 h-7 rounded-full bg-rose-50 dark:bg-rose-950/50 text-rose-700 dark:text-rose-300 flex items-center justify-center text-[10px] font-black">{a.avatar_initials}</span>
@@ -567,13 +570,13 @@ const Section: React.FC<{ icon: React.ReactNode; title: string; children: React.
 );
 
 const Kpi: React.FC<{
-  icon: React.ReactNode; label: string; value: string; delta?: number | null; deltaLabel?: string; invertDelta?: boolean;
+  accent?: string; icon: React.ReactNode; label: string; value: string; delta?: number | null; deltaLabel?: string; invertDelta?: boolean;
   foot?: React.ReactNode; tone?: 'warn'; onClick?: () => void; digits?: (s: string | number) => string;
-}> = ({ icon, label, value, delta, deltaLabel, invertDelta, foot, tone, onClick, digits = String }) => {
+}> = ({ accent = 'green', icon, label, value, delta, deltaLabel, invertDelta, foot, tone, onClick, digits = String }) => {
   const good = delta === null || delta === undefined ? null : invertDelta ? delta <= 0 : delta >= 0;
   const Tag: any = onClick ? 'button' : 'div';
   return (
-    <Tag onClick={onClick} className={`card-base p-4 text-left flex flex-col gap-3 min-w-0 ${onClick ? 'hover:shadow-md hover:-translate-y-0.5 cursor-pointer' : ''} ${tone === 'warn' ? 'ring-1 ring-amber-300/60 dark:ring-amber-700/40' : ''}`}>
+    <Tag onClick={onClick} className={`card-base accent-${accent} p-4 text-left flex flex-col gap-3 min-w-0 ${onClick ? 'hover:shadow-md hover:-translate-y-0.5 cursor-pointer' : ''} ${tone === 'warn' ? 'ring-1 ring-amber-300/60 dark:ring-amber-700/40' : ''}`}>
       <div className="flex items-center justify-between gap-2">
         <span className="text-[11px] font-bold text-slate-500 dark:text-slate-400 truncate">{label}</span>
         <span className="w-7 h-7 shrink-0 rounded-lg bg-brand-light dark:bg-emerald-950/50 text-brand dark:text-emerald-400 flex items-center justify-center">{icon}</span>

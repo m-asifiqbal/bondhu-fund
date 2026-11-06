@@ -31,6 +31,7 @@ interface ElectronAPI {
   importPreview: (token: string, opts: ImportOptions) => Promise<Result<ImportPreview>>;
   importCommit: (token: string, opts: ImportOptions) => Promise<Result<ImportResult>>;
   exportMembersXlsx: () => Promise<Result<{ canceled: boolean; filePath?: string }>>;
+  exportStatements: (memberId: number | null, format: 'pdf' | 'xlsx') => Promise<Result<{ canceled: boolean; filePath?: string; count?: number }>>;
 }
 
 declare global {
@@ -190,6 +191,8 @@ export const previewImport = (token: string, opts: ImportOptions) => unwrap(brid
 /** Imports all valid rows in one transaction (a PreImport snapshot is taken first). */
 export const commitImport = (token: string, opts: ImportOptions) => unwrap(bridge().importCommit(token, opts));
 export const exportMembersToExcel = () => unwrap(bridge().exportMembersXlsx());
+/** Statement of one member (id) or of every member (null), as PDF or Excel. */
+export const exportStatements = (memberId: number | null, format: 'pdf' | 'xlsx') => unwrap(bridge().exportStatements(memberId, format));
 // Sign-in & health --------------------------------------------------------------------------
 export const login = (username: string, password: string) => call<SessionInfo>('login', username, password);
 export const logout = () => call<void>('logout');

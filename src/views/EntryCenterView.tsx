@@ -1,16 +1,16 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { History, Check, RotateCcw, Coins, Receipt, TrendingUp, Info } from 'lucide-react';
+import { History, Check, RotateCcw, Coins, Receipt, TrendingUp, TrendingDown, Landmark, Info } from 'lucide-react';
 import { SegmentedTabs } from '../components/common/SegmentedTabs';
 import { useApp } from '../context/AppContext';
-import { getAllMembersLite, recordPayment, addExpense, addInvestment, suggestLateFee } from '../services/db';
-import { Member, MasterCategory } from '../types';
+import { getAllMembersLite, recordPayment, addExpense, addInvestment, suggestLateFee, getInvestments, addInvestmentReturn } from '../services/db';
+import { Member, MasterCategory, Investment } from '../types';
 import { SearchableSelect, SelectOption } from '../components/common/SearchableSelect';
 import { MonthPicker } from '../components/common/MonthPicker';
 import { DatePicker } from '../components/common/DatePicker';
 import { todayISO } from '../utils/date';
 
 type LiteMember = Pick<Member, 'id' | 'member_code' | 'name' | 'phone' | 'monthly_due' | 'status' | 'avatar_initials'> & { name_bn?: string | null };
-type EntryType = 'money' | 'expense' | 'investment';
+type EntryType = 'money' | 'expense' | 'investment' | 'return';
 type Num = number | '';
 
 const toNum = (v: string): Num => (v === '' ? '' : Number(v));
@@ -63,6 +63,23 @@ export const EntryCenterView: React.FC = () => {
   const [invReviewDate, setInvReviewDate] = useState('');
   const [invNote, setInvNote] = useState('');
 
+  // Investment benefit / loss
+  const [investments, setInvestments] = useState<Investment[]>([]);
+  const [retInvId, setRetInvId] = useState<number | ''>('');
+  const [retType, setRetType] = useState<'Profit' | 'Loss'>('Profit');
+  const [retAmount, setRetAmount] = useState<Num>('');
+  const [retDate, setRetDate] = useState(todayISO());
+  const [retMethod, setRetMethod] = useState('');
+  const [retRef, setRetRef] = useState('');
+  const [retNote, setRetNote] = useState('');
+  useEffect(() => {
+    let alive = true;
+    getInvestments('newest', 'All').then(list => { if (alive) setInvestments(list.filter(i => i.status !== 'Sold')); }).catch(() => undefined);
+    return () => { alive = false; };
+  }, [refreshKey]);
+  const investmentOptions = useMemo<SelectOption[]>(() => investments.map(i => ({ value: i.id, label: i.name, sublabel: i.sector } as SelectOption)), [investments]);
+  const selectedInv = investments.find(i => i.id === retInvId);
+
   useEffect(() => { setEntryType(entryCenterInitialTab); }, [entryCenterInitialTab]);
   useEffect(() => { setPaymentMonth(selectedMonth); }, [selectedMonth]);
 
@@ -79,6 +96,7 @@ export const EntryCenterView: React.FC = () => {
     setPaymentMethod(p => (paymentMethods.some(x => x.name === p) ? p : paymentMethods[0]?.name || ''));
     setExpenseCategory(p => (expenseCategories.some(x => x.name === p) ? p : expenseCategories[0]?.name || ''));
     setInvSector(p => (investmentSectors.some(x => x.name === p) ? p : investmentSectors[0]?.name || ''));
+    setRetMethod(p => (paymentMethods.some(x => x.name === p) ? p : paymentMethods[0]?.name || ''));
   }, [paymentMethods, expenseCategories, investmentSectors]);
 
   // Suggested late fee follows month/date (user may override afterwards).
@@ -126,6 +144,12 @@ export const EntryCenterView: React.FC = () => {
       setExpensePayee('');
       setExpenseReceiptRef('');
       setExpenseNote('');
+    } else if (type === 'return') {
+      setRetInvId('');
+      setRetAmount('');
+      setRetDate(todayISO());
+      setRetRef('');
+      setRetNote('');
     } else {
       setInvName('');
       setInvAmount('');
@@ -151,6 +175,11 @@ export const EntryCenterView: React.FC = () => {
       if (expenseAmount === '' || Number(expenseAmount) <= 0) return t('members.entry_err_exp_amount', 'Enter an expense amount greater than zero.');
       if (!expenseDate) return t('members.entry_err_exp_date', 'Please choose the expense date.');
       if (!expensePayee.trim()) return t('members.entry_err_payee', 'Payee is required.');
+    } else if (entryType === 'return') {
+      if (!retInvId) return t('ret.err_inv', 'Choose the investment.');
+      if (retAmount === '' || Number(retAmount) <= 0) return t('ret.err_amount', 'Enter an amount greater than zero.');
+      if (!retDate) return t('ret.err_date', 'Please choose the date.');
+      if (retType === 'Profit' && !retMethod) return t('ret.err_method', 'Choose how the benefit was received (cash, bank, bKash…).');
     } else {
       if (!invName.trim()) return t('members.entry_err_inv_name', 'Investment name is required.');
       if (!invSector) return t('members.entry_err_sector', 'Please choose a sector.');
@@ -193,6 +222,12 @@ export const EntryCenterView: React.FC = () => {
           notes: expenseNote.trim(),
         });
         showToast(`${t('members.entry_expense_saved', 'Expense saved')}: ${expenseTitle.trim()} · ${formatCurrency(Number(expenseAmount))}`);
+      } else if (entryType === 'return') {
+        await addInvestmentReturn({
+          investment_id: Number(retInvId), entry_type: retType, amount: Number(retAmount), entry_date: retDate,
+          payment_method: retMethod, reference: retRef.trim(), note: retNote.trim(),
+        });
+        showToast(`${retType === 'Profit' ? t('ret.saved_profit', 'Benefit recorded.') : t('ret.saved_loss', 'Loss recorded.')} ${selectedInv?.name || ''} · ${formatCurrency(Number(retAmount))}`);
       } else {
         await addInvestment({
           name: invName.trim(),
@@ -236,7 +271,7 @@ export const EntryCenterView: React.FC = () => {
         </div>
         <button
           type="button"
-          onClick={() => setActiveTab(entryType === 'money' ? 'collections' : entryType === 'expense' ? 'expenses' : 'investments')}
+          onClick={() => setActiveTab(entryType === 'money' ? 'collections' : entryType === 'expense' ? 'expenses' : entryType === 'return' ? 'returns' : 'investments')}
           className="btn btn-outline"
         >
           <History size={14} className="text-slate-500 dark:text-slate-400" />
@@ -254,6 +289,7 @@ export const EntryCenterView: React.FC = () => {
               { key: 'money', label: t('members.entry_money', 'Money received'), icon: <Coins size={15} /> },
               { key: 'expense', label: t('members.entry_expense', 'Expense'), icon: <Receipt size={15} /> },
               { key: 'investment', label: t('members.entry_investment', 'Investment'), icon: <TrendingUp size={15} /> },
+              { key: 'return', label: t('members.entry_return', 'Investment profit / loss'), icon: <Landmark size={15} /> },
             ]} />
         </div>
 
@@ -371,6 +407,39 @@ export const EntryCenterView: React.FC = () => {
                 </>
               )}
 
+              {entryType === 'return' && (
+                <>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <SearchableSelect label={t('ret.col_inv', 'Investment')} required options={investmentOptions} value={retInvId}
+                      onChange={v => setRetInvId(v === '' || v == null ? '' : Number(v))} placeholder={t('ret.inv_ph', 'Choose investment…')} />
+                    <div>
+                      <label className="form-label">{t('ret.col_type', 'Type')} <Req /></label>
+                      <SegmentedTabs ariaLabel={t('ret.col_type', 'Type')} value={retType} onChange={(k: any) => setRetType(k)}
+                        items={[{ key: 'Profit', label: t('ret.t_profit', 'Benefit received'), icon: <TrendingUp size={15} /> }, { key: 'Loss', label: t('ret.t_loss', 'Loss'), icon: <TrendingDown size={15} /> }]} />
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div>
+                      <label className="form-label">{t('common.amount', 'Amount')} <Req /></label>
+                      <input type="number" min={0} step="0.01" value={retAmount} onChange={e => setRetAmount(toNum(e.target.value))} className="form-input font-bold tabular-nums" />
+                    </div>
+                    <DatePicker label={t('common.date', 'Date')} required clearable={false} value={retDate} max={todayISO()} onChange={setRetDate} />
+                  </div>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <SearchableSelect label={retType === 'Profit' ? t('ret.col_via', 'Received through') : t('ret.via_optional', 'Paid through (optional)')} required={retType === 'Profit'}
+                      options={methodOptions} value={retMethod} onChange={v => setRetMethod(String(v ?? ''))} placeholder={t('members.pay_method_ph', 'Select method…')} />
+                    <div>
+                      <label className="form-label">{t('members.trx', 'Transaction / Ref ID')}</label>
+                      <input type="text" value={retRef} onChange={e => setRetRef(e.target.value)} className="form-input font-mono" />
+                    </div>
+                  </div>
+                  <div>
+                    <label className="form-label">{t('members.note', 'Note')}</label>
+                    <input type="text" value={retNote} onChange={e => setRetNote(e.target.value)} className="form-input" />
+                  </div>
+                </>
+              )}
+
               {entryType === 'investment' && (
                 <>
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -456,6 +525,21 @@ export const EntryCenterView: React.FC = () => {
                     <div className="pt-3 border-t border-slate-200 dark:border-slate-700 flex justify-between items-center">
                       <span className="font-bold text-slate-900 dark:text-white">{t('members.entry_total_expense', 'Total expense')}</span>
                       <span className="text-base font-black text-rose-700 dark:text-rose-400">{formatCurrency(Number(expenseAmount) || 0)}</span>
+                    </div>
+                  </div>
+                ) : entryType === 'return' ? (
+                  <div className="space-y-3">
+                    <Row label={t('ret.col_inv', 'Investment')} value={selectedInv?.name} />
+                    <Row label={t('ret.col_type', 'Type')} value={retType === 'Profit' ? t('ret.t_profit', 'Benefit received') : t('ret.t_loss', 'Loss')} />
+                    <Row label={t('common.date', 'Date')} value={formatDate(retDate)} />
+                    <Row label={t('ret.col_via', 'Received through')} value={retMethod ? tv(retMethod) : ''} />
+                    <div className="pt-3 border-t border-slate-200 dark:border-slate-700 flex justify-between items-center">
+                      <span className="font-bold text-slate-900 dark:text-white">{retType === 'Profit' ? t('ret.f_profit', 'Benefit') : t('ret.f_loss', 'Loss')}</span>
+                      <span className={`text-base font-black ${retType === 'Profit' ? 'text-emerald-700 dark:text-emerald-400' : 'text-rose-700 dark:text-rose-400'}`}>{retType === 'Profit' ? '+' : '−'}{formatCurrency(Number(retAmount) || 0)}</span>
+                    </div>
+                    <div className="bg-amber-50/80 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800/80 rounded-xl p-3 text-[11px] text-amber-900 dark:text-amber-300 mt-4 leading-relaxed flex items-start gap-2">
+                      <Info size={14} className="shrink-0 mt-0.5 text-amber-700 dark:text-amber-400" />
+                      <span>{t('members.entry_return_tip', 'A benefit adds money to the fund and a loss reduces it. Both are shared with members when they are settled.')}</span>
                     </div>
                   </div>
                 ) : (

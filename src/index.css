@@ -333,3 +333,27 @@ html[lang="bn"] body :where(p, span, label, td, th, li, button, h1, h2, h3, h4) 
 .chip[aria-selected="true"] .chip-count { background: rgba(255, 255, 255, .26); }
 @keyframes chip-pop { 0% { transform: scale(.92); } 60% { transform: scale(1.05); } 100% { transform: scale(1); } }
 @media (prefers-reduced-motion: reduce) { .chip { transition: none !important; animation: none !important; } }
+
+/* ---- Sidebar: section spacing, collapsed icon state, readable tooltip -------------- */
+.nav-section-sep { border-top: 1px solid #e6edf2; }
+.dark .nav-section-sep { border-top-color: #22353f; }
+.nav-item-collapsed { width: 2.9rem; height: 2.9rem; margin-left: auto; margin-right: auto; padding: 0 !important; border-radius: .9rem; }
+.nav-item-collapsed:not(.nav-item-active):hover { transform: scale(1.06); }
+.nav-ind-collapsed { left: 50%; right: auto; width: 2.9rem; margin-left: -1.45rem; border-radius: .9rem; }
+.nav-tip {
+  position: fixed; z-index: 70; transform: translateY(-50%); pointer-events: none; white-space: nowrap;
+  padding: .55rem .95rem; border-radius: .75rem; font-size: 1rem; font-weight: 700; letter-spacing: .01em;
+  background: #0f1f27; color: #fff; box-shadow: 0 10px 26px -8px rgba(0, 0, 0, .5); animation: nav-tip-in .16s var(--bf-ease);
+}
+.nav-tip::before { content: ''; position: absolute; left: -5px; top: 50%; width: 10px; height: 10px; margin-top: -5px; background: inherit; transform: rotate(45deg); border-radius: 2px; }
+.dark .nav-tip { background: #fff; color: #0f6b50; box-shadow: 0 10px 26px -8px rgba(0, 0, 0, .8); }
+@keyframes nav-tip-in { from { opacity: 0; transform: translate(-6px, -50%); } to { opacity: 1; transform: translate(0, -50%); } }
+
+/* ---- Information cards: coloured stripe at the start (follows the rounded corner) ---- */
+.accent-purple { border-left: 4px solid #8b5cf6; }
+.accent-green { border-left: 4px solid #10b981; }
+.accent-rose { border-left: 4px solid #f43f5e; }
+.accent-blue { border-left: 4px solid #3b82f6; }
+.accent-amber { border-left: 4px solid #f59e0b; }
+.accent-teal { border-left: 4px solid #14b8a6; }
+[dir="rtl"] .accent-purple, [dir="rtl"] .accent-green, [dir="rtl"] .accent-rose, [dir="rtl"] .accent-blue, [dir="rtl"] .accent-amber, [dir="rtl"] .accent-teal { border-left-width: 1px; }

@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
+import { serial } from '../utils/i18n';
 import {
   Plus,
   CheckCircle,
@@ -586,6 +587,7 @@ export const ExpensesView: React.FC = () => {
               <table className="w-full min-w-[880px] text-left text-xs text-slate-800 dark:text-slate-200">
                 <thead className="bg-slate-50 dark:bg-[#111e24] border-b border-slate-200 dark:border-slate-800 text-slate-500 dark:text-slate-400 font-bold uppercase tracking-wider text-[10px]">
                   <tr>
+<th className="py-3 px-4 w-12 text-center">{t('common.no', 'No.')}</th>
                     <th className="py-3 px-4">{t('common.date', 'Date')}</th>
                     <th className="py-3 px-4">{t('finance.exp_expense_payee', 'Expense & payee')}</th>
                     <th className="py-3 px-4">{t('finance.exp_category', 'Category')}</th>
@@ -598,19 +600,20 @@ export const ExpensesView: React.FC = () => {
                 <tbody className="divide-y divide-slate-100 dark:divide-slate-800/80 font-medium">
                   {loading && expenses.length === 0 ? (
                     <tr>
-                      <td colSpan={7} className="py-8 text-center text-slate-400">{t('common.loading', 'Loading…')}</td>
+                      <td colSpan={8} className="py-8 text-center text-slate-400">{t('common.loading', 'Loading…')}</td>
                     </tr>
                   ) : displayedExpenses.length === 0 ? (
                     <tr>
-                      <td colSpan={7} className="py-8 text-center text-slate-400">
+                      <td colSpan={8} className="py-8 text-center text-slate-400">
                         {t('finance.exp_no_match', 'No expenses match your filters.')}
                       </td>
                     </tr>
                   ) : (
-                    displayedExpenses.map(e => {
+                    displayedExpenses.map((e, __i) => {
                       const st = styleIndex(e.category);
                       return (
                         <tr key={e.id} className="hover:bg-slate-50/80 dark:hover:bg-[#1a2b34] transition-colors">
+<td className="py-3 px-4 text-center text-slate-400 dark:text-slate-500 font-semibold tabular-nums">{serial((safePage - 1) * limit + __i + 1)}</td>
                           <td className="py-3 px-4 text-slate-500 dark:text-slate-400 whitespace-nowrap">{formatDate(e.expense_date)}</td>
                           <td className="py-3 px-4">
                             <div className="flex items-center gap-2.5">

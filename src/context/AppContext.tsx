@@ -25,8 +25,8 @@ interface AppContextType {
   showToast: (message: string, type?: 'success' | 'error' | 'info') => void;
   openRecordModal: boolean;
   setOpenRecordModal: (open: boolean) => void;
-  entryCenterInitialTab: 'money' | 'expense' | 'investment';
-  setEntryCenterInitialTab: (tab: 'money' | 'expense' | 'investment') => void;
+  entryCenterInitialTab: 'money' | 'expense' | 'investment' | 'return';
+  setEntryCenterInitialTab: (tab: 'money' | 'expense' | 'investment' | 'return') => void;
   notifications: AppNotification[];
   unreadNotificationCount: number;
   markNotificationRead: (id: string) => void;
@@ -91,7 +91,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [refreshKey, setRefreshKey] = useState(0);
   const [toasts, setToasts] = useState<ToastInfo[]>([]);
   const [openRecordModal, setOpenRecordModal] = useState(false);
-  const [entryCenterInitialTab, setEntryCenterInitialTab] = useState<'money' | 'expense' | 'investment'>('money');
+  const [entryCenterInitialTab, setEntryCenterInitialTab] = useState<'money' | 'expense' | 'investment' | 'return'>('money');
   const [notifications, setNotifications] = useState<AppNotification[]>([]);
   const [readNotifIds, setReadNotifIds] = useState<Set<string>>(() => {
     try { return new Set(JSON.parse(localStorage.getItem('bondhu_read_notifs') || '[]')); } catch { return new Set(); }

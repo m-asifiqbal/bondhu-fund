@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
+import { serial } from '../utils/i18n';
 import { Plus, TrendingUp, TrendingDown, Scale, CalendarDays, Trash2, Check } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 import {
@@ -156,6 +157,7 @@ export const InvestmentReturnsView: React.FC = () => {
           <table className="w-full min-w-[820px] text-left text-xs text-slate-800 dark:text-slate-200">
             <thead className="bg-slate-50 dark:bg-[#111e24] border-b border-slate-200 dark:border-slate-800 text-slate-500 dark:text-slate-400 font-bold uppercase tracking-wider text-[10px]">
               <tr>
+<th className="py-3 px-4 w-12 text-center">{t('common.no', 'No.')}</th>
                 <th className="py-3 px-4">{t('common.date', 'Date')}</th>
                 <th className="py-3 px-4">{t('ret.col_inv', 'Investment')}</th>
                 <th className="py-3 px-4">{t('ret.col_type', 'Type')}</th>
@@ -167,9 +169,10 @@ export const InvestmentReturnsView: React.FC = () => {
             </thead>
             <tbody className="divide-y divide-slate-100 dark:divide-slate-800/80 font-medium">
               {shown.length === 0 ? (
-                <tr><td colSpan={7} className="py-12 text-center text-slate-400">{loading ? t('common.loading', 'Loading...') : t('ret.empty', 'No profit or loss entries yet.')}</td></tr>
-              ) : shown.map(r => (
+                <tr><td colSpan={8} className="py-12 text-center text-slate-400">{loading ? t('common.loading', 'Loading...') : t('ret.empty', 'No profit or loss entries yet.')}</td></tr>
+              ) : shown.map((r, __i) => (
                 <tr key={r.id} className="hover:bg-slate-50/80 dark:hover:bg-[#1a2b34] transition-colors">
+<td className="py-3 px-4 text-center text-slate-400 dark:text-slate-500 font-semibold tabular-nums">{serial(0 + __i + 1)}</td>
                   <td className="py-3 px-4 whitespace-nowrap text-slate-600 dark:text-slate-400">{formatDate(r.entry_date)}</td>
                   <td className="py-3 px-4"><div className="font-bold text-slate-900 dark:text-white">{r.investment_name}</div><div className="text-[11px] text-slate-500 font-normal">{r.sector}</div></td>
                   <td className="py-3 px-4">

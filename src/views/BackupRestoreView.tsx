@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
+import { serial } from '../utils/i18n';
 import {
   HardDriveDownload,
   Upload,
@@ -342,8 +343,8 @@ export const BackupRestoreView: React.FC = () => {
         </div>
         {info && (
           <div className="grid grid-cols-2 sm:grid-cols-4 xl:grid-cols-6 gap-3 mt-5 text-xs">
-            {stats.map(([label, value]) => (
-              <div key={label} className="rounded-xl bg-slate-50 dark:bg-slate-900/40 border border-slate-200 dark:border-slate-800 px-3 py-2">
+            {stats.map(([label, value], si) => (
+              <div key={label} className={`rounded-xl bg-slate-50 dark:bg-slate-900/40 border border-slate-200 dark:border-slate-800 px-3 py-2 accent-${["purple","green","rose","blue","amber","teal"][si % 6]}`}>
                 <span className="text-slate-500 dark:text-slate-400 block text-[10px] uppercase font-bold tracking-wide">{label}</span>
                 <span className="font-black text-slate-900 dark:text-white">{value}</span>
               </div>
@@ -424,6 +425,7 @@ export const BackupRestoreView: React.FC = () => {
           <table className="w-full text-xs">
             <thead className="bg-slate-50 dark:bg-slate-900/40 text-[10px] uppercase tracking-wide text-slate-500 dark:text-slate-400">
               <tr>
+<th className="text-left px-5 py-2 font-bold w-12 text-center">{t('common.no', 'No.')}</th>
                 <th className="text-left px-5 py-2 font-bold">{t('finance.backup_file', 'File')}</th>
                 <th className="text-left px-3 py-2 font-bold">{t('finance.backup_type', 'Type')}</th>
                 <th className="text-left px-3 py-2 font-bold">{t('finance.backup_created', 'Created')}</th>
@@ -432,10 +434,11 @@ export const BackupRestoreView: React.FC = () => {
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
-              {snapshots.map(s => {
+              {snapshots.map((s, __i) => {
                 const k = snapshotKind(s.fileName);
                 return (
                   <tr key={s.fileName} className="hover:bg-slate-50/80 dark:hover:bg-[#1a2b34]">
+<td className="py-3 px-3 text-center text-slate-400 dark:text-slate-500 font-semibold tabular-nums">{serial(0 + __i + 1)}</td>
                     <td className="px-5 py-2.5 font-mono font-semibold text-slate-900 dark:text-white break-all">{s.fileName}</td>
                     <td className="px-3 py-2.5"><span className={`px-2 py-0.5 rounded text-[10px] font-bold ${k.cls}`}>{k.label}</span></td>
                     <td className="px-3 py-2.5 text-slate-600 dark:text-slate-300 whitespace-nowrap">{formatStamp(s.createdAt)}</td>
@@ -455,7 +458,7 @@ export const BackupRestoreView: React.FC = () => {
               })}
               {snapshots.length === 0 && (
                 <tr>
-                  <td colSpan={5} className="text-center py-8 text-slate-400 dark:text-slate-500">
+                  <td colSpan={6} className="text-center py-8 text-slate-400 dark:text-slate-500">
                     {t('finance.backup_no_snapshots', 'No snapshots yet. Automatic snapshots are created daily when enabled in Settings.')}
                   </td>
                 </tr>

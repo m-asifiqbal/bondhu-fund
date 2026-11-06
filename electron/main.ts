@@ -3,6 +3,7 @@ import * as path from 'path';
 import * as fs from 'fs';
 import * as store from './database';
 import { buildTemplate, parseWorkbook, buildMembersExport, type ParsedWorkbook } from './excel';
+import { buildStatementsXlsx, buildStatementsHtml, type StatementsData } from './statements';
 
 /** Parsed import files waiting for confirmation (token → workbook). Kept in memory only. */
 const pendingImports = new Map<string, { parsed: ParsedWorkbook; fileName: string }>();
@@ -127,7 +128,7 @@ async function start() {
   setTimeout(dailyAutoBackup, 5000);
 }
 
-const UI_SCALE = 0.85;
+const UI_SCALE = 0.89;
 
 function createWindow() {
   mainWindow = new BrowserWindow({
@@ -365,6 +366,38 @@ function registerIpc() {
     fs.writeFileSync(res.filePath, await buildMembersExport(d.members, d.payments, d.months));
     shell.openPath(res.filePath);
     return { canceled: false, filePath: res.filePath };
+  }));
+
+  /** Member statement(s) as PDF or Excel. memberId = one member; null = every member. */
+  ipcMain.handle('members:export-statements', (_e, memberId: number | null, format: 'pdf' | 'xlsx') => wrap(async () => {
+    store.requireSession();
+    const data = store.getStatementsData(memberId ? [Number(memberId)] : undefined) as unknown as StatementsData;
+    if (!data.statements.length) throw new Error('There are no members to export.');
+    const ext = format === 'xlsx' ? 'xlsx' : 'pdf';
+    const day = new Date().toISOString().slice(0, 10);
+    const safe = (v: string) => String(v).replace(/[^A-Za-z0-9_-]+/g, '_').replace(/^_+|_+$/g, '').slice(0, 30);
+    const one = data.statements.length === 1 ? data.statements[0].member : null;
+    const name = one ? `Statement_${one.member_code}_${safe(one.name) || 'member'}_${day}.${ext}` : `BondhuFund_All_Statements_${day}.${ext}`;
+    const res = await dialog.showSaveDialog(mainWindow!, {
+      title: one ? 'Save member statement' : 'Save all member statements',
+      defaultPath: path.join(app.getPath('documents'), name),
+      filters: [ext === 'pdf' ? { name: 'PDF', extensions: ['pdf'] } : { name: 'Excel workbook', extensions: ['xlsx'] }],
+    });
+    if (res.canceled || !res.filePath) return { canceled: true };
+    if (ext === 'xlsx') {
+      fs.writeFileSync(res.filePath, await buildStatementsXlsx(data));
+    } else {
+      // render the statements in a hidden window so the PDF never depends on what is on screen
+      const tmp = path.join(app.getPath('temp'), `bf-statement-${Date.now()}.html`);
+      fs.writeFileSync(tmp, buildStatementsHtml(data), 'utf8');
+      const win = new BrowserWindow({ show: false, webPreferences: { sandbox: true, contextIsolation: true, javascript: false } });
+      try {
+        await win.loadFile(tmp);
+        fs.writeFileSync(res.filePath, await win.webContents.printToPDF({ printBackground: true, pageSize: 'A4', margins: { marginType: 'none' } }));
+      } finally { win.destroy(); try { fs.unlinkSync(tmp); } catch { /* temp file */ } }
+    }
+    shell.openPath(res.filePath);
+    return { canceled: false, filePath: res.filePath, count: data.statements.length };
   }));
 
   ipcMain.handle('file:save-pdf', (_e, defaultName: string, landscape?: boolean) => wrap(async () => {

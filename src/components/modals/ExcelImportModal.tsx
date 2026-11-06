@@ -1,4 +1,5 @@
 import React, { useMemo, useState } from 'react';
+import { serial } from '../../utils/i18n';
 import {
   FileSpreadsheet, Download, FolderOpen, CheckCircle2, AlertTriangle, XCircle, ArrowLeft, Upload, Users, Receipt,
   CalendarRange, Info, Loader2, ClipboardList, ShieldCheck,
@@ -232,15 +233,16 @@ export const ExcelImportModal: React.FC<Props> = ({ open, onClose, onPasteInstea
               <table className="w-full text-xs">
                 <thead className="sticky top-0 bg-slate-50 dark:bg-[#0f1a20] z-10">
                   <tr className="text-left text-slate-500 dark:text-slate-400">
-                    {[t('members.imp_col_row', 'Row'), t('members.imp_col_member', 'Member'), t('members.imp_col_due', 'Monthly due'), t('members.imp_col_join', 'Joined'),
+                    {[t('common.no', 'No.'), t('members.imp_col_row', 'Row'), t('members.imp_col_member', 'Member'), t('members.imp_col_due', 'Monthly due'), t('members.imp_col_join', 'Joined'),
                       t('members.imp_col_opening', 'Opening'), t('members.imp_col_history', 'History'), t('members.imp_col_result', 'Result')].map((h, i) => (
-                      <th key={i} className={`px-3 py-2.5 font-bold ${i >= 2 && i <= 5 ? 'text-right' : ''}`}>{h}</th>
+                      <th key={i} className={`px-3 py-2.5 font-bold ${i >= 3 && i <= 6 ? 'text-right' : ''}`}>{h}</th>
                     ))}
                   </tr>
                 </thead>
                 <tbody>
-                  {members.map(m => (
+                  {members.map((m, __i) => (
                     <tr key={m.row} className="border-t border-slate-100 dark:border-[#1b2c34] align-top">
+                      <td className="px-3 py-2.5 text-center text-slate-400 dark:text-slate-500 font-semibold tabular-nums">{serial(__i + 1)}</td>
                       <td className="px-3 py-2.5 text-slate-400 tabular-nums">{n(m.row)}</td>
                       <td className="px-3 py-2.5 min-w-[200px]">
                         <div className="font-bold text-slate-800 dark:text-slate-100">{(language === 'bn' && m.name_bn) || m.name || '—'}</div>
@@ -262,21 +264,22 @@ export const ExcelImportModal: React.FC<Props> = ({ open, onClose, onPasteInstea
                       </td>
                     </tr>
                   ))}
-                  {members.length === 0 && <tr><td colSpan={7} className="px-3 py-10 text-center text-slate-400">{t('members.imp_none', 'Nothing to show.')}</td></tr>}
+                  {members.length === 0 && <tr><td colSpan={8} className="px-3 py-10 text-center text-slate-400">{t('members.imp_none', 'Nothing to show.')}</td></tr>}
                 </tbody>
               </table>
             ) : (
               <table className="w-full text-xs">
                 <thead className="sticky top-0 bg-slate-50 dark:bg-[#0f1a20] z-10">
                   <tr className="text-left text-slate-500 dark:text-slate-400">
-                    {[t('members.imp_col_cell', 'Cell'), t('members.imp_col_member', 'Member'), t('common.month', 'Month'), t('common.amount', 'Amount'), t('members.imp_col_result', 'Result')].map((h, i) => (
-                      <th key={i} className={`px-3 py-2.5 font-bold ${i === 3 ? 'text-right' : ''}`}>{h}</th>
+                    {[t('common.no', 'No.'), t('members.imp_col_cell', 'Cell'), t('members.imp_col_member', 'Member'), t('common.month', 'Month'), t('common.amount', 'Amount'), t('members.imp_col_result', 'Result')].map((h, i) => (
+                      <th key={i} className={`px-3 py-2.5 font-bold ${i === 4 ? 'text-right' : ''}`}>{h}</th>
                     ))}
                   </tr>
                 </thead>
                 <tbody>
                   {payIssues.map((p, i) => (
                     <tr key={i} className="border-t border-slate-100 dark:border-[#1b2c34] align-top">
+                      <td className="px-3 py-2.5 text-center text-slate-400 dark:text-slate-500 font-semibold tabular-nums">{serial(i + 1)}</td>
                       <td className="px-3 py-2.5 font-mono text-slate-500">{p.cell}</td>
                       <td className="px-3 py-2.5"><div className="font-bold text-slate-800 dark:text-slate-100">{p.name || '—'}</div><div className="text-[10px] font-mono text-slate-500">{p.code}</div></td>
                       <td className="px-3 py-2.5 whitespace-nowrap">{formatMonth(p.month)}</td>
@@ -290,7 +293,7 @@ export const ExcelImportModal: React.FC<Props> = ({ open, onClose, onPasteInstea
                     </tr>
                   ))}
                   {payIssues.length === 0 && (
-                    <tr><td colSpan={5} className="px-3 py-10 text-center text-emerald-600 dark:text-emerald-400 font-semibold">
+                    <tr><td colSpan={6} className="px-3 py-10 text-center text-emerald-600 dark:text-emerald-400 font-semibold">
                       <CheckCircle2 size={16} className="inline mr-1.5" />{t('members.imp_no_issues', 'All payments look good.')}
                     </td></tr>
                   )}

@@ -315,8 +315,8 @@ export const UserProfileView: React.FC = () => {
 
       {/* Stats */}
       <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-5 gap-4">
-        {tiles.map(tile => (
-          <div key={tile.label} className="card-base p-4 flex items-start gap-3">
+        {tiles.map((tile, ti) => (
+          <div key={tile.label} className={`card-base p-4 flex items-start gap-3 accent-${["purple","green","rose","blue","amber","teal"][ti % 6]}`}>
             <div className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 ${tile.tone}`}><tile.icon size={18} /></div>
             <div className="min-w-0">
               <div className="text-[11px] font-semibold text-slate-500 dark:text-slate-400 leading-tight">{tile.label}</div>

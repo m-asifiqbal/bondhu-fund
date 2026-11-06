@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
+import { serial } from '../utils/i18n';
 import {
   Plus,
   Download,
@@ -751,6 +752,7 @@ export const InvestmentsView: React.FC = () => {
             <table className="w-full min-w-[880px] text-left text-xs text-slate-800 dark:text-slate-200">
               <thead className="bg-slate-50 dark:bg-[#111e24] border-b border-slate-200 dark:border-slate-800 text-slate-600 dark:text-slate-400 font-bold uppercase tracking-wider text-[10px]">
                 <tr>
+<th className="py-3 px-2.5 w-12 text-center">{t('common.no', 'No.')}</th>
                   <th className="py-3 px-2.5">{t('finance.inv_investment', 'Investment')}</th>
                   <th className="py-3 px-2.5">{t('finance.inv_sector', 'Sector')}</th>
                   <th className="py-3 px-2.5">{t('finance.inv_purchased', 'Purchased')}</th>
@@ -764,19 +766,20 @@ export const InvestmentsView: React.FC = () => {
               <tbody className="divide-y divide-slate-100 dark:divide-slate-800/80 font-medium">
                 {loading && investments.length === 0 ? (
                   <tr>
-                    <td colSpan={8} className="py-8 text-center text-slate-400">{t('common.loading', 'Loading…')}</td>
+                    <td colSpan={9} className="py-8 text-center text-slate-400">{t('common.loading', 'Loading…')}</td>
                   </tr>
                 ) : investments.length === 0 ? (
                   <tr>
-                    <td colSpan={8} className="py-8 text-center text-slate-400">{t('finance.inv_no_match', 'No investments match your filters.')}</td>
+                    <td colSpan={9} className="py-8 text-center text-slate-400">{t('finance.inv_no_match', 'No investments match your filters.')}</td>
                   </tr>
                 ) : (
-                  investments.map(inv => {
+                  investments.map((inv, __i) => {
                     const isSold = inv.status === 'Sold';
                     const gain = isSold ? realizedGain(inv) : inv.gain_loss ?? (inv.current_estimated_value - inv.invested_amount);
                     const reviewSoon = !isSold && inv.review_date && daysBetween(today, inv.review_date.slice(0, 10)) <= 30;
                     return (
                       <tr key={inv.id} className={`hover:bg-slate-50/80 dark:hover:bg-[#1a2b34] transition-colors ${isSold ? 'opacity-80' : ''}`}>
+<td className="py-3 px-2.5 text-center text-slate-400 dark:text-slate-500 font-semibold tabular-nums">{serial(0 + __i + 1)}</td>
                         <td className="py-3 px-2.5">
                           <div className="flex items-center gap-3">
                             <div className="w-8 h-8 rounded-xl bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 flex items-center justify-center shrink-0">

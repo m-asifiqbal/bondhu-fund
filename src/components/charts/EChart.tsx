@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
+import { serial } from '../../utils/i18n';
 import * as echarts from 'echarts/core';
 import { BarChart, LineChart, PieChart, HeatmapChart } from 'echarts/charts';
 import {
@@ -178,11 +179,12 @@ export const ChartCard: React.FC<ChartCardProps> = ({ title, subtitle, icon, act
         <div className="overflow-auto max-h-[320px] -mx-1">
           <table className="w-full text-xs">
             <thead className="sticky top-0 bg-white dark:bg-[#142026]">
-              <tr>{table.headers.map((h, i) => <th key={i} className={`py-2 px-2 font-bold text-slate-500 dark:text-slate-400 border-b border-slate-200 dark:border-[#22353f] ${i ? 'text-right' : 'text-left'}`}>{h}</th>)}</tr>
+              <tr><th className="py-2 px-2 w-10 text-center font-bold text-slate-500 dark:text-slate-400 border-b border-slate-200 dark:border-[#22353f]">{t('common.no', 'No.')}</th>{table.headers.map((h, i) => <th key={i} className={`py-2 px-2 font-bold text-slate-500 dark:text-slate-400 border-b border-slate-200 dark:border-[#22353f] ${i ? 'text-right' : 'text-left'}`}>{h}</th>)}</tr>
             </thead>
             <tbody>
               {table.rows.map((r, i) => (
                 <tr key={i} className="border-b border-slate-100 dark:border-[#1b2c34] last:border-0">
+                  <td className="py-2 px-2 text-center text-slate-400 font-semibold tabular-nums">{serial(i + 1)}</td>
                   {r.map((c, j) => <td key={j} className={`py-2 px-2 text-slate-700 dark:text-slate-200 ${j ? 'text-right tabular-nums' : ''}`}>{c}</td>)}
                 </tr>
               ))}

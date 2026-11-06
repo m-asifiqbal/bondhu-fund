@@ -898,6 +898,31 @@ function getMemberStatement(memberId: number) {
   return { member: m, rows: rows.reverse() };
 }
 
+/** Everything needed to print / export member statements (one member, a list, or everyone). Oldest month first. */
+export function getStatementsData(memberIds?: number[]) {
+  const s = settingsMap();
+  const ids = (memberIds || []).map(Number).filter(Boolean);
+  const members = all(`SELECT id FROM members ${ids.length ? `WHERE id IN (${ids.map(() => '?').join(',')})` : ''} ORDER BY member_code COLLATE NOCASE`, ids);
+  const statements = members.map(({ id }) => {
+    const st = getMemberStatement(Number(id));
+    const rows = [...st.rows].reverse();
+    const paid = rows.filter(r => r.status === 'Paid');
+    const overdue = rows.filter(r => r.status === 'Overdue');
+    const contributions = paid.reduce((a, r) => a + (Number(r.contribution_amount) || 0), 0);
+    const lateFees = paid.reduce((a, r) => a + (Number(r.late_fee) || 0), 0);
+    const settlement = get('SELECT settlement_date, principal, profit_share, total_paid, payment_method, trx_id, note FROM member_settlements WHERE member_id = ?', [Number(id)]);
+    return {
+      member: st.member, rows,
+      totals: {
+        opening: Number(st.member.opening_balance) || 0, contributions, lateFees, received: contributions + lateFees, paidMonths: paid.length,
+        overdueMonths: overdue.length, overdueAmount: overdue.reduce((a, r) => a + (Number(r.monthly_due) || 0), 0), pendingMonths: rows.filter(r => r.status === 'Pending').length,
+      },
+      settlement: settlement || null,
+    };
+  });
+  return { orgName: s.organization_name || 'Bondhu Fund', currency: s.currency_symbol || 'TK', generatedOn: todayISO(), statements };
+}
+
 function bulkAddMembers(list: any[]) {
   const s = settingsMap();
   const batch: string[] = [];

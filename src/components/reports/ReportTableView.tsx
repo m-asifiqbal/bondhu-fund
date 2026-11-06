@@ -80,7 +80,7 @@ export const ReportTableView: React.FC<Props> = ({ columns, rows, f, totalLabel 
       <table className="w-full text-xs report-table">
         <thead>
           <tr className="bg-slate-50 dark:bg-[#101b21] text-slate-600 dark:text-slate-300">
-            <th className="px-3 py-2.5 text-left font-bold w-10">#</th>
+            <th className="px-3 py-2.5 text-center font-bold w-12">{f.bn ? 'নং' : 'No.'}</th>
             {columns.map(c => (
               <th key={c.key} className={`px-3 py-2.5 font-bold whitespace-nowrap ${isNumeric(c.kind) ? 'text-right' : 'text-left'}`}>
                 {f.bn ? c.bn : c.label}
@@ -91,7 +91,7 @@ export const ReportTableView: React.FC<Props> = ({ columns, rows, f, totalLabel 
         <tbody className="divide-y divide-slate-100 dark:divide-[#1d2e36]">
           {rows.map((r, i) => (
             <tr key={i} className="hover:bg-slate-50/70 dark:hover:bg-[#1a2b34] text-slate-800 dark:text-slate-200">
-              <td className="px-3 py-3 text-slate-400">{f.bn ? f.toBanglaDigits(i + 1) : i + 1}</td>
+              <td className="px-3 py-3 text-center text-slate-400 font-semibold tabular-nums">{f.bn ? f.toBanglaDigits(i + 1) : i + 1}</td>
               {columns.map(c => (
                 <td key={c.key}
                   className={`px-3 py-3 ${isNumeric(c.kind) ? 'text-right tabular-nums whitespace-nowrap' : c.kind === 'date' || c.kind === 'month' || c.kind === 'datetime' ? 'whitespace-nowrap' : ''} ${c.kind === 'money' && Number(r[c.key]) < 0 ? 'text-rose-600 dark:text-rose-400' : ''}`}>

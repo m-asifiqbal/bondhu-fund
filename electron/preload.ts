@@ -18,4 +18,5 @@ contextBridge.exposeInMainWorld('electronAPI', {
   importPreview: (token: string, opts: unknown) => ipcRenderer.invoke('import:preview', token, opts),
   importCommit: (token: string, opts: unknown) => ipcRenderer.invoke('import:commit', token, opts),
   exportMembersXlsx: () => ipcRenderer.invoke('members:export-xlsx'),
+  exportStatements: (memberId: number | null, format: 'pdf' | 'xlsx') => ipcRenderer.invoke('members:export-statements', memberId, format),
 });

@@ -1,11 +1,12 @@
 import React, { useState, useEffect, useMemo } from 'react';
+import { serial } from '../utils/i18n';
 import {
   Plus, Upload, Search, ChevronLeft, ChevronRight, X, UserPlus, Edit2, Trash2, Receipt, FileSpreadsheet, Users,
   CheckCircle2, Clock, AlertTriangle, UserMinus,
 } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 import {
-  getMembers, addMember, updateMember, deleteMember, getMemberStatement, bulkAddMembers, getNextMemberCode, exportMembersToExcel, getMemberSettlements, cancelSettlement,
+  getMembers, addMember, updateMember, deleteMember, getMemberStatement, bulkAddMembers, getNextMemberCode, exportMembersToExcel, getMemberSettlements, cancelSettlement, exportStatements,
 } from '../services/db';
 import { Member, MemberStats, MemberStatement, PaymentStatus, MemberSettlement } from '../types';
 import { todayISO } from '../utils/date';
@@ -14,6 +15,7 @@ import { DatePicker } from '../components/common/DatePicker';
 import { Modal } from '../components/common/Modal';
 import { ExcelImportModal } from '../components/modals/ExcelImportModal';
 import { SettleMemberModal } from '../components/modals/SettleMemberModal';
+import { DownloadMenu, DownloadFormat } from '../components/common/DownloadMenu';
 
 const PAGE_SIZE = 10;
 const EMPTY_STATS: MemberStats = { total: 0, active: 0, paid: 0, pending: 0, overdue: 0 };
@@ -77,6 +79,16 @@ export const MembersView: React.FC = () => {
   const [confirmDelete, setConfirmDelete] = useState<Member | null>(null);
   const [offerInactive, setOfferInactive] = useState<{ member: Member; message: string } | null>(null);
   const [busy, setBusy] = useState(false);
+  const [dlBusy, setDlBusy] = useState<number | 'all' | null>(null);
+  /** Statement download: memberId = one member, null = every member. */
+  const downloadStatements = async (memberId: number | null, format: DownloadFormat) => {
+    if (dlBusy) return;
+    setDlBusy(memberId ?? 'all');
+    try {
+      const r = await exportStatements(memberId, format);
+      if (!r.canceled) showToast(`${memberId ? t('members.dl_one_saved', 'Statement saved') : t('members.dl_all_saved', 'All statements saved')}${r.filePath ? `: ${r.filePath}` : ''}`);
+    } catch (e: any) { showToast(e.message, 'error'); } finally { setDlBusy(null); }
+  };
   const [settleFor, setSettleFor] = useState<Member | null>(null);
   const [settlement, setSettlement] = useState<MemberSettlement | null>(null);
   const [confirmCancelSettle, setConfirmCancelSettle] = useState(false);
@@ -378,8 +390,8 @@ export const MembersView: React.FC = () => {
 
       {/* KPIs */}
       <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
-        {kpis.map(k => (
-          <div key={k.id} className="card-base p-5 flex items-center justify-between gap-3">
+        {kpis.map((k, ki) => (
+          <div key={k.id} className={`card-base p-5 flex items-center justify-between gap-3 accent-${['purple', 'green', 'amber', 'rose'][ki % 4]}`}>
             <div className="min-w-0">
               <div className="text-xs text-slate-600 dark:text-slate-400 font-bold">{k.label}</div>
               <div className={`text-2xl font-black mt-1 ${k.tone}`}>{n(k.value)}</div>
@@ -439,10 +451,19 @@ export const MembersView: React.FC = () => {
       {/* Table + statement panel */}
       <div className={`grid grid-cols-1 gap-6 ${statementId != null ? 'xl:grid-cols-3' : ''}`}>
         <div className={`card-base overflow-hidden min-w-0 ${statementId != null ? 'xl:col-span-2' : ''}`}>
+          <div className="px-4 py-3 border-b border-slate-200 dark:border-slate-800 flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <h2 className="text-sm font-bold text-slate-900 dark:text-white">{t('members.list_title', 'Member list')}</h2>
+              <p className="text-[11px] text-slate-500 dark:text-slate-400">{t('members.dl_hint', 'Download the statement of one member from its row, or of everyone together.')}</p>
+            </div>
+            <DownloadMenu label={t('members.dl_all', 'Download all statements')} title={t('members.dl_all_title', 'Download the statements of all members')}
+              busy={dlBusy === 'all'} onPick={f => downloadStatements(null, f)} />
+          </div>
           <div className="overflow-x-auto w-full">
             <table className="w-full min-w-[820px] text-left text-xs text-slate-800 dark:text-slate-200">
               <thead className="bg-slate-50 dark:bg-[#111e24] border-b border-slate-200 dark:border-slate-800 text-slate-600 dark:text-slate-400 font-bold uppercase tracking-wider text-[10px]">
                 <tr>
+<th className="py-3.5 px-4 w-12 text-center">{t('common.no', 'No.')}</th>
                   <th className="py-3.5 px-4">{t('common.member', 'Member')}</th>
                   <th className="py-3.5 px-4">{t('common.member_id', 'Member ID')}</th>
                   <th className="py-3.5 px-4">{t('common.monthly_due', 'Monthly due')}</th>
@@ -455,12 +476,12 @@ export const MembersView: React.FC = () => {
               <tbody className="divide-y divide-slate-100 dark:divide-slate-800/80 font-medium">
                 {members.length === 0 ? (
                   <tr>
-                    <td colSpan={7} className="py-10 text-center text-slate-400">
+                    <td colSpan={8} className="py-10 text-center text-slate-400">
                       {loading ? t('common.loading', 'Loading...') : t('members.empty', 'No members match your search and filters.')}
                     </td>
                   </tr>
                 ) : (
-                  members.map(m => {
+                  members.map((m, __i) => {
                     const other = otherName(m);
                     return (
                       <tr
@@ -468,6 +489,7 @@ export const MembersView: React.FC = () => {
                         onClick={() => setStatementId(m.id)}
                         className={`cursor-pointer transition-colors ${statementId === m.id ? 'bg-emerald-50/70 dark:bg-emerald-950/30' : 'hover:bg-slate-50/80 dark:hover:bg-[#1a2b34]'}`}
                       >
+                        <td className="py-3 px-4 text-center text-slate-400 dark:text-slate-500 font-semibold tabular-nums">{serial((page - 1) * PAGE_SIZE + __i + 1)}</td>
                         <td className="py-3 px-4">
                           <div className="flex items-center gap-3">
                             <div className="w-8 h-8 rounded-full bg-[#e2ede7] dark:bg-emerald-950/60 text-[#0f4a3c] dark:text-emerald-400 font-bold text-xs flex items-center justify-center shrink-0 border border-[#c3ded0] dark:border-emerald-800">
@@ -507,6 +529,7 @@ export const MembersView: React.FC = () => {
                                 <UserMinus size={14} />
                               </button>
                             )}
+                            <DownloadMenu title={t('members.dl_one', 'Download statement')} busy={dlBusy === m.id} onPick={f => downloadStatements(m.id, f)} />
                             <button type="button" onClick={() => setStatementId(m.id)} className={iconBtn}
                               title={t('members.statement', 'Statement')} aria-label={t('members.statement', 'Statement')}>
                               <FileSpreadsheet size={14} />
@@ -576,6 +599,8 @@ export const MembersView: React.FC = () => {
                   </p>
                 )}
               </div>
+              <DownloadMenu title={t('members.dl_one', 'Download statement')} busy={dlBusy === statementId} onPick={f => statementId != null && downloadStatements(statementId, f)}
+                className="btn btn-green-outline btn-sm btn-icon shrink-0" />
               <button type="button" onClick={() => { setStatementId(null); setStatement(null); }}
                 className="btn btn-cancel shrink-0"
                 title={t('members.close_statement', 'Close statement')} aria-label={t('members.close_statement', 'Close statement')}>
@@ -615,6 +640,7 @@ export const MembersView: React.FC = () => {
               <table className="w-full min-w-[360px] text-left text-xs text-slate-800 dark:text-slate-200">
                 <thead className="sticky top-0 bg-white dark:bg-[#14232b] text-slate-500 dark:text-slate-400 font-bold uppercase tracking-wider text-[10px] border-b border-slate-200 dark:border-slate-800">
                   <tr>
+<th className="py-2.5 px-4 w-12 text-center">{t('common.no', 'No.')}</th>
                     <th className="py-2.5 px-4">{t('common.month', 'Month')}</th>
                     <th className="py-2.5 px-4">{t('members.paid_on', 'Paid on')}</th>
                     <th className="py-2.5 px-4 text-right">{t('common.amount', 'Amount')}</th>
@@ -623,12 +649,13 @@ export const MembersView: React.FC = () => {
                 </thead>
                 <tbody className="divide-y divide-slate-100 dark:divide-slate-800/80">
                   {statementLoading && !statement ? (
-                    <tr><td colSpan={4} className="py-8 text-center text-slate-400">{t('common.loading', 'Loading...')}</td></tr>
+                    <tr><td colSpan={5} className="py-8 text-center text-slate-400">{t('common.loading', 'Loading...')}</td></tr>
                   ) : statement && statement.rows.length === 0 ? (
-                    <tr><td colSpan={4} className="py-8 text-center text-slate-400">{t('members.no_months', 'No months due yet.')}</td></tr>
+                    <tr><td colSpan={5} className="py-8 text-center text-slate-400">{t('members.no_months', 'No months due yet.')}</td></tr>
                   ) : (
-                    statement?.rows.map(r => (
+                    statement?.rows.map((r, __i) => (
                       <tr key={r.payment_month}>
+<td className="py-2.5 px-4 text-center text-slate-400 dark:text-slate-500 font-semibold tabular-nums">{serial(0 + __i + 1)}</td>
                         <td className="py-2.5 px-4 font-bold text-slate-900 dark:text-white whitespace-nowrap">{formatMonth(r.payment_month)}</td>
                         <td className="py-2.5 px-4 text-slate-600 dark:text-slate-400 whitespace-nowrap">
                           {r.status === 'Paid' ? formatDate(r.payment_date) : `${t('members.due', 'Due')} ${formatDate(r.due_date)}`}
@@ -864,6 +891,7 @@ export const MembersView: React.FC = () => {
               <table className="w-full min-w-[480px] text-left text-[11px] text-slate-700 dark:text-slate-300">
                 <thead className="bg-slate-50 dark:bg-[#111e24] text-slate-500 dark:text-slate-400 font-bold uppercase text-[10px]">
                   <tr>
+<th className="py-2 px-3 w-12 text-center">{t('common.no', 'No.')}</th>
                     <th className="py-2 px-3">{t('members.name', 'Full name')}</th>
                     <th className="py-2 px-3">{t('members.phone', 'Mobile phone')}</th>
                     <th className="py-2 px-3">{t('members.email', 'Email')}</th>
@@ -874,6 +902,7 @@ export const MembersView: React.FC = () => {
                 <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
                   {parsedImport.slice(0, 50).map((r, i) => (
                     <tr key={i}>
+                      <td className="py-1.5 px-3 text-center text-slate-400 dark:text-slate-500 font-semibold tabular-nums">{serial(i + 1)}</td>
                       <td className="py-1.5 px-3 font-bold">{r.name}</td>
                       <td className="py-1.5 px-3">{r.phone || '—'}</td>
                       <td className="py-1.5 px-3">{r.email || '—'}</td>

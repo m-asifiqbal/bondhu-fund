@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import { serial } from '../utils/i18n';
 import { UserPlus, Trash2, Pencil, History, Users, KeyRound, Lock, Camera, X, ChevronRight, Search, Loader2 } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 import { getUsers, addUser, updateUser, deleteUser, getAuditLog, setUserPassword } from '../services/db';
@@ -302,6 +303,7 @@ export const UserManagementView: React.FC = () => {
           <table className="w-full text-xs">
             <thead className="bg-slate-50 dark:bg-slate-900/40 text-[10px] uppercase tracking-wide text-slate-500 dark:text-slate-400 sticky top-0">
               <tr>
+<th className="text-left px-5 py-2.5 font-bold whitespace-nowrap w-12 text-center">{t('common.no', 'No.')}</th>
                 <th className="text-left px-5 py-2.5 font-bold whitespace-nowrap">{t('admin.when', 'When')}</th>
                 <th className="text-left px-3 py-2.5 font-bold">{t('admin.user', 'User')}</th>
                 <th className="text-left px-3 py-2.5 font-bold">{t('admin.action', 'Action')}</th>
@@ -310,8 +312,9 @@ export const UserManagementView: React.FC = () => {
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
-              {audit.map(a => (
+              {audit.map((a, __i) => (
                 <tr key={a.id} className="hover:bg-slate-50/80 dark:hover:bg-[#1a2b34] align-top">
+<td className="py-3 px-3 text-center text-slate-400 dark:text-slate-500 font-semibold tabular-nums">{serial(0 + __i + 1)}</td>
                   <td className="px-5 py-3 whitespace-nowrap text-slate-500 dark:text-slate-400">{stamp(a.at)}</td>
                   <td className="px-3 py-3 font-semibold text-slate-800 dark:text-slate-200">{a.user_name || '—'}</td>
                   <td className="px-3 py-3 font-bold text-slate-900 dark:text-white whitespace-nowrap">{labels.action(a.action)}</td>
@@ -323,7 +326,7 @@ export const UserManagementView: React.FC = () => {
               ))}
               {audit.length === 0 && (
                 <tr>
-                  <td colSpan={5} className="text-center py-8 text-slate-400 dark:text-slate-500">{t('admin.no_activity', 'No activity recorded yet.')}</td>
+                  <td colSpan={6} className="text-center py-8 text-slate-400 dark:text-slate-500">{t('admin.no_activity', 'No activity recorded yet.')}</td>
                 </tr>
               )}
             </tbody>
