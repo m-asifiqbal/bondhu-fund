@@ -271,7 +271,7 @@ export const CollectionsView: React.FC = () => {
   const showNoDues = !loading && stats.totalMembers === 0 && !hasFilters;
 
   return (
-    <div className="p-6 lg:p-8 space-y-6 max-w-7xl mx-auto">
+    <div className="p-6 lg:p-8 space-y-6 max-w-[1680px] mx-auto">
       {/* Header */}
       <div className="flex flex-wrap items-center justify-between gap-4">
         <div>

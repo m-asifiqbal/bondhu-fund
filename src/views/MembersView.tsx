@@ -5,14 +5,15 @@ import {
 } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 import {
-  getMembers, addMember, updateMember, deleteMember, getMemberStatement, bulkAddMembers, getNextMemberCode, exportMembersToExcel,
+  getMembers, addMember, updateMember, deleteMember, getMemberStatement, bulkAddMembers, getNextMemberCode, exportMembersToExcel, getMemberSettlements, cancelSettlement,
 } from '../services/db';
-import { Member, MemberStats, MemberStatement, PaymentStatus } from '../types';
+import { Member, MemberStats, MemberStatement, PaymentStatus, MemberSettlement } from '../types';
 import { todayISO } from '../utils/date';
 import { SearchableSelect, SelectOption } from '../components/common/SearchableSelect';
 import { DatePicker } from '../components/common/DatePicker';
 import { Modal } from '../components/common/Modal';
 import { ExcelImportModal } from '../components/modals/ExcelImportModal';
+import { SettleMemberModal } from '../components/modals/SettleMemberModal';
 
 const PAGE_SIZE = 10;
 const EMPTY_STATS: MemberStats = { total: 0, active: 0, paid: 0, pending: 0, overdue: 0 };
@@ -49,7 +50,7 @@ export const MembersView: React.FC = () => {
     showToast, refreshKey, triggerRefresh, memberFilterStatus, setMemberFilterStatus, setOpenRecordModal,
     setSelectedMemberIdForPayment, selectedMonth, t, tv, bnName, language, toBanglaDigits, settings,
     formatCurrency, formatDate, formatMonth,
-    canUpload,
+    canUpload, isAdmin,
   } = useApp();
   const bn = language === 'bn';
   const n = (v: string | number) => (bn ? toBanglaDigits(v) : String(v));
@@ -76,6 +77,9 @@ export const MembersView: React.FC = () => {
   const [confirmDelete, setConfirmDelete] = useState<Member | null>(null);
   const [offerInactive, setOfferInactive] = useState<{ member: Member; message: string } | null>(null);
   const [busy, setBusy] = useState(false);
+  const [settleFor, setSettleFor] = useState<Member | null>(null);
+  const [settlement, setSettlement] = useState<MemberSettlement | null>(null);
+  const [confirmCancelSettle, setConfirmCancelSettle] = useState(false);
 
   // Statement panel
   const [statement, setStatement] = useState<MemberStatement | null>(null);
@@ -123,7 +127,7 @@ export const MembersView: React.FC = () => {
     let alive = true;
     setStatementLoading(true);
     getMemberStatement(statementId)
-      .then(s => alive && setStatement(s))
+      .then(s => { if (!alive) return; setStatement(s); if (s.member.status === 'Inactive') loadSettlement(s.member.id); else setSettlement(null); })
       .catch((e: any) => { if (alive) { showToast(e.message, 'error'); setStatementId(null); setStatement(null); } })
       .finally(() => alive && setStatementLoading(false));
     return () => { alive = false; };
@@ -249,20 +253,26 @@ export const MembersView: React.FC = () => {
     }
   };
 
-  const handleSetInactive = async () => {
-    if (!offerInactive || busy) return;
+  const handleSetInactive = () => {
+    if (!offerInactive) return;
     const m = offerInactive.member;
+    setOfferInactive(null);
+    setSettleFor(m);
+  };
+
+  const loadSettlement = async (memberId: number) => {
+    try { setSettlement((await getMemberSettlements()).find(x => x.member_id === memberId) || null); } catch { setSettlement(null); }
+  };
+
+  const handleCancelSettlement = async () => {
+    if (!statement || busy) return;
     setBusy(true);
     try {
-      await updateMember(m.id, { status: 'Inactive' });
-      showToast(`${bnName(m.name, m.name_bn)}: ${t('members.set_inactive_done', 'set to Inactive.')}`);
-      setOfferInactive(null);
+      await cancelSettlement(statement.member.id);
+      showToast(t('settle.cancelled', 'Settlement cancelled.'));
+      setConfirmCancelSettle(false); setSettlement(null);
       triggerRefresh();
-    } catch (e2: any) {
-      showToast(e2.message, 'error');
-    } finally {
-      setBusy(false);
-    }
+    } catch (e2: any) { showToast(e2.message, 'error'); } finally { setBusy(false); }
   };
 
   const recordFor = (id: number) => {
@@ -339,7 +349,7 @@ export const MembersView: React.FC = () => {
   const otherName = (m: { name: string; name_bn?: string | null }) => (bn ? (m.name_bn ? m.name : '') : m.name_bn || '');
 
   return (
-    <div className="p-4 md:p-6 xl:p-8 space-y-6 max-w-7xl mx-auto">
+    <div className="p-4 md:p-6 xl:p-8 space-y-6 max-w-[1680px] mx-auto">
       {/* Header */}
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div>
@@ -491,6 +501,12 @@ export const MembersView: React.FC = () => {
                                 <Receipt size={14} />
                               </button>
                             )}
+                            {m.status === 'Active' && (
+                              <button type="button" onClick={() => setSettleFor(m)} className={iconBtn}
+                                title={t('settle.title', 'Settle & deactivate member')} aria-label={t('settle.title', 'Settle & deactivate member')}>
+                                <UserMinus size={14} />
+                              </button>
+                            )}
                             <button type="button" onClick={() => setStatementId(m.id)} className={iconBtn}
                               title={t('members.statement', 'Statement')} aria-label={t('members.statement', 'Statement')}>
                               <FileSpreadsheet size={14} />
@@ -581,6 +597,17 @@ export const MembersView: React.FC = () => {
                   <div className="text-slate-500 dark:text-slate-400">{t('members.unpaid', 'Unpaid')} ({n(statementTotals.owedMonths)})</div>
                   <div className="font-black text-rose-700 dark:text-rose-400">{formatCurrency(statementTotals.owed)}</div>
                 </div>
+              </div>
+            )}
+
+            {statement?.member.status === 'Inactive' && settlement && (
+              <div className="px-4 py-3 border-b border-slate-200 dark:border-slate-800 bg-amber-50/60 dark:bg-amber-950/20 text-[11px] space-y-1">
+                <div className="font-bold text-slate-900 dark:text-white">{t('settle.record', 'Settled')} · {formatDate(settlement.settlement_date)} · {tv(settlement.payment_method)}</div>
+                <div className="flex justify-between"><span>{t('settle.principal', 'Member own money')}</span><b>{formatCurrency(settlement.principal)}</b></div>
+                <div className="flex justify-between"><span>{t('settle.share', 'Investment benefit share')}</span><b>{formatCurrency(settlement.profit_share)}</b></div>
+                <div className="flex justify-between text-emerald-800 dark:text-emerald-300"><span>{t('settle.total', 'Total paid to member')}</span><b>{formatCurrency(settlement.total_paid)}</b></div>
+                {settlement.note ? <div className="text-slate-500 dark:text-slate-400">{settlement.note}</div> : null}
+                {isAdmin && <button type="button" onClick={() => setConfirmCancelSettle(true)} className="btn btn-danger-outline btn-sm mt-1">{t('settle.cancel', 'Cancel settlement')}</button>}
               </div>
             )}
 
@@ -689,12 +716,11 @@ export const MembersView: React.FC = () => {
               <label className="form-label">{t('members.designation', 'Designation')}</label>
               <input type="text" value={form.designation} onChange={e => setField('designation', e.target.value)} className="form-input" />
             </div>
-            <SearchableSelect
-              label={t('common.status', 'Status')}
-              options={memberStatusOptions}
-              value={form.status}
-              onChange={v => setField('status', (v || 'Active') as MemberForm['status'])}
-            />
+            <div>
+              <label className="form-label">{t('common.status', 'Status')}</label>
+              <input type="text" readOnly value={tv(form.status)} className="form-input opacity-80 cursor-not-allowed"
+                title={t('members.status_locked', 'Use "Settle & deactivate" to make a member inactive.')} />
+            </div>
             <div>
               <label className="form-label">{t('common.monthly_due', 'Monthly due')} <span className="text-rose-500">*</span></label>
               <input
@@ -772,7 +798,7 @@ export const MembersView: React.FC = () => {
           <>
             <button type="button" onClick={() => setOfferInactive(null)} disabled={busy} className="btn btn-cancel">{t('common.cancel', 'Cancel')}</button>
             <button type="button" onClick={handleSetInactive} disabled={busy} className="btn btn-primary">
-              {busy ? t('common.saving', 'Saving...') : t('members.set_inactive', 'Set Inactive')}
+              {t('members.settle_first', 'Settle & deactivate')}
             </button>
           </>
         }
@@ -780,9 +806,21 @@ export const MembersView: React.FC = () => {
         {offerInactive && (
           <div className="space-y-2 text-xs text-slate-600 dark:text-slate-300 leading-relaxed">
             <p className="text-rose-700 dark:text-rose-300">{offerInactive.message}</p>
-            <p>{t('members.offer_inactive', 'Set this member to Inactive now?')}</p>
+            <p>{t('members.offer_inactive', 'To deactivate this member, record the final settlement (their money and investment benefit) first.')}</p>
           </div>
         )}
+      </Modal>
+
+      <SettleMemberModal member={settleFor} onClose={() => setSettleFor(null)}
+        onDone={() => { setSettleFor(null); triggerRefresh(); }} />
+
+      <Modal open={confirmCancelSettle} onClose={() => !busy && setConfirmCancelSettle(false)} locked={busy} size="sm" tone="danger"
+        icon={<AlertTriangle size={18} />} title={t('settle.cancel_title', 'Cancel this settlement?')}
+        footer={<>
+          <button type="button" onClick={() => setConfirmCancelSettle(false)} disabled={busy} className="btn btn-cancel">{t('common.cancel', 'Cancel')}</button>
+          <button type="button" onClick={handleCancelSettlement} disabled={busy} className="btn btn-danger">{t('settle.cancel_yes', 'Cancel settlement')}</button>
+        </>}>
+        <p className="text-xs text-slate-600 dark:text-slate-300 leading-relaxed">{t('settle.cancel_msg', 'The payout record is removed and the money counts as still in the fund. Use this only to correct a mistake. The member stays inactive until you reactivate them.')}</p>
       </Modal>
 
       {/* Bulk import modal */}

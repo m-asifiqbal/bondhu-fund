@@ -155,4 +155,5 @@ import membersDict from '../locales/members';
 import financeDict from '../locales/finance';
 import reportsDict from '../locales/reports';
 import adminDict from '../locales/admin';
-Object.assign(translations, commonDict, shellDict, membersDict, financeDict, reportsDict, adminDict);
+import returnsDict from '../locales/returns';
+Object.assign(translations, commonDict, shellDict, membersDict, financeDict, reportsDict, adminDict, returnsDict);

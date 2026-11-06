@@ -129,6 +129,8 @@ export const ReportsView: React.FC = () => {
     { value: 'collection', label: t('reports.collections_only', 'Collections only') },
     { value: 'expense', label: t('reports.expenses_only', 'Expenses only') },
     { value: 'investment', label: t('reports.investments_only', 'Investments only') },
+    { value: 'return', label: t('reports.returns_only', 'Investment profit / loss only') },
+    { value: 'settlement', label: t('reports.settlements_only', 'Member settlements only') },
   ], [t]);
   const statusOptions = useMemo(() => {
     const mk = (vals: string[]): SelectOption[] => vals.map(v => ({ value: v, label: tv(v) }));
@@ -316,7 +318,7 @@ export const ReportsView: React.FC = () => {
   const hasRows = !!data && (data.rows.length > 0 || extraTables.length > 0);
 
   return (
-    <div className="report-page p-8 space-y-6 max-w-7xl mx-auto">
+    <div className="report-page p-8 space-y-6 max-w-[1680px] mx-auto">
       {/* Header */}
       <div className="no-print flex flex-wrap items-center justify-between gap-4">
         <div className="min-w-0">

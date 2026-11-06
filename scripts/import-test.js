@@ -33,7 +33,7 @@ const ok = (c, m) => { console.log(`${c ? 'PASS' : 'FAIL'}  ${m}`); if (!c) fail
   ms.spliceRows(2, 3); // remove examples
   ms.addRow(['BF-0101', 'Rahim Uddin', 'রহিম উদ্দিন', '01711-111111', 'rahim@example.com', 'President', 'Active', 2000, new Date(Date.UTC(+m(-5).slice(0, 4), +m(-5).slice(5) - 1, 1)), 0, '']);
   ms.addRow(['', 'Karima Begum', 'করিমা বেগম', '০১৮১১-২২২২২২', '', 'Treasurer', 'সক্রিয়', '3,000', '১৫/০১/২০২৪', '24000', 'paid 24000 before app']);
-  ms.addRow(['BF-0103', 'Jamal Hossain', '', '', 'not-an-email', 'Member', 'Inactive', 2000, `01/${m(-3).slice(5)}/${m(-3).slice(0, 4)}`, 0, '']);
+  ms.addRow(['BF-0103', 'Jamal Hossain', '', '', 'not-an-email', 'Member', 'Active', 2000, `01/${m(-3).slice(5)}/${m(-3).slice(0, 4)}`, 0, '']);
   ms.addRow(['BF-0101', 'Duplicate Code', '', '', '', '', 'Active', 2000, '01/01/2024', 0, '']);   // duplicate code → error
   ms.addRow(['BF-0105', '', '', '', '', '', 'Active', 2000, '01/01/2024', 0, '']);                // no name → error
   ms.addRow(['BF-0106', 'Bad Date', '', '', '', '', 'Active', 2000, '31/02/2024', 0, '']);         // invalid date → error

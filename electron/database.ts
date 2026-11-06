@@ -17,7 +17,7 @@ import initSqlJs from 'sql.js';
 import type { Database, SqlJsStatic } from 'sql.js';
 import type { ParsedWorkbook } from './excel';
 
-export const SCHEMA_VERSION = 3;
+export const SCHEMA_VERSION = 4;
 
 let SQL: SqlJsStatic;
 let db: Database;
@@ -206,6 +206,25 @@ CREATE TABLE IF NOT EXISTS expenses (
   amount REAL NOT NULL, expense_date TEXT NOT NULL, payee TEXT, receipt_ref TEXT,
   status TEXT NOT NULL DEFAULT 'Verified', notes TEXT, created_by TEXT,
   created_at TEXT DEFAULT (datetime('now','localtime')));
+CREATE TABLE IF NOT EXISTS investment_returns (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  investment_id INTEGER NOT NULL REFERENCES investments(id),
+  entry_type TEXT NOT NULL CHECK (entry_type IN ('Profit','Loss')),
+  amount REAL NOT NULL CHECK (amount > 0),
+  entry_date TEXT NOT NULL, payment_method TEXT, reference TEXT, note TEXT, created_by TEXT,
+  created_at TEXT DEFAULT (datetime('now','localtime')));
+CREATE TABLE IF NOT EXISTS member_settlements (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  member_id INTEGER NOT NULL UNIQUE REFERENCES members(id),
+  settlement_date TEXT NOT NULL,
+  principal REAL NOT NULL,            -- opening balance + contributions (late fees are not refunded)
+  calc_profit_share REAL NOT NULL DEFAULT 0,  -- what the system calculated
+  profit_share REAL NOT NULL DEFAULT 0,       -- what was actually settled (negative = share of a loss)
+  total_paid REAL NOT NULL CHECK (total_paid >= 0),
+  payment_method TEXT NOT NULL, trx_id TEXT, note TEXT, created_by TEXT,
+  created_at TEXT DEFAULT (datetime('now','localtime')));
+CREATE INDEX IF NOT EXISTS idx_ret_inv ON investment_returns(investment_id);
+CREATE INDEX IF NOT EXISTS idx_ret_date ON investment_returns(entry_date);
 CREATE TABLE IF NOT EXISTS backup_logs (
   id INTEGER PRIMARY KEY AUTOINCREMENT, file_name TEXT NOT NULL, file_path TEXT NOT NULL,
   file_size INTEGER NOT NULL, backup_type TEXT NOT NULL,
@@ -525,8 +544,197 @@ function fundPosition(asOf = todayISO()) {
   const expenses = num('SELECT SUM(amount) FROM expenses WHERE expense_date <= ?', [asOf]);
   const realized = num(`SELECT SUM(sold_amount - invested_amount) FROM investments WHERE status='Sold' AND sold_date <= ?`, [asOf]);
   const investedAtCost = num(`SELECT SUM(invested_amount) FROM investments WHERE purchase_date <= ? AND NOT (status='Sold' AND sold_date <= ?)`, [asOf, asOf]);
-  const fundBalance = opening + collected - expenses + realized;
-  return { opening, collected, expenses, realized, investedAtCost, fundBalance, cashInHand: fundBalance - investedAtCost };
+  // investment benefits received (+) and losses booked (-), and money paid out to settled members
+  const returnsNet = num(`SELECT SUM(CASE entry_type WHEN 'Profit' THEN amount ELSE -amount END) FROM investment_returns WHERE entry_date <= ?`, [asOf]);
+  const settlements = num('SELECT SUM(total_paid) FROM member_settlements WHERE settlement_date <= ?', [asOf]);
+  const fundBalance = opening + collected - expenses + realized + returnsNet - settlements;
+  return { opening, collected, expenses, realized, returnsNet, settlements, investedAtCost, fundBalance, cashInHand: fundBalance - investedAtCost };
+}
+
+// ---------------------------------------------------------------------------
+// Member settlement (exit payout) — principal + the member's share of investment benefit
+// ---------------------------------------------------------------------------
+const r2 = (n: number) => Math.round((n + Number.EPSILON) * 100) / 100;
+
+/**
+ * Share of investment benefit for one member, from the date each benefit was earned.
+ * Every benefit event (profit entry, loss entry, realised gain/loss on a sale) is split between the members
+ * who were still in the fund on that date, in proportion to each member's principal (opening balance +
+ * contributions paid up to that date). A member only shares in events dated up to their settlement date.
+ */
+function memberBenefitShare(memberId: number, settleDate: string) {
+  type E = { date: string; amount: number; label: string };
+  const events: E[] = [
+    ...all(`SELECT r.entry_date AS date, CASE r.entry_type WHEN 'Profit' THEN r.amount ELSE -r.amount END AS amount, i.name AS label
+            FROM investment_returns r JOIN investments i ON i.id = r.investment_id WHERE r.entry_date <= ?`, [settleDate]),
+    ...all(`SELECT sold_date AS date, sold_amount - invested_amount AS amount, name AS label FROM investments
+            WHERE status = 'Sold' AND sold_date IS NOT NULL AND sold_date <= ?`, [settleDate]),
+  ].map(e => ({ date: String(e.date), amount: Number(e.amount) || 0, label: String(e.label) }));
+  events.sort((a, b) => a.date.localeCompare(b.date));
+
+  const members = all('SELECT id, opening_balance FROM members');
+  const pays = new Map<number, Array<{ d: string; a: number }>>();
+  for (const r of all('SELECT member_id, payment_date, contribution_amount FROM collections')) {
+    if (!pays.has(r.member_id)) pays.set(r.member_id, []);
+    pays.get(r.member_id)!.push({ d: String(r.payment_date), a: Number(r.contribution_amount) || 0 });
+  }
+  const settledOn = new Map<number, string>(all('SELECT member_id, settlement_date FROM member_settlements WHERE member_id != ?', [memberId])
+    .map(r => [Number(r.member_id), String(r.settlement_date)]));
+  settledOn.set(memberId, settleDate);
+  const principalAt = (id: number, opening: number, d: string) =>
+    opening + (pays.get(id) || []).reduce((s, p) => s + (p.d <= d ? p.a : 0), 0);
+
+  let total = 0;
+  const lines: Array<{ date: string; label: string; amount: number; share: number }> = [];
+  for (const ev of events) {
+    let mine = 0, all_ = 0;
+    for (const m of members) {
+      const sd = settledOn.get(Number(m.id));
+      if (sd !== undefined && sd < ev.date) continue;          // already paid out before this benefit existed
+      const p = principalAt(Number(m.id), Number(m.opening_balance) || 0, ev.date);
+      all_ += p;
+      if (Number(m.id) === memberId) mine = p;
+    }
+    const share = all_ > 0 ? (ev.amount * mine) / all_ : 0;
+    total += share;
+    if (Math.abs(share) >= 0.005) lines.push({ date: ev.date, label: ev.label, amount: ev.amount, share: r2(share) });
+  }
+  return { share: r2(total), lines };
+}
+
+/** Everything the settlement dialog needs: contributions, calculated profit share, suggested payout, cash check. */
+function previewMemberSettlement(memberId: number, settleDate?: string) {
+  const m = get('SELECT * FROM members WHERE id = ?', [Number(memberId)]);
+  if (!m) fail('Member not found.');
+  const existing = get('SELECT * FROM member_settlements WHERE member_id = ?', [m.id]);
+  const date = toISODate(settleDate) || existing?.settlement_date || todayISO();
+  const contributions = num('SELECT SUM(contribution_amount) FROM collections WHERE member_id = ?', [m.id]);
+  const lateFees = num('SELECT SUM(late_fee) FROM collections WHERE member_id = ?', [m.id]);
+  const lastPayment = get('SELECT MAX(payment_date) d FROM collections WHERE member_id = ?', [m.id])?.d || null;
+  const principal = r2(Number(m.opening_balance || 0) + contributions);
+  const calc = memberBenefitShare(m.id, date);
+  const pos = fundPosition('9999-12-31');
+  return {
+    member: { id: m.id, member_code: m.member_code, name: m.name, status: m.status, join_date: m.join_date },
+    settlementDate: date, existing: existing || null, lastPaymentDate: lastPayment,
+    openingBalance: Number(m.opening_balance || 0), contributions: r2(contributions), lateFeesKept: r2(lateFees),
+    principal, profitShare: calc.share, lines: calc.lines,
+    suggestedPayout: r2(Math.max(0, principal + calc.share)),
+    cashInHand: r2(pos.cashInHand),
+  };
+}
+
+/** Pays a member out and deactivates them — one atomic step. */
+function settleMember(d: any) {
+  const memberId = Number(d?.member_id);
+  const m = get('SELECT * FROM members WHERE id = ?', [memberId]);
+  if (!m) fail('Member not found.');
+  if (get('SELECT 1 FROM member_settlements WHERE member_id = ?', [memberId])) fail('This member already has a settlement. Cancel it first (Admin) to redo it.');
+  if (m.status !== 'Active') fail('Only an active member can be settled.');
+  const date = toISODate(d.settlement_date) || todayISO();
+  if (date > todayISO()) fail('Settlement date cannot be in the future.');
+  const prev = previewMemberSettlement(memberId, date);
+  if (prev.lastPaymentDate && date < prev.lastPaymentDate) fail(`Settlement date cannot be before the member's last payment (${prev.lastPaymentDate}).`);
+  if (date < String(m.join_date)) fail('Settlement date cannot be before the join date.');
+  const method = String(d.payment_method || '').trim();
+  if (!method) fail('Choose the medium the money was paid through (cash, bank, bKash…).');
+  const calc = prev.profitShare;
+  const share = d.profit_share === undefined || d.profit_share === '' || d.profit_share === null ? calc : r2(Number(d.profit_share));
+  if (!Number.isFinite(share)) fail('Profit share must be a number.');
+  const note = String(d.note || '').trim();
+  if (Math.abs(share - calc) > 0.009 && !note) fail('You changed the calculated profit share — please write the reason in the note.');
+  const total = r2(prev.principal + share);
+  if (total < 0) fail('The payout cannot be negative. The loss share is larger than the member\'s principal.');
+  const id = tx(() => {
+    run(`INSERT INTO member_settlements (member_id, settlement_date, principal, calc_profit_share, profit_share, total_paid, payment_method, trx_id, note, created_by)
+         VALUES (?,?,?,?,?,?,?,?,?,?)`,
+      [memberId, date, prev.principal, calc, share, total, method, String(d.trx_id || '').trim(), note, actor]);
+    const sid = lastId();
+    run(`UPDATE members SET status = 'Inactive', updated_at = datetime('now','localtime') WHERE id = ?`, [memberId]);
+    audit('settle', 'member', memberId, `${m.member_code} paid ${total} (principal ${prev.principal}, share ${share}) via ${method} on ${date}`);
+    return sid;
+  });
+  mutated();
+  return id;
+}
+
+function getMemberSettlements() {
+  return all(`SELECT s.*, m.member_code, m.name AS member_name, m.name_bn AS member_name_bn, m.avatar_initials
+              FROM member_settlements s JOIN members m ON m.id = s.member_id ORDER BY s.settlement_date DESC, s.id DESC`);
+}
+
+/** Admin only: removes a settlement record (to correct a mistake). The member stays Inactive until reactivated. */
+function cancelSettlement(memberId: number) {
+  const s = get('SELECT s.*, m.member_code FROM member_settlements s JOIN members m ON m.id=s.member_id WHERE s.member_id = ?', [Number(memberId)]);
+  if (!s) fail('No settlement found for this member.');
+  tx(() => {
+    run('DELETE FROM member_settlements WHERE member_id = ?', [Number(memberId)]);
+    audit('void', 'settlement', Number(memberId), `${s.member_code} cancelled settlement of ${s.total_paid}`);
+  });
+  mutated();
+}
+
+// ---------------------------------------------------------------------------
+// Investment returns (profit / loss entries)
+// ---------------------------------------------------------------------------
+function getInvestmentReturns(investmentId?: number, startDate?: string, endDate?: string) {
+  const where: string[] = []; const params: any[] = [];
+  if (investmentId) { where.push('r.investment_id = ?'); params.push(Number(investmentId)); }
+  const s = toISODate(startDate), e = toISODate(endDate);
+  if (s) { where.push('r.entry_date >= ?'); params.push(s); }
+  if (e) { where.push('r.entry_date <= ?'); params.push(e); }
+  return all(`SELECT r.*, i.name AS investment_name, i.sector FROM investment_returns r JOIN investments i ON i.id = r.investment_id
+              ${where.length ? 'WHERE ' + where.join(' AND ') : ''} ORDER BY r.entry_date DESC, r.id DESC`, params);
+}
+
+function getReturnsSummary() {
+  const row = get(`SELECT COALESCE(SUM(CASE entry_type WHEN 'Profit' THEN amount END),0) profit, COALESCE(SUM(CASE entry_type WHEN 'Loss' THEN amount END),0) loss,
+                          COUNT(*) n FROM investment_returns`) || {};
+  const byInv = all(`SELECT i.id, i.name, i.sector, i.invested_amount,
+      COALESCE(SUM(CASE r.entry_type WHEN 'Profit' THEN r.amount END),0) profit, COALESCE(SUM(CASE r.entry_type WHEN 'Loss' THEN r.amount END),0) loss
+      FROM investments i JOIN investment_returns r ON r.investment_id = i.id GROUP BY i.id ORDER BY (profit - loss) DESC`)
+    .map(r => ({ ...r, net: r2(Number(r.profit) - Number(r.loss)) }));
+  const year = String(todayISO()).slice(0, 4);
+  const yr = get(`SELECT COALESCE(SUM(CASE entry_type WHEN 'Profit' THEN amount ELSE -amount END),0) v FROM investment_returns WHERE substr(entry_date,1,4) = ?`, [year]);
+  return { profit: Number(row.profit) || 0, loss: Number(row.loss) || 0, net: r2((Number(row.profit) || 0) - (Number(row.loss) || 0)), entries: Number(row.n) || 0, yearNet: Number(yr?.v) || 0, byInvestment: byInv };
+}
+
+function validateReturn(d: any) {
+  const inv = get('SELECT id, purchase_date FROM investments WHERE id = ?', [Number(d?.investment_id)]);
+  if (!inv) fail('Please choose the investment this entry belongs to.');
+  if (!['Profit', 'Loss'].includes(d.entry_type)) fail('Choose Profit or Loss.');
+  const amount = Number(d.amount);
+  if (!(amount > 0)) fail('Amount must be greater than zero.');
+  const date = toISODate(d.entry_date) || todayISO();
+  if (date > todayISO()) fail('Entry date cannot be in the future.');
+  if (date < String(inv.purchase_date)) fail(`Entry date cannot be before the investment was made (${inv.purchase_date}).`);
+  if (d.entry_type === 'Profit' && !String(d.payment_method || '').trim()) fail('Choose the medium the benefit was received through (cash, bank, bKash…).');
+  // a back-dated entry would change what an already-settled member should have received
+  const lateSettle = get('SELECT MAX(settlement_date) d FROM member_settlements')?.d;
+  if (lateSettle && date <= lateSettle) fail(`A member was already settled on ${lateSettle}. Benefit or loss entries must be dated after the latest settlement.`);
+  return { amount: r2(amount), date };
+}
+
+function addInvestmentReturn(d: any) {
+  const v = validateReturn(d);
+  const id = tx(() => {
+    run(`INSERT INTO investment_returns (investment_id, entry_type, amount, entry_date, payment_method, reference, note, created_by) VALUES (?,?,?,?,?,?,?,?)`,
+      [Number(d.investment_id), d.entry_type, v.amount, v.date, String(d.payment_method || '').trim(), String(d.reference || '').trim(), String(d.note || '').trim(), actor]);
+    const nid = lastId();
+    audit('create', 'investment_return', nid, `${d.entry_type} ${v.amount} on investment #${d.investment_id}`);
+    return nid;
+  });
+  mutated();
+  return id;
+}
+
+function deleteInvestmentReturn(id: number) {
+  const r = get('SELECT * FROM investment_returns WHERE id = ?', [Number(id)]);
+  if (!r) fail('Entry not found.');
+  const settledAfter = get('SELECT 1 FROM member_settlements WHERE settlement_date >= ?', [r.entry_date]);
+  if (settledAfter) fail('A member has already been settled on or after this entry\'s date, so it cannot be removed. Cancel that settlement first (Admin).');
+  tx(() => { run('DELETE FROM investment_returns WHERE id = ?', [Number(id)]); audit('void', 'investment_return', Number(id), `${r.entry_type} ${r.amount}`); });
+  mutated();
 }
 
 // ---------------------------------------------------------------------------
@@ -637,6 +845,14 @@ function updateMember(id: number, d: any) {
   };
   const keys = Object.keys(fields).filter(k => fields[k] !== undefined);
   if (!keys.length) return;
+  const cur = get('SELECT status, opening_balance FROM members WHERE id = ?', [id]);
+  const settled = !!get('SELECT 1 FROM member_settlements WHERE member_id = ?', [id]);
+  if (d.status !== undefined && d.status !== cur.status) {
+    if (d.status === 'Inactive') fail('A member cannot be made inactive directly. Use "Settle & deactivate" so the final payout is recorded first.');
+    if (d.status === 'Active' && settled) fail('This member has been settled and paid out. An Admin must cancel the settlement before the member can be reactivated.');
+  }
+  if (settled && fields.opening_balance !== undefined && Math.abs(fields.opening_balance - Number(cur.opening_balance)) > 0.009)
+    fail('The opening balance cannot be changed after the member has been settled.');
   tx(() => {
     run(`UPDATE members SET ${keys.map(k => `${k} = ?`).join(', ')}, updated_at = datetime('now','localtime') WHERE id = ?`,
       [...keys.map(k => fields[k]), id]);
@@ -647,6 +863,7 @@ function updateMember(id: number, d: any) {
 
 function deleteMember(id: number) {
   const payments = num('SELECT COUNT(*) FROM collections WHERE member_id = ?', [id]);
+  if (get('SELECT 1 FROM member_settlements WHERE member_id = ?', [id])) fail('This member has a settlement record, so the member cannot be deleted.');
   if (payments > 0) fail(`This member has ${payments} payment record(s). Set the member to Inactive instead, so the fund history stays correct.`);
   tx(() => {
     const m = get('SELECT member_code, name FROM members WHERE id = ?', [id]);
@@ -721,7 +938,7 @@ function planImport(p: ParsedWorkbook, opts: ImportOptions = {}) {
   const today = todayISO();
   const curM = currentMonthKey();
   const defDue = Number(s.default_monthly_due) || 0;
-  const dbMembers = all('SELECT id, member_code, name, monthly_due, join_date FROM members');
+  const dbMembers = all('SELECT id, member_code, name, monthly_due, join_date, status, opening_balance FROM members');
   const dbByCode = new Map(dbMembers.map(m => [String(m.member_code).toLowerCase(), m]));
   const dbByName = new Map<string, Row[]>();
   for (const m of dbMembers) {
@@ -765,6 +982,15 @@ function planImport(p: ParsedWorkbook, opts: ImportOptions = {}) {
     const action: 'new' | 'update' | 'skip' = existing ? (existingMode === 'update' ? 'update' : 'skip') : 'new';
     if (existing && action === 'skip') msgs.push({ level: 'warning', text: `${code} already exists — details not changed (choose "Update existing members" to apply changes)` });
     if (!existing && !code) { code = getNextMemberCode(reservedCodes); reservedCodes.push(code); }
+    // an exit must go through a recorded settlement — an import may not deactivate / reactivate / re-base anyone
+    if (!existing && status === 'Inactive') msgs.push({ level: 'error', text: 'New members must be imported as Active. Use Settle & deactivate in the app when someone leaves.' });
+    if (existing && action === 'update') {
+      const settled = !!get('SELECT 1 FROM member_settlements WHERE member_id = ?', [Number(existing.id)]);
+      if (statusRaw && status && status !== existing.status) {
+        msgs.push({ level: 'error', text: status === 'Inactive' ? 'A member cannot be made inactive by import. Use Settle & deactivate in the app.' : settled ? 'This member was settled; an Admin must cancel the settlement before reactivating.' : 'Status change not allowed here.' });
+      }
+      if (settled && m.opening_balance !== null && Math.abs(m.opening_balance - Number(existing.opening_balance)) > 0.009) msgs.push({ level: 'error', text: 'Opening balance cannot change after settlement' });
+    }
     const level: Level = msgs.some(x => x.level === 'error') ? 'error' : msgs.length ? 'warning' : 'ok';
     return {
       row: m.row, code, name, name_bn: m.name_bn, phone: m.phone, email: m.email, designation: m.designation || 'Member',
@@ -971,8 +1197,9 @@ function getCollections(month?: string, statusTab = 'All', startDate?: string, e
 
 function recordPayment(d: any) {
   const memberId = Number(d?.member_id);
-  const member = get('SELECT id, name, member_code, monthly_due FROM members WHERE id = ?', [memberId]);
+  const member = get('SELECT id, name, member_code, monthly_due, status FROM members WHERE id = ?', [memberId]);
   if (!member) fail('Please select a valid member.');
+  if (member.status !== 'Active') fail(`${member.name} is inactive. Payments can only be recorded for active members.`);
   const mk = toMonthKey(d.payment_month);
   if (!mk) fail('Please select the month this payment is for.');
   const contribution = Number(d.contribution_amount);
@@ -1001,6 +1228,7 @@ function recordPayment(d: any) {
 function deletePayment(id: number) {
   const p = get('SELECT c.*, m.member_code FROM collections c JOIN members m ON m.id=c.member_id WHERE c.id = ?', [id]);
   if (!p) fail('Payment not found.');
+  if (get('SELECT 1 FROM member_settlements WHERE member_id = ?', [p.member_id])) fail('This member has been settled, so their payments can no longer be changed.');
   tx(() => {
     run('DELETE FROM collections WHERE id = ?', [id]);
     audit('void', 'collection', id, `${p.member_code} ${p.payment_month} ${p.total_amount}`);
@@ -1076,6 +1304,13 @@ function updateInvestment(id: number, d: any) {
   if (f.status && f.status !== 'Sold' && cur.status === 'Sold') { f.sold_amount = null; f.sold_date = null; }
   const keys = Object.keys(f).filter(k => f[k] !== undefined);
   if (!keys.length) return;
+  // realised gain/loss feeds member settlements — don't let a sale be rewritten after a member was paid out on it
+  const touchesSale = ['status', 'sold_date', 'sold_amount', 'invested_amount'].some(k => f[k] !== undefined && f[k] !== cur[k]);
+  if (touchesSale && (cur.status === 'Sold' || f.status === 'Sold')) {
+    const when = [cur.sold_date, f.sold_date].filter(Boolean).sort()[0] || todayISO();
+    if (get('SELECT 1 FROM member_settlements WHERE settlement_date >= ?', [when]))
+      fail('A member was settled on or after this sale date, so the sale cannot be changed. Cancel that settlement first (Admin).');
+  }
   tx(() => {
     run(`UPDATE investments SET ${keys.map(k => `${k} = ?`).join(', ')}, updated_at = datetime('now','localtime') WHERE id = ?`, [...keys.map(k => f[k]), id]);
     audit('update', 'investment', id, keys.join(', '));
@@ -1089,6 +1324,11 @@ function updateInvestmentValuation(id: number, value: number) {
 }
 
 function deleteInvestment(id: number) {
+  const n = num('SELECT COUNT(*) FROM investment_returns WHERE investment_id = ?', [id]);
+  if (n > 0) fail(`This investment has ${n} profit/loss entr${n === 1 ? 'y' : 'ies'}. Remove those entries first so the fund history stays correct.`);
+  const inv = get('SELECT status, sold_date FROM investments WHERE id = ?', [id]);
+  if (inv?.status === 'Sold' && get('SELECT 1 FROM member_settlements WHERE settlement_date >= ?', [inv.sold_date]))
+    fail('This sale was shared with settled members and cannot be deleted.');
   tx(() => { run('DELETE FROM investments WHERE id = ?', [id]); audit('delete', 'investment', id); });
   mutated();
 }
@@ -1363,7 +1603,7 @@ function validateNewPassword(p: string, username: string) {
 // Permission model -----------------------------------------------------------------------
 const PUBLIC = new Set(['login', 'getSession', 'getAppSettings']);
 const UPLOAD = new Set(['bulkAddMembers']);                          // + Excel import IPC (main.ts)
-const ADMIN = new Set(['addUser', 'deleteUser', 'setUserPassword', 'saveAppSettings', 'resetDatabase', 'loadDemoData',
+const ADMIN = new Set(['cancelSettlement', 'addUser', 'deleteUser', 'setUserPassword', 'saveAppSettings', 'resetDatabase', 'loadDemoData',
   'addMasterItem', 'updateMasterItem', 'deleteMasterItem']);
 const READ = /^(get|suggest|preview|export)/;
 
@@ -1524,6 +1764,9 @@ function getOverviewData(month?: string) {
       SELECT 'collection' AS kind, c.id, m.name || ' paid ' || c.payment_month AS title, c.payment_method AS sub, c.total_amount AS amount, c.payment_date AS date, c.created_at FROM collections c JOIN members m ON m.id=c.member_id
       UNION ALL SELECT 'expense', id, title, category, -amount, expense_date, created_at FROM expenses
       UNION ALL SELECT 'investment', id, name, sector, -invested_amount, purchase_date, created_at FROM investments
+      UNION ALL SELECT 'return', r.id, i.name || CASE r.entry_type WHEN 'Profit' THEN ' benefit received' ELSE ' loss booked' END, i.sector,
+                CASE r.entry_type WHEN 'Profit' THEN r.amount ELSE -r.amount END, r.entry_date, r.created_at FROM investment_returns r JOIN investments i ON i.id = r.investment_id
+      UNION ALL SELECT 'settlement', s.id, m.name || ' settled', s.payment_method, -s.total_paid, s.settlement_date, s.created_at FROM member_settlements s JOIN members m ON m.id = s.member_id
       UNION ALL SELECT 'member', id, name || ' joined', member_code, 0, join_date, created_at FROM members
     ) ORDER BY date DESC, created_at DESC LIMIT 10`);
 
@@ -1593,6 +1836,17 @@ function getTransactions(startDate?: string, endDate?: string, type = 'All') {
     parts.push(`SELECT 'sale', sold_date, name, 'Investment sold: ' || sector, '', '', sold_amount, 0 FROM investments WHERE status='Sold' AND sold_date BETWEEN ? AND ?`);
     params.push(s, e, s, e);
   }
+  if (type === 'All' || type === 'return') {
+    parts.push(`SELECT 'return', r.entry_date, i.name, r.entry_type || ' from investment' || CASE WHEN r.note != '' THEN ': ' || r.note ELSE '' END, r.payment_method, r.reference,
+                CASE r.entry_type WHEN 'Profit' THEN r.amount ELSE 0 END, CASE r.entry_type WHEN 'Loss' THEN r.amount ELSE 0 END
+                FROM investment_returns r JOIN investments i ON i.id = r.investment_id WHERE r.entry_date BETWEEN ? AND ?`);
+    params.push(s, e);
+  }
+  if (type === 'All' || type === 'settlement') {
+    parts.push(`SELECT 'settlement', s.settlement_date, m.member_code || ' ' || m.name, 'Member settlement (principal ' || s.principal || ', share ' || s.profit_share || ')',
+                s.payment_method, s.trx_id, 0, s.total_paid FROM member_settlements s JOIN members m ON m.id = s.member_id WHERE s.settlement_date BETWEEN ? AND ?`);
+    params.push(s, e);
+  }
   if (!parts.length) return [];
   return all(`${parts.join(' UNION ALL ')} ORDER BY date, type`, params);
 }
@@ -1638,6 +1892,7 @@ function getDatabaseStats() {
   return {
     schemaVersion: num('PRAGMA user_version'),
     members: c('members'), collections: c('collections'), investments: c('investments'), expenses: c('expenses'),
+    returns: c('investment_returns'), settlements: c('member_settlements'),
     users: c('users'), masterData: c('master_data'), auditEntries: c('audit_log'),
   };
 }
@@ -1645,9 +1900,9 @@ function getDatabaseStats() {
 /** Wipes business data. keepSetup keeps users, master data and settings. */
 function resetDatabase(keepSetup = true) {
   tx(() => {
-    for (const t of ['collections', 'members', 'investments', 'expenses']) run(`DELETE FROM ${t}`);
+    for (const t of ['member_settlements', 'investment_returns', 'collections', 'members', 'investments', 'expenses']) run(`DELETE FROM ${t}`);
     if (!keepSetup) { run('DELETE FROM master_data'); run('DELETE FROM users'); run('DELETE FROM app_settings'); }
-    run(`DELETE FROM sqlite_sequence WHERE name IN ('collections','members','investments','expenses')`);
+    run(`DELETE FROM sqlite_sequence WHERE name IN ('member_settlements','investment_returns','collections','members','investments','expenses')`);
     audit('reset', 'database', null, keepSetup ? 'business data cleared' : 'factory reset');
   });
   ensureDefaults();
@@ -1722,6 +1977,26 @@ function checkAccountingHealth() {
   add('inv_sector', 'Investment sectors exist in master data', 'warn',
     all(`SELECT DISTINCT sector FROM investments WHERE sector NOT IN (SELECT name FROM master_data WHERE type='investment_sector')`), r => String(r.sector));
 
+  // investment returns & member settlements
+  add('ret_values', 'Investment profit/loss entries are valid', 'fail',
+    all(`SELECT r.id, i.name, r.entry_type, r.amount, r.entry_date FROM investment_returns r LEFT JOIN investments i ON i.id = r.investment_id
+         WHERE i.id IS NULL OR r.amount <= 0 OR NOT ${iso('r.entry_date')} OR r.entry_date > ? OR r.entry_date < i.purchase_date`, [today]),
+    r => `#${r.id} ${r.name ?? 'missing investment'}: ${r.entry_type} ${r.amount} on "${r.entry_date}"`);
+  add('set_missing', 'Inactive members have a recorded settlement', 'warn',
+    all(`SELECT m.member_code, m.name FROM members m WHERE m.status = 'Inactive' AND NOT EXISTS (SELECT 1 FROM member_settlements s WHERE s.member_id = m.id)`),
+    r => `${r.member_code} ${r.name}: inactive but no settlement (payout) was recorded`);
+  add('set_active', 'Settled members are inactive', 'fail',
+    all(`SELECT m.member_code, m.name FROM members m JOIN member_settlements s ON s.member_id = m.id WHERE m.status != 'Inactive'`),
+    r => `${r.member_code} ${r.name}: has a settlement but is not inactive`);
+  const badSet: Row[] = [];
+  for (const s of all('SELECT s.*, m.member_code FROM member_settlements s JOIN members m ON m.id = s.member_id')) {
+    const principal = r2(num('SELECT COALESCE(SUM(contribution_amount),0) FROM collections WHERE member_id = ?', [s.member_id]) + num('SELECT opening_balance FROM members WHERE id = ?', [s.member_id]));
+    if (Math.abs(principal - Number(s.principal)) > 0.01) badSet.push({ t: `${s.member_code}: recorded principal ${s.principal} but contributions now total ${principal}` });
+    if (Math.abs(Number(s.principal) + Number(s.profit_share) - Number(s.total_paid)) > 0.01) badSet.push({ t: `${s.member_code}: principal ${s.principal} + share ${s.profit_share} ≠ paid ${s.total_paid}` });
+    if (get('SELECT 1 FROM collections WHERE member_id = ? AND payment_date > ?', [s.member_id, s.settlement_date])) badSet.push({ t: `${s.member_code}: payments exist after the settlement date` });
+  }
+  add('set_math', 'Member settlements add up', 'fail', badSet, r => r.t);
+
   // settings
   const st = settingsMap();
   const badSettings: Row[] = [];
@@ -1734,8 +2009,11 @@ function checkAccountingHealth() {
   const pos = fundPosition('9999-12-31');
   const opening = num('SELECT COALESCE(SUM(opening_balance),0) FROM members');
   const credits = num('SELECT COALESCE(SUM(total_amount),0) FROM collections')
-    + num(`SELECT COALESCE(SUM(sold_amount),0) FROM investments WHERE status='Sold'`);
-  const debits = num('SELECT COALESCE(SUM(amount),0) FROM expenses') + num('SELECT COALESCE(SUM(invested_amount),0) FROM investments');
+    + num(`SELECT COALESCE(SUM(sold_amount),0) FROM investments WHERE status='Sold'`)
+    + num(`SELECT COALESCE(SUM(amount),0) FROM investment_returns WHERE entry_type='Profit'`);
+  const debits = num('SELECT COALESCE(SUM(amount),0) FROM expenses') + num('SELECT COALESCE(SUM(invested_amount),0) FROM investments')
+    + num(`SELECT COALESCE(SUM(amount),0) FROM investment_returns WHERE entry_type='Loss'`)
+    + num('SELECT COALESCE(SUM(total_paid),0) FROM member_settlements');
   const ledgerCash = opening + credits - debits;
   const diff = Math.round((ledgerCash - pos.cashInHand) * 100) / 100;
   checks.push({ id: 'reconcile', title: 'Cash book reconciles with cash in hand', status: Math.abs(diff) < 0.01 ? 'pass' : 'fail',
@@ -1816,6 +2094,25 @@ function loadDemoData() {
            VALUES (?,?,?,?,?,?,?,?,?,?)`,
         [n, sec, pdate, a, v, st, st === 'Review' ? todayISO(new Date(Date.now() + 12 * 864e5)) : null, loc, 'Demo', `${pdate} 11:00:00`]);
     }
+    // benefit / loss entries and one member exit (so the demo shows settlements correctly)
+    const invId = (n: string) => num('SELECT id FROM investments WHERE name = ?', [n]);
+    const retRows: Array<[string, string, number, string, string]> = [
+      ['Sonali Bank FDR', 'Profit', 2400, `${addMonths(cur, -2)}-05`, 'Bank transfer'],
+      ['Sonali Bank FDR', 'Profit', 2600, `${addMonths(cur, -1)}-05`, 'Bank transfer'],
+      ['Mirpur Commercial Flat', 'Profit', 9000, `${addMonths(cur, -1)}-08`, 'Cash'],
+      ['Uttara Plot 7B', 'Loss', 3500, `${addMonths(cur, -1)}-12`, ''],
+    ];
+    for (const [n, t, a, d, pm] of retRows) {
+      run(`INSERT INTO investment_returns (investment_id, entry_type, amount, entry_date, payment_method, note, created_by) VALUES (?,?,?,?,?,?,?)`,
+        [invId(n), t, a, d, pm, t === 'Profit' ? 'Periodic benefit' : 'Valuation loss', 'Demo']);
+    }
+    const exitM = get(`SELECT id, member_code, opening_balance FROM members WHERE status = 'Inactive'`);
+    if (exitM) {
+      const principal = r2(Number(exitM.opening_balance) + num('SELECT SUM(contribution_amount) FROM collections WHERE member_id = ?', [exitM.id]));
+      const last = get('SELECT MAX(payment_date) d FROM collections WHERE member_id = ?', [exitM.id])?.d || todayISO();
+      run(`INSERT INTO member_settlements (member_id, settlement_date, principal, calc_profit_share, profit_share, total_paid, payment_method, note, created_by)
+           VALUES (?,?,?,?,?,?,?,?,?)`, [exitM.id, last, principal, 0, 0, principal, 'Bank transfer', 'Left the fund', 'Demo']);
+    }
     const cats = ['Meetup & Events', 'Office & Supplies', 'Legal & Documentation', 'Bank Charges', 'Maintenance', 'Emergency Support'];
     for (let k = start; k <= cur; k = addMonths(k, 1)) {
       const n = 1 + Math.floor(rnd() * 3);
@@ -1843,6 +2140,8 @@ export const api: Record<string, (...args: any[]) => any> = {
   getMembers, getAllMembersLite, addMember, updateMember, deleteMember, getMemberHistory, getMemberStatement, bulkAddMembers, getNextMemberCode,
   getCollections, recordPayment, deletePayment, suggestLateFee,
   getInvestments, addInvestment, updateInvestment, updateInvestmentValuation, deleteInvestment,
+  getInvestmentReturns, getReturnsSummary, addInvestmentReturn, deleteInvestmentReturn,
+  previewMemberSettlement, settleMember, getMemberSettlements, cancelSettlement,
   getExpenses, addExpense, updateExpense, verifyExpenseReceipt, deleteExpense,
   getUsers, getUserProfile, addUser, updateUser, deleteUser,
   login, logout, getSession, changeOwnPassword, setUserPassword, checkAccountingHealth,

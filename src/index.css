@@ -274,3 +274,43 @@ html[lang="bn"] body { font-family: 'Noto Sans Bengali', 'Inter', system-ui, san
 /* Letter-spacing splits Bangla conjuncts and vowel signs apart; uppercase does nothing for Bangla. */
 html[lang="bn"] body * { letter-spacing: normal !important; }
 html[lang="bn"] body :where(p, span, label, td, th, li, button, h1, h2, h3, h4) { line-height: 1.55; }
+
+/* ---- Compact table density (un-layered so it wins over utilities) ------------- */
+/* Row actions: small square buttons with a soft 2dp elevation */
+.btn-act, main table .btn-icon {
+  width: 1.75rem; height: 1.75rem; min-width: 1.75rem; padding: 0; border-radius: .55rem;
+  box-shadow: 0 2px 2px rgba(15, 23, 42, .12), 0 3px 1px -2px rgba(15, 23, 42, .10), 0 1px 5px rgba(15, 23, 42, .16);
+}
+.dark .btn-act, .dark main table .btn-icon { box-shadow: 0 2px 2px rgba(0, 0, 0, .35), 0 3px 1px -2px rgba(0, 0, 0, .3), 0 1px 5px rgba(0, 0, 0, .4); }
+.btn-act:not(:disabled):hover, main table .btn-icon:not(:disabled):hover {
+  box-shadow: 0 4px 6px -1px rgba(15, 23, 42, .18), 0 2px 4px -2px rgba(15, 23, 42, .14);
+}
+.btn-act svg, main table .btn-icon svg { width: 13px; height: 13px; }
+/* Segmented tabs: slightly wider pills, same height */
+.seg-btn { padding-left: 1.4rem; padding-right: 1.4rem; min-width: 5.25rem; }
+.seg-sm .seg-btn { padding-left: 1.1rem; padding-right: 1.1rem; min-width: 4.25rem; }
+/* Confirmation dialog buttons: 2px shorter */
+.modal-footer-confirm .btn { height: calc(2.5rem - 2px); }
+
+/* ---- Sidebar navigation: gliding selection pill ------------------------------ */
+.nav-ind {
+  position: absolute; left: .75rem; right: .75rem; top: 0; border-radius: .8rem; pointer-events: none; z-index: 0;
+  background: linear-gradient(135deg, #3aae86 0%, #2f9e78 100%);           /* light green, day */
+  box-shadow: 0 6px 14px -6px rgba(47, 158, 120, .65), inset 0 1px 0 rgba(255, 255, 255, .28);
+  will-change: transform, height;
+}
+.nav-ind-anim { transition: transform .45s var(--bf-ease), height .3s var(--bf-ease), opacity .2s ease; }
+.dark .nav-ind { background: #ffffff; box-shadow: 0 6px 16px -6px rgba(0, 0, 0, .6), 0 0 0 1px rgba(255, 255, 255, .5); }  /* white, night */
+.nav-item { transition: color .22s ease, background-color .2s ease, transform .2s var(--bf-ease); }
+.nav-item:not(.nav-item-active):hover { background: rgba(47, 158, 120, .09); color: #0f172a; transform: translateX(3px); }
+.dark .nav-item:not(.nav-item-active):hover { background: rgba(255, 255, 255, .07); color: #fff; }
+.nav-item:not(.nav-item-active):active { transform: translateX(1px) scale(.98); }
+.nav-item-active { color: #fff; }                                      /* white text on light green, day */
+.dark .nav-item-active { color: #0f8a63; }                             /* light-green text on white, night */
+.nav-icon { transition: transform .3s var(--bf-ease); }
+.nav-item:hover .nav-icon { transform: scale(1.12); }
+.nav-item-active .nav-icon { animation: nav-icon-pop .45s var(--bf-ease); }
+@keyframes nav-icon-pop { 0% { transform: scale(.7) rotate(-12deg); } 60% { transform: scale(1.22) rotate(4deg); } 100% { transform: scale(1) rotate(0); } }
+.nav-item-active > span { animation: nav-label-in .35s var(--bf-ease); }
+@keyframes nav-label-in { from { opacity: .4; transform: translateX(-6px); } to { opacity: 1; transform: none; } }
+@media (prefers-reduced-motion: reduce) { .nav-ind-anim, .nav-item, .nav-icon { transition: none !important; } .nav-item-active .nav-icon, .nav-item-active > span { animation: none; } }

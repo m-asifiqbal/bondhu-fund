@@ -193,7 +193,7 @@ export const UserProfileView: React.FC = () => {
   // ---------------------------------------------------------------- states
   if (loading && !profile) {
     return (
-      <div className="p-6 lg:p-8 max-w-7xl mx-auto space-y-6 animate-pulse">
+      <div className="p-6 lg:p-8 max-w-[1680px] mx-auto space-y-6 animate-pulse">
         <div className="card-base h-56" />
         <div className="grid grid-cols-2 lg:grid-cols-5 gap-4">{[0, 1, 2, 3, 4].map(i => <div key={i} className="card-base h-24" />)}</div>
         <div className="card-base h-64" />
@@ -238,7 +238,7 @@ export const UserProfileView: React.FC = () => {
   const btnPrimary = 'btn btn-primary';
 
   return (
-    <div className="p-6 lg:p-8 space-y-6 max-w-7xl mx-auto text-xs">
+    <div className="p-6 lg:p-8 space-y-6 max-w-[1680px] mx-auto text-xs">
       {/* Hero */}
       <div className="card-base overflow-hidden">
         <div className="h-28 bg-gradient-to-r from-emerald-700 via-teal-700 to-slate-800 dark:from-emerald-900 dark:via-teal-900 dark:to-slate-900 relative">

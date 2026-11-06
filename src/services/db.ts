@@ -9,7 +9,7 @@
 import type {
   Member, CollectionRecord, Investment, Expense, AppUser, MasterCategory, BackupRecord,
   OverviewMetrics, AppSettings, AppNotification, OverviewData, MemberStats, CollectionStats,
-  LedgerRow, AuditEntry, SnapshotFile, AppInfo, MemberStatement, UserProfile, ImportOptions, ImportPreview, ImportResult, SessionInfo, HealthReport,
+  LedgerRow, AuditEntry, InvestmentReturn, ReturnsSummary, SettlementPreview, MemberSettlement, SnapshotFile, AppInfo, MemberStatement, UserProfile, ImportOptions, ImportPreview, ImportResult, SessionInfo, HealthReport,
 } from '../types';
 
 type Result<T> = { ok: true; data: T } | { ok: false; error: string };
@@ -198,3 +198,15 @@ export const changeOwnPassword = (current: string, next: string) => call<void>('
 /** Admin only; not allowed for the protected iqbal_labs account. */
 export const setUserPassword = (userId: number, next: string) => call<void>('setUserPassword', userId, next);
 export const checkAccountingHealth = () => call<HealthReport>('checkAccountingHealth');
+// Investment returns & member settlements ---------------------------------------
+export const getInvestmentReturns = (investmentId?: number, startDate?: string, endDate?: string) =>
+  call<InvestmentReturn[]>('getInvestmentReturns', investmentId, startDate, endDate);
+export const getReturnsSummary = () => call<ReturnsSummary>('getReturnsSummary');
+export const addInvestmentReturn = (d: { investment_id: number; entry_type: 'Profit' | 'Loss'; amount: number; entry_date: string; payment_method?: string; reference?: string; note?: string }) =>
+  call<number>('addInvestmentReturn', d);
+export const deleteInvestmentReturn = (id: number) => call<void>('deleteInvestmentReturn', id);
+export const previewMemberSettlement = (memberId: number, date?: string) => call<SettlementPreview>('previewMemberSettlement', memberId, date);
+export const settleMember = (d: { member_id: number; settlement_date: string; payment_method: string; profit_share?: number; trx_id?: string; note?: string }) =>
+  call<number>('settleMember', d);
+export const getMemberSettlements = () => call<MemberSettlement[]>('getMemberSettlements');
+export const cancelSettlement = (memberId: number) => call<void>('cancelSettlement', memberId);

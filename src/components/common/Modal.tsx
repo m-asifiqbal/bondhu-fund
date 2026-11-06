@@ -118,7 +118,7 @@ export const Modal: React.FC<ModalProps> = (props) => {
           </>
         )}
         {footer && (
-          <div className="px-7 py-3.5 border-t border-slate-200 dark:border-[#22353f] flex flex-wrap items-center justify-end gap-3 bg-slate-50/70 dark:bg-[#0f1a20]/70 rounded-b-[1.5rem]">{footer}</div>
+          <div className={`modal-footer ${tone ? "modal-footer-confirm " : ""}px-7 py-3.5 border-t border-slate-200 dark:border-[#22353f] flex flex-wrap items-center justify-end gap-3 bg-slate-50/70 dark:bg-[#0f1a20]/70 rounded-b-[1.5rem]`}>{footer}</div>
         )}
       </div>
     </div>,

@@ -9,6 +9,7 @@ export type NavTab =
   | 'members'
   | 'collections'
   | 'investments'
+  | 'returns'
   | 'expenses'
   | 'entry'
   | 'master'
@@ -194,7 +195,7 @@ export interface MemberStatement {
 }
 
 export interface LedgerRow {
-  type: 'collection' | 'expense' | 'investment' | 'sale';
+  type: 'collection' | 'expense' | 'investment' | 'sale' | 'return' | 'settlement';
   date: string; party: string; description: string; method: string; reference: string; credit: number; debit: number;
 }
 
@@ -241,7 +242,7 @@ export interface OverviewData {
     receiptCount: number;
     lastBackup: string;
   };
-  recent: Array<{ kind: 'collection' | 'expense' | 'investment' | 'member'; id: number; title: string; sub: string; amount: number; date: string; created_at: string }>;
+  recent: Array<{ kind: 'collection' | 'expense' | 'investment' | 'member' | 'return' | 'settlement'; id: number; title: string; sub: string; amount: number; date: string; created_at: string }>;
 }
 
 export interface UserProfile {
@@ -297,4 +298,25 @@ export interface HealthReport {
   totals: { members: number; payments: number; expenses: number; investments: number; openingBalances: number; collected: number;
     spent: number; invested: number; fundBalance: number; cashInHand: number };
   checks: Array<{ id: string; title: string; status: HealthStatus; count: number; details: string[] }>;
+}
+export interface InvestmentReturn {
+  id: number; investment_id: number; investment_name: string; sector?: string;
+  entry_type: 'Profit' | 'Loss'; amount: number; entry_date: string;
+  payment_method?: string | null; reference?: string | null; note?: string | null; created_by?: string | null;
+}
+export interface ReturnsSummary {
+  profit: number; loss: number; net: number; entries: number; yearNet: number;
+  byInvestment: Array<{ id: number; name: string; sector: string; invested_amount: number; profit: number; loss: number; net: number }>;
+}
+export interface SettlementPreview {
+  member: { id: number; member_code: string; name: string; status: string; join_date: string };
+  settlementDate: string; lastPaymentDate: string | null; existing: unknown | null;
+  openingBalance: number; contributions: number; lateFeesKept: number; principal: number;
+  profitShare: number; lines: Array<{ date: string; label: string; amount: number; share: number }>;
+  suggestedPayout: number; cashInHand: number;
+}
+export interface MemberSettlement {
+  id: number; member_id: number; member_code: string; member_name: string; member_name_bn?: string | null; avatar_initials?: string;
+  settlement_date: string; principal: number; calc_profit_share: number; profit_share: number; total_paid: number;
+  payment_method: string; trx_id?: string | null; note?: string | null;
 }

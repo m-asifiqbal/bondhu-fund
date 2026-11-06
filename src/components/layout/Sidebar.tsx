@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect, useMemo } from 'react';
+import React, { useState, useRef, useEffect, useMemo, useLayoutEffect } from 'react';
 import {
   LayoutDashboard,
   Receipt,
@@ -19,6 +19,7 @@ import {
   UsersRound,
   Lock,
   KeyRound,
+  Coins,
   LogOut,
 } from 'lucide-react';
 import { Modal } from '../common/Modal';
@@ -197,6 +198,7 @@ export const Sidebar: React.FC = () => {
       title: t('shell.section_portfolio', 'Portfolio'),
       items: [
         { id: 'investments', label: t('nav.investments', 'Investments'), icon: TrendingUp },
+        { id: 'returns', label: t('nav.returns', 'Investment Returns'), icon: Coins },
         { id: 'reports', label: t('nav.reports', 'Reports & Export'), icon: FileSpreadsheet },
       ],
     },
@@ -213,6 +215,27 @@ export const Sidebar: React.FC = () => {
   ] as NavSection[], [t, isAdmin]);
 
   const logo = settings?.org_logo;
+
+  // Sliding selection pill: measured from the active item, glides between tabs.
+  const navRef = useRef<HTMLElement>(null);
+  const itemRefs = useRef<Record<string, HTMLButtonElement | null>>({});
+  const [ind, setInd] = useState<{ y: number; h: number } | null>(null);
+  const [indReady, setIndReady] = useState(false);
+  const measureInd = () => {
+    const b = itemRefs.current[activeTab];
+    setInd(b ? { y: b.offsetTop, h: b.offsetHeight } : null);
+  };
+  useLayoutEffect(() => {
+    measureInd();
+    const id = requestAnimationFrame(() => setIndReady(true));
+    return () => cancelAnimationFrame(id);
+  }, [activeTab, isCollapsed, navSections]); // eslint-disable-line react-hooks/exhaustive-deps
+  useLayoutEffect(() => {
+    const ro = new ResizeObserver(measureInd);
+    if (navRef.current) ro.observe(navRef.current);
+    (document as any).fonts?.ready?.then(measureInd);
+    return () => ro.disconnect();
+  }); // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
     <aside
@@ -242,7 +265,7 @@ export const Sidebar: React.FC = () => {
             )}
             {!isCollapsed && (
               <div className="flex flex-col min-w-0">
-                <span className="text-sm font-black text-slate-900 dark:text-white tracking-tight leading-tight line-clamp-2 break-words">
+                <span className="text-[15.1px] font-black text-slate-900 dark:text-white tracking-tight leading-tight line-clamp-2 break-words">
                   {orgName}
                 </span>
                 <span className="text-[10px] font-semibold text-slate-400 dark:text-slate-500 uppercase tracking-wider truncate">
@@ -262,11 +285,13 @@ export const Sidebar: React.FC = () => {
         </div>
 
         {/* Categorized Nav Sections */}
-        <nav className="p-3 space-y-4 overflow-y-auto max-h-[calc(100vh-150px)]">
+        <nav ref={navRef} className="relative p-3 space-y-4 overflow-y-auto max-h-[calc(100vh-150px)] nav-scroll">
+          <span aria-hidden className={`nav-ind ${indReady ? 'nav-ind-anim' : ''}`}
+            style={{ transform: `translateY(${ind?.y ?? 0}px)`, height: ind?.h ?? 0, opacity: ind ? 1 : 0 }} />
           {navSections.map(section => (
             <div key={section.key} className="space-y-1">
               {!isCollapsed && (
-                <div className="px-3 pb-1 text-[10px] font-bold text-slate-400 dark:text-slate-500 tracking-wider uppercase">
+                <div className="px-3 pb-1 text-[10.8px] font-bold text-slate-400 dark:text-slate-500 tracking-wider uppercase">
                   {section.title}
                 </div>
               )}
@@ -276,19 +301,13 @@ export const Sidebar: React.FC = () => {
                 return (
                   <button
                     key={item.id}
+                    ref={el => { itemRefs.current[item.id] = el; }}
                     onClick={() => setActiveTab(item.id)}
                     title={isCollapsed ? item.label : undefined}
-                    className={`w-full flex items-center ${isCollapsed ? 'justify-center px-2' : 'gap-3 px-3'
-                      } py-2 rounded-xl text-xs font-semibold transition-all ${isActive
-                        ? 'bg-slate-100 dark:bg-slate-800 text-slate-900 dark:text-white font-bold shadow-xs'
-                        : 'text-slate-600 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-800/60 hover:text-slate-900 dark:hover:text-white'
-                      }`}
+                    aria-current={isActive ? 'page' : undefined}
+                    className={`nav-item relative z-[1] w-full flex items-center ${isCollapsed ? 'justify-center px-2' : 'gap-3 px-3'} py-2.5 rounded-xl text-[13px] font-semibold ${isActive ? 'nav-item-active font-bold' : 'text-slate-600 dark:text-slate-400'}`}
                   >
-                    <Icon
-                      size={16}
-                      strokeWidth={isActive ? 2.3 : 1.9}
-                      className={isActive ? 'text-slate-900 dark:text-white shrink-0' : 'text-slate-500 dark:text-slate-400 shrink-0'}
-                    />
+                    <Icon size={17} strokeWidth={isActive ? 2.4 : 1.9} className="nav-icon shrink-0" />
                     {!isCollapsed && <span className="truncate">{item.label}</span>}
                   </button>
                 );

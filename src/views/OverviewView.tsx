@@ -358,7 +358,7 @@ export const OverviewView: React.FC = () => {
       </section>
 
       {/* KPI tiles */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 min-[1800px]:grid-cols-6 min-[2200px]:grid-cols-8 gap-4">
         <Kpi icon={<Wallet size={16} />} label={tr('netWorth')} value={money(k.netWorth)} delta={pct(k.fundBalance, k.prevFundBalance)} deltaLabel={tr('vsLast')} digits={digits} />
         <Kpi icon={<Landmark size={16} />} label={tr('cash')} value={money(k.cashInHand)} delta={pct(k.cashInHand, k.prevCashInHand)} deltaLabel={tr('vsLast')} digits={digits} />
         <Kpi icon={<HandCoins size={16} />} label={tr('collected')} value={money(k.monthCollected)}
@@ -530,8 +530,8 @@ export const OverviewView: React.FC = () => {
             <ul className="divide-y divide-slate-100 dark:divide-[#1b2c34]">
               {data.recent.map(r => (
                 <li key={`${r.kind}-${r.id}`} className="py-2.5 flex items-center gap-3">
-                  <span className={`w-8 h-8 shrink-0 rounded-xl flex items-center justify-center ${r.kind === 'collection' ? 'bg-emerald-50 text-emerald-600 dark:bg-emerald-950/50 dark:text-emerald-400' : r.kind === 'member' ? 'bg-sky-50 text-sky-600 dark:bg-sky-950/50 dark:text-sky-400' : 'bg-rose-50 text-rose-600 dark:bg-rose-950/50 dark:text-rose-400'}`}>
-                    {r.kind === 'collection' ? <ArrowDownLeft size={14} /> : r.kind === 'member' ? <UserPlus size={14} /> : <ArrowUpRight size={14} />}
+                  <span className={`w-8 h-8 shrink-0 rounded-xl flex items-center justify-center ${(r.kind === 'collection' || (r.kind === 'return' && r.amount >= 0)) ? 'bg-emerald-50 text-emerald-600 dark:bg-emerald-950/50 dark:text-emerald-400' : r.kind === 'member' ? 'bg-sky-50 text-sky-600 dark:bg-sky-950/50 dark:text-sky-400' : 'bg-rose-50 text-rose-600 dark:bg-rose-950/50 dark:text-rose-400'}`}>
+                    {(r.kind === 'collection' || (r.kind === 'return' && r.amount >= 0)) ? <ArrowDownLeft size={14} /> : r.kind === 'member' ? <UserPlus size={14} /> : <ArrowUpRight size={14} />}
                   </span>
                   <div className="min-w-0 flex-1">
                     <div className="text-xs font-bold text-slate-800 dark:text-slate-100 truncate">{recentTitle(r)}</div>

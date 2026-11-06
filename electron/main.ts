@@ -127,6 +127,8 @@ async function start() {
   setTimeout(dailyAutoBackup, 5000);
 }
 
+const UI_SCALE = 0.85;
+
 function createWindow() {
   mainWindow = new BrowserWindow({
     width: 1440,
@@ -145,6 +147,11 @@ function createWindow() {
       spellcheck: false,
     },
   });
+  // Interface scale: everything (text, cards, radii, spacing) is 15% smaller than the default, and the layout
+  // re-flows for the larger effective screen so more cards fit in a row.
+  const applyScale = () => mainWindow?.webContents.setZoomFactor(UI_SCALE);
+  mainWindow.webContents.on('dom-ready', applyScale);
+  mainWindow.webContents.on('did-finish-load', applyScale);
   mainWindow.once('ready-to-show', () => { mainWindow?.maximize(); mainWindow?.show(); });
 
   if (isDev) mainWindow.loadURL('http://localhost:5173');

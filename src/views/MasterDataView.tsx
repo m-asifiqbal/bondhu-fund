@@ -133,7 +133,7 @@ export const MasterDataView: React.FC = () => {
   const deleting = confirmDelete !== null && busyId === confirmDelete.id;
 
   return (
-    <div className="p-6 lg:p-8 space-y-6 max-w-7xl mx-auto">
+    <div className="p-6 lg:p-8 space-y-6 max-w-[1680px] mx-auto">
       <div>
         <h1 className="text-2xl font-black text-slate-900 dark:text-white tracking-tight">{t('finance.master_title', 'Master data')}</h1>
         <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
@@ -217,7 +217,7 @@ export const MasterDataView: React.FC = () => {
                     <div className="min-w-0 flex-1">
                       <div className="grid grid-cols-1 md:grid-cols-2 gap-x-3 gap-y-0.5 items-center">
                         <div className="flex items-center gap-2 min-w-0">
-                          <span className="font-bold text-slate-900 dark:text-white truncate" title={item.name}>{item.name}</span>
+                          <span className="text-sm font-bold text-slate-900 dark:text-white truncate" title={item.name}>{item.name}</span>
                           <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold border shrink-0 ${
                             item.is_active
                               ? 'bg-emerald-100 dark:bg-emerald-950 text-emerald-800 dark:text-emerald-300 border-emerald-200 dark:border-emerald-800'
@@ -226,12 +226,12 @@ export const MasterDataView: React.FC = () => {
                             {item.is_active ? t('status.active', 'Active') : t('status.inactive', 'Inactive')}
                           </span>
                         </div>
-                        <span lang="bn" className={`truncate ${item.name_bn ? 'font-semibold text-slate-800 dark:text-slate-200' : 'italic text-slate-400 dark:text-slate-500'}`}
+                        <span lang="bn" className={`text-sm truncate ${item.name_bn ? 'font-semibold text-slate-800 dark:text-slate-200' : 'italic text-slate-400 dark:text-slate-500'}`}
                           title={item.name_bn || ''}>
                           {item.name_bn || t('finance.master_no_bn', 'No Bangla name')}
                         </span>
                       </div>
-                      {item.description && <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5">{item.description}</p>}
+                      {item.description && <p className="text-[10px] text-slate-500 dark:text-slate-400 mt-0.5">{item.description}</p>}
                     </div>
                   )}
 
@@ -239,11 +239,11 @@ export const MasterDataView: React.FC = () => {
                     {editing ? (
                       <>
                         <button onClick={() => saveEdit(item)} disabled={busy} title={t('common.save', 'Save')} aria-label={t('common.save', 'Save')}
-                          className="w-8 h-8 rounded-lg text-emerald-700 dark:text-emerald-400 hover:bg-emerald-50 dark:hover:bg-emerald-950/40 flex items-center justify-center disabled:opacity-50">
+                          className="btn btn-green-outline btn-act justify-center">
                           <Check size={15} />
                         </button>
                         <button onClick={() => setEditId(null)} disabled={busy} title={t('common.cancel', 'Cancel')} aria-label={t('common.cancel', 'Cancel')}
-                          className="btn btn-cancel w-8 justify-center">
+                          className="btn btn-cancel btn-act justify-center">
                           <X size={15} />
                         </button>
                       </>
@@ -261,11 +261,11 @@ export const MasterDataView: React.FC = () => {
                           <span className={`absolute top-0.5 left-0.5 w-4 h-4 rounded-full bg-white shadow transition-transform ${item.is_active ? 'translate-x-4' : ''}`} />
                         </button>
                         <button onClick={() => startEdit(item)} disabled={busy} title={t('finance.master_rename', 'Rename / edit')} aria-label={t('finance.master_rename', 'Rename / edit')}
-                          className="btn btn-outline w-8 justify-center">
+                          className="btn btn-outline btn-act justify-center">
                           <Pencil size={14} />
                         </button>
                         <button onClick={() => setConfirmDelete(item)} disabled={busy} title={t('common.delete', 'Delete')} aria-label={t('common.delete', 'Delete')}
-                          className="btn btn-danger-outline w-8 justify-center">
+                          className="btn btn-danger-outline btn-act justify-center">
                           <Trash2 size={15} />
                         </button>
                       </>

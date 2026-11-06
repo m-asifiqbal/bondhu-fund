@@ -177,7 +177,7 @@ export const UserManagementView: React.FC = () => {
   const stop = (fn: () => void) => (e: React.MouseEvent) => { e.stopPropagation(); fn(); };
 
   return (
-    <div className="p-6 lg:p-8 space-y-6 max-w-7xl mx-auto text-xs">
+    <div className="p-6 lg:p-8 space-y-6 max-w-[1680px] mx-auto text-xs">
       <div className="flex flex-wrap items-end justify-between gap-4">
         <div>
           <h1 className="text-2xl font-black text-slate-900 dark:text-white tracking-tight">{t('admin.users_title', 'Users & Roles')}</h1>

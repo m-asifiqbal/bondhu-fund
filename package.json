@@ -1,6 +1,6 @@
 {
   "name": "bondhu-fund-desktop",
-  "version": "2.2.4",
+  "version": "2.3.0",
   "description": "Bondhu Fund - offline fund management for member savings groups",
   "main": "dist-electron/main.js",
   "scripts": {
@@ -15,6 +15,7 @@
     "typecheck": "tsc --noEmit && tsc -p tsconfig.electron.json --noEmit",
     "test:db": "node scripts/bundle-electron.js && node scripts/db-test.js",
     "screenshots": "npm run build:all && cross-env ELECTRON_RUN_AS_NODE= electron scripts/capture-screenshots.js",
+    "test:settle": "node scripts/bundle-electron.js && node scripts/settle-test.js",
     "test:import": "node scripts/bundle-electron.js && node scripts/import-test.js",
     "typecheck:electron": "tsc -p tsconfig.electron.json --noEmit"
   },

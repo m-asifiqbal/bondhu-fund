@@ -350,7 +350,7 @@ export const ExpensesView: React.FC = () => {
   const recordsLabel = t('finance.records', 'records');
 
   return (
-    <div className="p-6 lg:p-8 space-y-6 max-w-7xl mx-auto">
+    <div className="p-6 lg:p-8 space-y-6 max-w-[1680px] mx-auto">
       {/* Header */}
       <div className="flex flex-wrap items-center justify-between gap-4">
         <div>
