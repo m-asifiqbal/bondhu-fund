@@ -50,14 +50,14 @@ export const SettleMemberModal: React.FC<Props> = ({ member, onClose, onDone }) 
     let alive = true;
     setLoading(true);
     previewMemberSettlement(member.id, date)
-      .then(p => { if (alive) { setPreview(p); setShare(p.profitShare); } })
+      .then(p => { if (alive) setPreview(p); })
       .catch(e => { if (alive) showToast(e.message, 'error'); })
       .finally(() => { if (alive) setLoading(false); });
     return () => { alive = false; };
   }, [member?.id, date]);
 
   const calc = preview?.profitShare ?? 0;
-  const shareNum = share === '' ? 0 : Number(share);
+  const shareNum = share === '' ? calc : Number(share);          // empty = use the calculated share
   const changed = !!preview && Math.abs(shareNum - calc) > 0.009;
   const total = preview ? r2(preview.principal + shareNum) : 0;
   const overCash = !!preview && total > preview.cashInHand + 0.009;
@@ -82,8 +82,8 @@ export const SettleMemberModal: React.FC<Props> = ({ member, onClose, onDone }) 
     }
   };
 
-  const row = 'flex items-baseline justify-between gap-3 py-1.5';
-  const lbl = 'text-xs text-slate-600 dark:text-slate-300';
+  const row = 'flex items-baseline justify-between gap-4 py-2.5';
+  const lbl = 'text-[13px] text-slate-600 dark:text-slate-300';
 
   return (
     <Modal
@@ -110,23 +110,25 @@ export const SettleMemberModal: React.FC<Props> = ({ member, onClose, onDone }) 
     >
       <form id="settle-form" onSubmit={handleSave} noValidate className="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-4 items-start">
         {/* Left: the money */}
-        <div className="rounded-xl border border-slate-200 dark:border-slate-700/70 px-4 py-2 divide-y divide-slate-100 dark:divide-slate-800">
-          <div className={row}><span className={lbl}>{t('settle.opening', 'Opening balance')}</span><span className="font-bold tabular-nums">{formatCurrency(preview?.openingBalance ?? 0)}</span></div>
-          <div className={row}><span className={lbl}>{t('settle.contrib', 'Contributions paid')}</span><span className="font-bold tabular-nums">{formatCurrency(preview?.contributions ?? 0)}</span></div>
-          <div className={row}><span className="text-xs font-bold text-slate-800 dark:text-slate-100">{t('settle.principal', 'Member\'s own money')}</span><span className="font-black tabular-nums">{formatCurrency(preview?.principal ?? 0)}</span></div>
-          <div className={row}>
-            <span className={lbl}>{t('settle.share', 'Investment benefit share')}<span className="block text-[10px] text-slate-400">{t('settle.calc', 'Calculated')}: {formatCurrency(calc)}</span></span>
+        <div className="rounded-2xl border border-slate-200 dark:border-slate-700/70 px-5 py-3 divide-y divide-slate-100 dark:divide-slate-800">
+          <div className={row}><span className={lbl}>{t('settle.opening', 'Opening balance')}</span><span className="text-[15px] font-bold tabular-nums">{formatCurrency(preview?.openingBalance ?? 0)}</span></div>
+          <div className={row}><span className={lbl}>{t('settle.contrib', 'Contributions paid')}</span><span className="text-[15px] font-bold tabular-nums">{formatCurrency(preview?.contributions ?? 0)}</span></div>
+          <div className={row}><span className="text-[13px] font-bold text-slate-800 dark:text-slate-100">{t('settle.principal', "Member's own money")}</span><span className="text-base font-black tabular-nums">{formatCurrency(preview?.principal ?? 0)}</span></div>
+          <div className={row}><span className={lbl}>{t('settle.share_calc', 'Investment benefit share (calculated)')}</span><span className="text-[15px] font-bold tabular-nums">{formatCurrency(calc)}</span></div>
+          <div className="py-3">
+            <label className="form-label">{t('settle.share_adjust', 'Change the share (optional)')}</label>
             <MoneyInput step="0.01" value={share} onChange={e => setShare(e.target.value === '' ? '' : Number(e.target.value))}
-              aria-label={t('settle.share', 'Investment benefit share')} className="form-input !w-36 text-right font-bold tabular-nums" />
+              placeholder={String(calc)} aria-label={t('settle.share_adjust', 'Change the share (optional)')} className="form-input font-bold tabular-nums" />
+            <p className="form-hint">{t('settle.share_hint', 'Leave empty to pay the calculated share.')}</p>
           </div>
-          <div className={row}><span className="text-xs font-bold text-emerald-800 dark:text-emerald-300">{t('settle.payout', 'Total payout')}</span><span className="font-black text-emerald-700 dark:text-emerald-300 tabular-nums">{formatCurrency(total)}</span></div>
-          <p className="py-1.5 text-[10px] leading-snug text-slate-500 dark:text-slate-400">
+          <div className={`${row} !py-3.5`}><span className="text-sm font-black text-emerald-800 dark:text-emerald-300">{t('settle.payout', 'Total payout')}</span><span className="text-xl font-black text-emerald-700 dark:text-emerald-300 tabular-nums">{formatCurrency(total)}</span></div>
+          <p className="py-2 text-[11px] leading-snug text-slate-500 dark:text-slate-400">
             {t('settle.late_note', 'Late fees stay in the fund:')} {formatCurrency(preview?.lateFeesKept ?? 0)} {t('settle.not_refunded', 'is not refunded.')}
           </p>
         </div>
 
         {/* Right: how it was paid */}
-        <div className="grid grid-cols-1 gap-y-3.5">
+        <div className="grid grid-cols-1 gap-y-4">
           <DatePicker label={t('settle.date', 'Settlement date')} required clearable={false} value={date} max={todayISO()} onChange={setDate} />
           <SearchableSelect label={t('settle.method', 'Paid through')} required options={methodOptions} value={method}
             onChange={v => setMethod(String(v ?? ''))} placeholder={t('members.pay_method_ph', 'Select method…')} />
