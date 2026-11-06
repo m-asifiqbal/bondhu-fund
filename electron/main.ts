@@ -128,7 +128,7 @@ async function start() {
   setTimeout(dailyAutoBackup, 5000);
 }
 
-const UI_SCALE = 0.89;
+const UI_SCALE = 0.93;
 
 function createWindow() {
   mainWindow = new BrowserWindow({

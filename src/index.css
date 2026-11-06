@@ -364,3 +364,18 @@ html[lang="bn"] body :where(p, span, label, td, th, li, button, h1, h2, h3, h4) 
 .dark .accent-blue { border-left-color: #3b82f6; }
 .dark .accent-amber { border-left-color: #f59e0b; }
 .dark .accent-teal { border-left-color: #14b8a6; }
+
+/* ---- Table action icon tooltip (same style as the collapsed sidebar labels) ---- */
+.act-tip {
+  position: fixed; z-index: 70; transform: translate(-50%, calc(-100% - 12px)); pointer-events: none; white-space: nowrap;
+  padding: .55rem .95rem; border-radius: .75rem; font-size: 1rem; font-weight: 700; letter-spacing: .01em;
+  background: #0f1f27; color: #fff; box-shadow: 0 10px 26px -8px rgba(0, 0, 0, .5); animation: act-tip-in .16s var(--bf-ease);
+}
+.act-tip::before { content: ''; position: absolute; left: 50%; bottom: -5px; width: 10px; height: 10px; margin-left: -5px; background: inherit; transform: rotate(45deg); border-radius: 2px; }
+.act-tip-below { transform: translate(-50%, 12px); }
+.act-tip-below::before { bottom: auto; top: -5px; }
+.dark .act-tip { background: #fff; color: #0f6b50; box-shadow: 0 10px 26px -8px rgba(0, 0, 0, .8); }
+@keyframes act-tip-in { from { opacity: 0; margin-top: 4px; } to { opacity: 1; margin-top: 0; } }
+/* sticky member columns (Members table) */
+.sticky-col-edge { box-shadow: 8px 0 8px -8px rgba(15, 23, 42, .22); }
+.dark .sticky-col-edge { box-shadow: 8px 0 8px -8px rgba(0, 0, 0, .6); }

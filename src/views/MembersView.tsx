@@ -463,8 +463,8 @@ export const MembersView: React.FC = () => {
             <table className="w-full min-w-[820px] text-left text-xs text-slate-800 dark:text-slate-200">
               <thead className="bg-slate-50 dark:bg-[#111e24] border-b border-slate-200 dark:border-slate-800 text-slate-600 dark:text-slate-400 font-bold uppercase tracking-wider text-[10px]">
                 <tr>
-<th className="py-3.5 px-4 w-12 text-center">{t('common.no', 'No.')}</th>
-                  <th className="py-3.5 px-4">{t('common.member', 'Member')}</th>
+<th className="py-3.5 px-4 text-center sticky left-0 z-20 bg-slate-50 dark:bg-[#111e24]" style={{ width: '3.25rem', minWidth: '3.25rem', maxWidth: '3.25rem' }}>{t('common.no', 'No.')}</th>
+                  <th className="py-3.5 px-4 sticky z-20 bg-slate-50 dark:bg-[#111e24] sticky-col-edge" style={{ left: '3.25rem', minWidth: '13rem' }}>{t('common.member', 'Member')}</th>
                   <th className="py-3.5 px-4">{t('common.member_id', 'Member ID')}</th>
                   <th className="py-3.5 px-4">{t('common.monthly_due', 'Monthly due')}</th>
                   <th className="py-3.5 px-4">{t('common.last_payment', 'Last payment')}</th>
@@ -487,10 +487,10 @@ export const MembersView: React.FC = () => {
                       <tr
                         key={m.id}
                         onClick={() => setStatementId(m.id)}
-                        className={`cursor-pointer transition-colors ${statementId === m.id ? 'bg-emerald-50/70 dark:bg-emerald-950/30' : 'hover:bg-slate-50/80 dark:hover:bg-[#1a2b34]'}`}
+                        className={`group cursor-pointer transition-colors ${statementId === m.id ? 'bg-emerald-50 dark:bg-[#12302a]' : 'hover:bg-slate-50 dark:hover:bg-[#1a2b34]'}`}
                       >
-                        <td className="py-3 px-4 text-center text-slate-400 dark:text-slate-500 font-semibold tabular-nums">{serial((page - 1) * PAGE_SIZE + __i + 1)}</td>
-                        <td className="py-3 px-4">
+                        <td className={`py-3 px-4 text-center text-slate-400 dark:text-slate-500 font-semibold tabular-nums sticky left-0 z-10 ${statementId === m.id ? 'bg-emerald-50 dark:bg-[#12302a]' : 'bg-white dark:bg-[#142026] group-hover:bg-slate-50 dark:group-hover:bg-[#1a2b34]'}`} style={{ width: '3.25rem', minWidth: '3.25rem', maxWidth: '3.25rem' }}>{serial((page - 1) * PAGE_SIZE + __i + 1)}</td>
+                        <td className={`py-3 px-4 sticky z-10 sticky-col-edge ${statementId === m.id ? 'bg-emerald-50 dark:bg-[#12302a]' : 'bg-white dark:bg-[#142026] group-hover:bg-slate-50 dark:group-hover:bg-[#1a2b34]'}`} style={{ left: '3.25rem', minWidth: '13rem' }}>
                           <div className="flex items-center gap-3">
                             <div className="w-8 h-8 rounded-full bg-[#e2ede7] dark:bg-emerald-950/60 text-[#0f4a3c] dark:text-emerald-400 font-bold text-xs flex items-center justify-center shrink-0 border border-[#c3ded0] dark:border-emerald-800">
                               {m.avatar_initials}
@@ -599,13 +599,15 @@ export const MembersView: React.FC = () => {
                   </p>
                 )}
               </div>
-              <DownloadMenu title={t('members.dl_one', 'Download statement')} busy={dlBusy === statementId} onPick={f => statementId != null && downloadStatements(statementId, f)}
-                className="btn btn-green-outline btn-sm btn-icon shrink-0" />
-              <button type="button" onClick={() => { setStatementId(null); setStatement(null); }}
-                className="btn btn-cancel shrink-0"
-                title={t('members.close_statement', 'Close statement')} aria-label={t('members.close_statement', 'Close statement')}>
-                <X size={16} />
-              </button>
+              <div className="flex items-center gap-2 shrink-0">
+                <DownloadMenu title={t('members.dl_one', 'Download statement')} busy={dlBusy === statementId} onPick={f => statementId != null && downloadStatements(statementId, f)}
+                  className="btn btn-green-outline btn-md btn-icon" />
+                <button type="button" onClick={() => { setStatementId(null); setStatement(null); }}
+                  className="btn btn-cancel btn-md btn-icon"
+                  title={t('members.close_statement', 'Close statement')} aria-label={t('members.close_statement', 'Close statement')}>
+                  <X size={16} />
+                </button>
+              </div>
             </div>
 
             {statement && statementTotals && (

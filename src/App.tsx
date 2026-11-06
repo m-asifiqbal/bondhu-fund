@@ -7,6 +7,7 @@ import { RecordPaymentModal } from './components/modals/RecordPaymentModal';
 import { LoginScreen, ChangePasswordPrompt } from './views/LoginScreen';
 
 // Views
+import { ActionTips } from './components/common/ActionTips';
 const OverviewView = React.lazy(() => import('./views/OverviewView').then(m => ({ default: m.OverviewView })));
 const MembersView = React.lazy(() => import('./views/MembersView').then(m => ({ default: m.MembersView })));
 const CollectionsView = React.lazy(() => import('./views/CollectionsView').then(m => ({ default: m.CollectionsView })));
@@ -140,6 +141,8 @@ const MainLayout: React.FC = () => {
           </ViewErrorBoundary>
         </main>
       </div>
+
+      <ActionTips />
 
       {/* Global Record Payment Dialog */}
       <RecordPaymentModal />
