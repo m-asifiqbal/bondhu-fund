@@ -81,7 +81,7 @@ export const PinDialog: React.FC<Props> = ({ open, mode, fileName, onSubmit, onM
           <label className="form-label">{master ? t('pin.master_pin', 'Master PIN') : mode === 'set' ? t('pin.new', 'New PIN') : t('pin.pin', 'PIN')} <span className="text-rose-500">*</span></label>
           <div className="relative">
             <input type={type} value={pin} onChange={e => setPin(e.target.value)} autoFocus={!master} autoComplete="off" spellCheck={false}
-              className="form-input font-mono tracking-widest pr-11" placeholder={mode === 'set' ? t('pin.placeholder', 'At least 6 digits or characters') : ''} />
+              data-clear-offset="34" className="form-input font-mono tracking-widest pr-20" placeholder={mode === 'set' ? t('pin.placeholder', 'At least 6 digits or characters') : ''} />
             <button type="button" onClick={() => setShow(s => !s)} aria-label={show ? t('pin.hide', 'Hide PIN') : t('pin.show', 'Show PIN')}
               className="absolute right-2 top-1/2 -translate-y-1/2 p-1.5 rounded-md text-slate-400 hover:text-slate-700 dark:hover:text-white">
               {show ? <EyeOff size={16} /> : <Eye size={16} />}

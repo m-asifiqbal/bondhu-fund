@@ -8,6 +8,7 @@ import { LoginScreen, ChangePasswordPrompt } from './views/LoginScreen';
 
 // Views
 import { ActionTips } from './components/common/ActionTips';
+import { ClearButtons } from './components/common/ClearButtons';
 const OverviewView = React.lazy(() => import('./views/OverviewView').then(m => ({ default: m.OverviewView })));
 const MembersView = React.lazy(() => import('./views/MembersView').then(m => ({ default: m.MembersView })));
 const CollectionsView = React.lazy(() => import('./views/CollectionsView').then(m => ({ default: m.CollectionsView })));
@@ -171,6 +172,7 @@ export function App() {
   return (
     <AppProvider>
       <AuthGate />
+      <ClearButtons />
     </AppProvider>
   );
 }
