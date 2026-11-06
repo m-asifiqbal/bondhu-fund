@@ -293,7 +293,7 @@ export const SettingsView: React.FC = () => {
                   <button
                     type="button"
                     role="switch"
-                    aria-checked={form.auto_backup_enabled}
+                    aria-checked={form.auto_backup_enabled} aria-label={t('admin.settings_auto_backup', 'Automatic daily backup')}
                     onClick={() => set('auto_backup_enabled', !form.auto_backup_enabled)}
                     className={`relative w-10 h-6 rounded-full transition-colors shrink-0 ${form.auto_backup_enabled ? 'bg-brand dark:bg-emerald-600' : 'bg-slate-300 dark:bg-slate-700'}`}
                   >
@@ -329,7 +329,7 @@ export const SettingsView: React.FC = () => {
           <button
             type="button"
             onClick={toggleDarkMode}
-            className="flex items-center justify-between rounded-xl border border-slate-200 dark:border-slate-700 px-4 py-3 hover:bg-slate-50 dark:hover:bg-slate-800/60"
+            className="btn btn-outline !h-12 !justify-between !px-4 w-full"
           >
             <span className="flex items-center gap-2 font-semibold text-slate-800 dark:text-slate-200">
               {isDarkMode ? <Moon size={15} /> : <Sun size={15} />}
@@ -340,7 +340,7 @@ export const SettingsView: React.FC = () => {
           <button
             type="button"
             onClick={toggleLanguage}
-            className="flex items-center justify-between rounded-xl border border-slate-200 dark:border-slate-700 px-4 py-3 hover:bg-slate-50 dark:hover:bg-slate-800/60"
+            className="btn btn-outline !h-12 !justify-between !px-4 w-full"
           >
             <span className="flex items-center gap-2 font-semibold text-slate-800 dark:text-slate-200">
               <Globe size={15} />

@@ -748,17 +748,17 @@ export const InvestmentsView: React.FC = () => {
           </div>
         ) : (
           <div className="overflow-x-auto w-full">
-            <table className="w-full min-w-[960px] text-left text-xs text-slate-800 dark:text-slate-200">
+            <table className="w-full min-w-[880px] text-left text-xs text-slate-800 dark:text-slate-200">
               <thead className="bg-slate-50 dark:bg-[#111e24] border-b border-slate-200 dark:border-slate-800 text-slate-600 dark:text-slate-400 font-bold uppercase tracking-wider text-[10px]">
                 <tr>
-                  <th className="py-3 px-4">{t('finance.inv_investment', 'Investment')}</th>
-                  <th className="py-3 px-4">{t('finance.inv_sector', 'Sector')}</th>
-                  <th className="py-3 px-4">{t('finance.inv_purchased', 'Purchased')}</th>
-                  <th className="py-3 px-4 text-right">{investedLabel}</th>
-                  <th className="py-3 px-4 text-right">{t('finance.inv_value_or_sale', 'Value / sale')}</th>
-                  <th className="py-3 px-4 text-right">{t('finance.inv_gain', 'Gain')}</th>
-                  <th className="py-3 px-4">{t('common.status', 'Status')}</th>
-                  <th className="py-3 px-4 text-right">{t('common.actions', 'Actions')}</th>
+                  <th className="py-3 px-2.5">{t('finance.inv_investment', 'Investment')}</th>
+                  <th className="py-3 px-2.5">{t('finance.inv_sector', 'Sector')}</th>
+                  <th className="py-3 px-2.5">{t('finance.inv_purchased', 'Purchased')}</th>
+                  <th className="py-3 px-2.5 text-right">{investedLabel}</th>
+                  <th className="py-3 px-2.5 text-right">{t('finance.inv_value_or_sale', 'Value / sale')}</th>
+                  <th className="py-3 px-2.5 text-right">{t('finance.inv_gain', 'Gain')}</th>
+                  <th className="py-3 px-2.5">{t('common.status', 'Status')}</th>
+                  <th className="py-3 px-2.5 text-right">{t('common.actions', 'Actions')}</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100 dark:divide-slate-800/80 font-medium">
@@ -777,7 +777,7 @@ export const InvestmentsView: React.FC = () => {
                     const reviewSoon = !isSold && inv.review_date && daysBetween(today, inv.review_date.slice(0, 10)) <= 30;
                     return (
                       <tr key={inv.id} className={`hover:bg-slate-50/80 dark:hover:bg-[#1a2b34] transition-colors ${isSold ? 'opacity-80' : ''}`}>
-                        <td className="py-3 px-4">
+                        <td className="py-3 px-2.5">
                           <div className="flex items-center gap-3">
                             <div className="w-8 h-8 rounded-xl bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 flex items-center justify-center shrink-0">
                               {sectorIcon(inv.sector)}
@@ -792,8 +792,8 @@ export const InvestmentsView: React.FC = () => {
                             </div>
                           </div>
                         </td>
-                        <td className="py-3 px-4 text-slate-700 dark:text-slate-300">{tv(inv.sector)}</td>
-                        <td className="py-3 px-4 text-slate-600 dark:text-slate-400 whitespace-nowrap">
+                        <td className="py-3 px-2.5 text-slate-700 dark:text-slate-300">{tv(inv.sector)}</td>
+                        <td className="py-3 px-2.5 text-slate-600 dark:text-slate-400 whitespace-nowrap">
                           {formatDate(inv.purchase_date)}
                           {!isSold && inv.review_date && (
                             <span className={`block text-[10px] ${reviewSoon ? 'text-amber-600 dark:text-amber-400 font-bold' : 'text-slate-400'}`}>
@@ -801,8 +801,8 @@ export const InvestmentsView: React.FC = () => {
                             </span>
                           )}
                         </td>
-                        <td className="py-3 px-4 text-right font-bold text-slate-900 dark:text-white whitespace-nowrap">{formatCurrency(inv.invested_amount)}</td>
-                        <td className="py-3 px-4 text-right font-bold text-slate-900 dark:text-white whitespace-nowrap">
+                        <td className="py-3 px-2.5 text-right font-bold text-slate-900 dark:text-white whitespace-nowrap">{formatCurrency(inv.invested_amount)}</td>
+                        <td className="py-3 px-2.5 text-right font-bold text-slate-900 dark:text-white whitespace-nowrap">
                           {isSold ? (
                             <>
                               {formatCurrency(inv.sold_amount ?? 0)}
@@ -814,20 +814,20 @@ export const InvestmentsView: React.FC = () => {
                             formatCurrency(inv.current_estimated_value)
                           )}
                         </td>
-                        <td className={`py-3 px-4 text-right font-black whitespace-nowrap ${gainCls(gain)}`}>
+                        <td className={`py-3 px-2.5 text-right font-black whitespace-nowrap ${gainCls(gain)}`}>
                           {signed(gain)}
                           <span className="block text-[10px] font-medium text-slate-400">
                             {isSold ? t('finance.inv_realized', 'realized') : t('finance.inv_unrealized', 'unrealized')}
                           </span>
                         </td>
-                        <td className="py-3 px-4">{statusBadge(inv.status)}</td>
-                        <td className="py-3 px-4 text-right whitespace-nowrap">
+                        <td className="py-3 px-2.5">{statusBadge(inv.status)}</td>
+                        <td className="py-3 px-2.5 text-right whitespace-nowrap">
                           <div className="flex items-center justify-end gap-1">
                             {!isSold && (
                               <>
                                 <button
                                   onClick={() => openValuation(inv)}
-                                  className="inline-flex items-center gap-1 px-2.5 py-1 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-[#0f4a3c] dark:text-emerald-400 rounded-lg text-[11px] font-bold border border-slate-200 dark:border-slate-700 transition-colors"
+                                  className="btn btn-green-outline btn-sm"
                                   title={t('finance.inv_update_valuation', 'Update valuation')}
                                 >
                                   <TrendingUp size={12} />
@@ -892,63 +892,46 @@ export const InvestmentsView: React.FC = () => {
           </div>
         }
       >
-        <form id="investment-form" onSubmit={handleFormSubmit} className="space-y-4 text-xs">
-          <div>
-            <label className="form-label">{t('finance.inv_name', 'Investment name')} *</label>
-            <input
-              type="text"
-              value={form.name}
-              onChange={set('name')}
-              className="form-input"
-              placeholder={t('finance.inv_name_ph', 'e.g. Savar land plot')}
-              required
-            />
-          </div>
-
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <div>
-              {sectorOptions.length > 0 ? (
-                <SearchableSelect
-                  label={t('finance.inv_sector', 'Sector')}
-                  required
-                  options={sectorOptions}
-                  value={form.sector}
-                  onChange={val => setForm(f => ({ ...f, sector: String(val ?? '') }))}
-                  placeholder={t('finance.inv_select_sector', 'Select sector…')}
-                />
-              ) : (
-                <>
-                  <label className="form-label">{t('finance.inv_sector', 'Sector')} *</label>
-                  <p className="form-hint">
-                    {t('finance.inv_no_sectors', 'No sectors yet.')}{' '}
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setFormOpen(false);
-                        setActiveTab('master');
-                      }}
-                      className="btn btn-outline"
-                    >
-                      {t('finance.exp_add_categories', 'Add them in Master data')}
-                    </button>
-                  </p>
-                </>
-              )}
-            </div>
-            <div>
-              <SearchableSelect
-                label={t('common.status', 'Status')}
-                options={formStatusOptions}
-                value={form.status}
-                onChange={val => setForm(f => ({ ...f, status: (val || 'Growing') as InvestmentStatus }))}
+        <form id="investment-form" onSubmit={handleFormSubmit} className="text-xs">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-x-5 gap-y-4 items-start">
+            <div className="sm:col-span-2 lg:col-span-2">
+              <label className="form-label">{t('finance.inv_name', 'Investment name')} <span className="text-rose-500">*</span></label>
+              <input
+                type="text"
+                value={form.name}
+                onChange={set('name')}
+                className="form-input"
+                placeholder={t('finance.inv_name_ph', 'e.g. Savar land plot')}
+                required
               />
             </div>
-          </div>
+            {sectorOptions.length > 0 ? (
+              <SearchableSelect
+                label={t('finance.inv_sector', 'Sector')}
+                required
+                options={sectorOptions}
+                value={form.sector}
+                onChange={val => setForm(f => ({ ...f, sector: String(val ?? '') }))}
+                placeholder={t('finance.inv_select_sector', 'Select sector…')}
+              />
+            ) : (
+              <div>
+                <label className="form-label">{t('finance.inv_sector', 'Sector')} <span className="text-rose-500">*</span></label>
+                <button type="button" onClick={() => { setFormOpen(false); setActiveTab('master'); }} className="btn btn-outline btn-block">
+                  {t('finance.exp_add_categories', 'Add them in Master data')}
+                </button>
+              </div>
+            )}
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <SearchableSelect
+              label={t('common.status', 'Status')}
+              options={formStatusOptions}
+              value={form.status}
+              onChange={val => setForm(f => ({ ...f, status: (val || 'Growing') as InvestmentStatus }))}
+            />
             <div>
-              <label className="form-label">{investedLabel} *</label>
-              <input type="number" min="0" step="any" value={form.invested_amount} onChange={set('invested_amount')} className="form-input font-bold" placeholder="0" required />
+              <label className="form-label">{investedLabel} <span className="text-rose-500">*</span></label>
+              <input type="number" min="0" step="any" value={form.invested_amount} onChange={set('invested_amount')} className="form-input font-bold tabular-nums" placeholder="0" required />
             </div>
             <div>
               <label className="form-label">{t('finance.inv_current_value', 'Current estimated value')}</label>
@@ -959,39 +942,35 @@ export const InvestmentsView: React.FC = () => {
                 value={form.current_estimated_value}
                 onChange={set('current_estimated_value')}
                 placeholder={t('finance.inv_same_as_invested', 'Same as invested')}
-                className="form-input font-bold"
+                className="form-input font-bold tabular-nums"
               />
             </div>
-          </div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <DatePicker
+              label={t('finance.inv_purchase_date', 'Purchase date')}
+              required
+              max={today}
+              value={form.purchase_date}
+              onChange={iso => setForm(f => ({ ...f, purchase_date: iso }))}
+            />
+            <DatePicker
+              label={t('finance.inv_review_date', 'Next review date')}
+              clearable
+              value={form.review_date}
+              onChange={iso => setForm(f => ({ ...f, review_date: iso }))}
+              placeholder={t('finance.inv_review_date_ph', 'Not scheduled')}
+            />
             <div>
-              <DatePicker
-                label={t('finance.inv_purchase_date', 'Purchase date')}
-                required
-                max={today}
-                value={form.purchase_date}
-                onChange={iso => setForm(f => ({ ...f, purchase_date: iso }))}
-              />
+              <label className="form-label">{t('finance.inv_location', 'Location / deed details')}</label>
+              <input type="text" value={form.location_details} onChange={set('location_details')} className="form-input" />
             </div>
-            <div>
-              <DatePicker
-                label={t('finance.inv_review_date', 'Next review date')}
-                clearable
-                value={form.review_date}
-                onChange={iso => setForm(f => ({ ...f, review_date: iso }))}
-                placeholder={t('finance.inv_review_date_ph', 'Not scheduled')}
-              />
-            </div>
-          </div>
 
-          {form.status === 'Sold' && (
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 p-3 rounded-xl bg-slate-50 dark:bg-[#121f26] border border-slate-200 dark:border-slate-800">
-              <div>
-                <label className="form-label">{t('finance.inv_sold_amount', 'Sale amount')} *</label>
-                <input type="number" min="0" step="any" value={form.sold_amount} onChange={set('sold_amount')} className="form-input font-bold" required />
-              </div>
-              <div>
+            {form.status === 'Sold' && (
+              <>
+                <div>
+                  <label className="form-label">{t('finance.inv_sold_amount', 'Sale amount')} <span className="text-rose-500">*</span></label>
+                  <input type="number" min="0" step="any" value={form.sold_amount} onChange={set('sold_amount')} className="form-input font-bold tabular-nums" required />
+                </div>
                 <DatePicker
                   label={t('finance.inv_sold_date', 'Sale date')}
                   required
@@ -1000,17 +979,13 @@ export const InvestmentsView: React.FC = () => {
                   value={form.sold_date}
                   onChange={iso => setForm(f => ({ ...f, sold_date: iso }))}
                 />
-              </div>
-            </div>
-          )}
+              </>
+            )}
 
-          <div>
-            <label className="form-label">{t('finance.inv_location', 'Location / deed details')}</label>
-            <input type="text" value={form.location_details} onChange={set('location_details')} className="form-input" />
-          </div>
-          <div>
-            <label className="form-label">{t('common.notes', 'Notes')}</label>
-            <textarea rows={2} value={form.notes} onChange={set('notes')} className="form-input" />
+            <div className="sm:col-span-2 lg:col-span-3">
+              <label className="form-label">{t('common.notes', 'Notes')}</label>
+              <input type="text" value={form.notes} onChange={set('notes')} className="form-input" />
+            </div>
           </div>
         </form>
       </Modal>
@@ -1062,7 +1037,7 @@ export const InvestmentsView: React.FC = () => {
               )}
             </div>
             <div>
-              <label className="form-label">{t('finance.inv_new_value', 'New estimated market value')} *</label>
+              <label className="form-label">{t('finance.inv_new_value', 'New estimated market value')} <span className="text-rose-500">*</span></label>
               <input type="number" min="0" step="any" value={newEstVal} onChange={e => setNewEstVal(e.target.value)} className="form-input font-bold" required autoFocus />
             </div>
           </form>
@@ -1093,7 +1068,7 @@ export const InvestmentsView: React.FC = () => {
           <form id="sell-form" onSubmit={handleSell} className="space-y-4 text-xs">
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div>
-                <label className="form-label">{t('finance.inv_sold_amount', 'Sale amount')} *</label>
+                <label className="form-label">{t('finance.inv_sold_amount', 'Sale amount')} <span className="text-rose-500">*</span></label>
                 <input type="number" min="0" step="any" value={soldAmount} onChange={e => setSoldAmount(e.target.value)} className="form-input font-bold" required autoFocus />
               </div>
               <div>

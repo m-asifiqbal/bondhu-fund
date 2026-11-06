@@ -444,7 +444,7 @@ export const BackupRestoreView: React.FC = () => {
                       <button
                         onClick={() => askRestoreSnapshot(s)}
                         disabled={!!busy || !isAdmin}
-                        className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-bold text-amber-700 dark:text-amber-400 hover:bg-amber-50 dark:hover:bg-amber-950/40 border border-amber-200 dark:border-amber-800 disabled:opacity-50"
+                        className="btn btn-outline btn-sm"
                       >
                         <RotateCcw size={12} />
                         {t('finance.backup_restore', 'Restore')}

@@ -524,7 +524,7 @@ export const OverviewView: React.FC = () => {
         <section className="card-base p-5">
           <div className="flex items-center justify-between mb-3">
             <h3 className="text-sm font-extrabold text-slate-900 dark:text-white flex items-center gap-2"><Activity size={15} className="text-brand dark:text-emerald-400" />{tr('recent')}</h3>
-            <button onClick={() => setOpenRecordModal(true)} className="no-print flex items-center gap-1 text-[11px] font-bold text-brand dark:text-emerald-400 hover:underline"><Plus size={12} />{language === 'bn' ? 'পেমেন্ট' : 'Record payment'}</button>
+            <button onClick={() => setOpenRecordModal(true)} className="no-print btn btn-green-outline btn-sm"><Plus size={12} />{language === 'bn' ? 'পেমেন্ট' : 'Record payment'}</button>
           </div>
           {data.recent.length === 0 ? <p className="text-xs text-slate-500 py-6 text-center">{tr('noData')}</p> : (
             <ul className="divide-y divide-slate-100 dark:divide-[#1b2c34]">

@@ -157,6 +157,10 @@ export const RecordPaymentModal: React.FC = () => {
       subtitle={t('members.pay_subtitle', 'Record a monthly contribution for a member')}
       footer={
         <>
+          <div className="mr-auto flex items-baseline gap-3" aria-live="polite">
+            <span className="text-xs font-bold text-slate-600 dark:text-slate-300">{t('members.pay_total', 'Total amount to record')}</span>
+            <span className="text-2xl font-black text-emerald-700 dark:text-emerald-300 tabular-nums">{formatCurrency(total)}</span>
+          </div>
           <button type="button" onClick={handleClose} disabled={isSubmitting} className="btn btn-cancel min-w-[7.5rem]">
             {t('common.cancel', 'Cancel')}
           </button>
@@ -236,17 +240,6 @@ export const RecordPaymentModal: React.FC = () => {
           <input type="text" value={note} onChange={e => setNote(e.target.value)} className="form-input" />
         </div>
 
-        <div className="sm:col-span-2 rounded-xl border-[1.5px] border-emerald-300 dark:border-emerald-800 bg-emerald-50 dark:bg-emerald-950/40 px-5 py-3 flex flex-wrap items-center justify-between gap-x-6 gap-y-2">
-          <div className="text-xs font-semibold text-slate-600 dark:text-slate-300 tabular-nums">
-            {t('members.pay_contribution', 'Contribution')} {formatCurrency(Number(amount) || 0)}
-            <span className="mx-2 text-slate-400">+</span>
-            {t('members.late_fee', 'Late fee')} {formatCurrency(Number(lateFee) || 0)}
-          </div>
-          <div className="flex items-baseline gap-3">
-            <span className="text-xs font-bold text-slate-700 dark:text-slate-300">{t('members.pay_total', 'Total amount to record')}</span>
-            <span className="text-2xl font-black text-emerald-800 dark:text-emerald-300 tabular-nums">{formatCurrency(total)}</span>
-          </div>
-        </div>
       </form>
     </Modal>
   );

@@ -653,8 +653,9 @@ export const MembersView: React.FC = () => {
           </>
         }
       >
-        <form id="member-form" onSubmit={handleFormSubmit} className="space-y-4 text-xs" noValidate>
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+        <form id="member-form" onSubmit={handleFormSubmit} className="text-xs" noValidate>
+          {/* Three equal columns, one row height; explanations live in one line under the grid. */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-x-5 gap-y-4 items-start">
             <div>
               <label className="form-label">{t('common.member_id', 'Member ID')}</label>
               <input
@@ -662,9 +663,9 @@ export const MembersView: React.FC = () => {
                 value={form.member_code}
                 onChange={e => setField('member_code', e.target.value.toUpperCase())}
                 disabled={editingId != null}
-                className="form-input font-mono font-bold disabled:opacity-60"
+                title={editingId == null ? t('members.code_hint', 'Assigned automatically; must be unique.') : undefined}
+                className="form-input font-mono font-bold"
               />
-              {editingId == null && <p className="form-hint">{t('members.code_hint', 'Assigned automatically; must be unique.')}</p>}
             </div>
             <div>
               <label className="form-label">{t('members.name', 'Full name')} <span className="text-rose-500">*</span></label>
@@ -673,8 +674,8 @@ export const MembersView: React.FC = () => {
             <div>
               <label className="form-label">{t('members.name_bn', 'Name (Bangla)')}</label>
               <input type="text" lang="bn" value={form.name_bn} onChange={e => setField('name_bn', e.target.value)} className="form-input"
+                title={t('members.name_bn_hint', 'Shown when the app is in Bangla.')}
                 placeholder={t('members.name_bn_ph', 'Optional, e.g. রফিক হাসান')} />
-              <p className="form-hint">{t('members.name_bn_hint', 'Shown when the app is in Bangla.')}</p>
             </div>
             <div>
               <label className="form-label">{t('members.phone', 'Mobile phone')}</label>
@@ -688,14 +689,12 @@ export const MembersView: React.FC = () => {
               <label className="form-label">{t('members.designation', 'Designation')}</label>
               <input type="text" value={form.designation} onChange={e => setField('designation', e.target.value)} className="form-input" />
             </div>
-            <div>
-              <SearchableSelect
-                label={t('common.status', 'Status')}
-                options={memberStatusOptions}
-                value={form.status}
-                onChange={v => setField('status', (v || 'Active') as MemberForm['status'])}
-              />
-            </div>
+            <SearchableSelect
+              label={t('common.status', 'Status')}
+              options={memberStatusOptions}
+              value={form.status}
+              onChange={v => setField('status', (v || 'Active') as MemberForm['status'])}
+            />
             <div>
               <label className="form-label">{t('common.monthly_due', 'Monthly due')} <span className="text-rose-500">*</span></label>
               <input
@@ -703,36 +702,35 @@ export const MembersView: React.FC = () => {
                 min={0}
                 value={form.monthly_due}
                 onChange={e => setField('monthly_due', e.target.value === '' ? '' : Number(e.target.value))}
-                className="form-input font-bold"
+                className="form-input font-bold tabular-nums"
                 required
               />
             </div>
-            <div className="sm:col-span-2">
-              <DatePicker
-                label={t('members.join_date', 'Join date')}
-                required
-                clearable={false}
-                value={form.join_date}
-                onChange={v => setField('join_date', v)}
-              />
-              <p className="form-hint">{t('members.join_hint', 'Dues are counted from this month.')}</p>
-            </div>
-          </div>
-          <div>
-            <label className="form-label">{t('members.opening_balance', 'Contributions before using the app')}</label>
-            <input
-              type="number"
-              min={0}
-              value={form.opening_balance}
-              onChange={e => setField('opening_balance', e.target.value === '' ? '' : Number(e.target.value))}
-              className="form-input font-bold"
+            <DatePicker
+              label={t('members.join_date', 'Join date')}
+              required
+              clearable={false}
+              value={form.join_date}
+              onChange={v => setField('join_date', v)}
             />
-            <p className="form-hint">{t('members.opening_hint', 'Total this member paid before records started in Bondhu Fund. Counted in the fund balance.')}</p>
+            <div>
+              <label className="form-label">{t('members.opening_balance', 'Contributions before using the app')}</label>
+              <input
+                type="number"
+                min={0}
+                value={form.opening_balance}
+                onChange={e => setField('opening_balance', e.target.value === '' ? '' : Number(e.target.value))}
+                className="form-input font-bold tabular-nums"
+              />
+            </div>
+            <div className="sm:col-span-1 lg:col-span-2">
+              <label className="form-label">{t('members.notes', 'Notes')}</label>
+              <input type="text" value={form.notes} onChange={e => setField('notes', e.target.value)} className="form-input" />
+            </div>
           </div>
-          <div>
-            <label className="form-label">{t('members.notes', 'Notes')}</label>
-            <textarea rows={2} value={form.notes} onChange={e => setField('notes', e.target.value)} className="form-input" />
-          </div>
+          <p className="form-hint mt-4">
+            {t('members.join_hint', 'Dues are counted from this month.')} {t('members.opening_hint', 'Total this member paid before records started in Bondhu Fund. Counted in the fund balance.')}
+          </p>
         </form>
       </Modal>
 

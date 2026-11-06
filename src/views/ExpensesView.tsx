@@ -751,81 +751,64 @@ export const ExpensesView: React.FC = () => {
           </div>
         }
       >
-        <form id="expense-form" onSubmit={handleFormSubmit} className="space-y-4 text-xs">
-          <div>
-            <label className="form-label">{t('finance.exp_field_title', 'Title')} *</label>
-            <input
-              type="text"
-              value={form.title}
-              onChange={set('title')}
-              className="form-input"
-              placeholder={t('finance.exp_title_ph', 'e.g. Monthly meeting snacks')}
-              required
-            />
-          </div>
-
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <div>
-              {formCategoryOptions.length > 0 ? (
-                <SearchableSelect
-                  label={t('finance.exp_category', 'Category')}
-                  required
-                  options={formCategoryOptions}
-                  value={form.category}
-                  onChange={val => setForm(f => ({ ...f, category: String(val ?? '') }))}
-                  placeholder={t('finance.exp_select_category', 'Select category…')}
-                />
-              ) : (
-                <>
-                  <label className="form-label">{t('finance.exp_category', 'Category')} *</label>
-                  <p className="form-hint">
-                    {t('finance.exp_no_categories', 'No expense categories yet.')}{' '}
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setFormOpen(false);
-                        setActiveTab('master');
-                      }}
-                      className="btn btn-outline"
-                    >
-                      {t('finance.exp_add_categories', 'Add them in Master data')}
-                    </button>
-                  </p>
-                </>
-              )}
-            </div>
-            <div>
-              <label className="form-label">{t('common.amount', 'Amount')} *</label>
-              <input type="number" min="0" step="any" value={form.amount} onChange={set('amount')} className="form-input font-bold" placeholder="0" required />
-            </div>
-          </div>
-
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <div>
-              <DatePicker
-                label={t('finance.exp_date', 'Expense date')}
+        <form id="expense-form" onSubmit={handleFormSubmit} className="text-xs">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-5 gap-y-4 items-start">
+            <div className="sm:col-span-2">
+              <label className="form-label">{t('finance.exp_field_title', 'Title')} <span className="text-rose-500">*</span></label>
+              <input
+                type="text"
+                value={form.title}
+                onChange={set('title')}
+                className="form-input"
+                placeholder={t('finance.exp_title_ph', 'e.g. Monthly meeting snacks')}
                 required
-                max={today}
-                value={form.expense_date}
-                onChange={iso => setForm(f => ({ ...f, expense_date: iso }))}
               />
             </div>
+
+            {formCategoryOptions.length > 0 ? (
+              <SearchableSelect
+                label={t('finance.exp_category', 'Category')}
+                required
+                options={formCategoryOptions}
+                value={form.category}
+                onChange={val => setForm(f => ({ ...f, category: String(val ?? '') }))}
+                placeholder={t('finance.exp_select_category', 'Select category…')}
+              />
+            ) : (
+              <div>
+                <label className="form-label">{t('finance.exp_category', 'Category')} <span className="text-rose-500">*</span></label>
+                <button type="button" onClick={() => { setFormOpen(false); setActiveTab('master'); }} className="btn btn-outline btn-block">
+                  {t('finance.exp_add_categories', 'Add them in Master data')}
+                </button>
+              </div>
+            )}
+            <div>
+              <label className="form-label">{t('common.amount', 'Amount')} <span className="text-rose-500">*</span></label>
+              <input type="number" min="0" step="any" value={form.amount} onChange={set('amount')} className="form-input font-bold tabular-nums" placeholder="0" required />
+            </div>
+
+            <DatePicker
+              label={t('finance.exp_date', 'Expense date')}
+              required
+              max={today}
+              value={form.expense_date}
+              onChange={iso => setForm(f => ({ ...f, expense_date: iso }))}
+            />
             <div>
               <label className="form-label">{t('finance.exp_payee_vendor', 'Payee / vendor')}</label>
               <input type="text" value={form.payee} onChange={set('payee')} className="form-input" />
             </div>
-          </div>
 
-          <div>
-            <label className="form-label">{t('finance.exp_receipt_ref_opt', 'Receipt / voucher ref (optional)')}</label>
-            <input type="text" value={form.receipt_ref} onChange={set('receipt_ref')} className="form-input font-mono" />
-            <p className="form-hint">{t('finance.exp_receipt_hint', 'Leave blank to flag as "Needs receipt" for later verification.')}</p>
+            <div>
+              <label className="form-label">{t('finance.exp_receipt_ref_opt', 'Receipt / voucher ref (optional)')}</label>
+              <input type="text" value={form.receipt_ref} onChange={set('receipt_ref')} className="form-input font-mono" />
+            </div>
+            <div>
+              <label className="form-label">{t('common.notes', 'Notes')}</label>
+              <input type="text" value={form.notes} onChange={set('notes')} className="form-input" />
+            </div>
           </div>
-
-          <div>
-            <label className="form-label">{t('common.notes', 'Notes')}</label>
-            <textarea rows={2} value={form.notes} onChange={set('notes')} className="form-input" />
-          </div>
+          <p className="form-hint mt-4">{t('finance.exp_receipt_hint', 'Leave blank to flag as "Needs receipt" for later verification.')}</p>
         </form>
       </Modal>
 
@@ -866,7 +849,7 @@ export const ExpensesView: React.FC = () => {
               <p className="text-[11px] text-slate-500 dark:text-slate-400">{tv(verifyExpense.category)}</p>
             </div>
             <div>
-              <label className="form-label">{t('finance.exp_receipt_number', 'Receipt / voucher number')} *</label>
+              <label className="form-label">{t('finance.exp_receipt_number', 'Receipt / voucher number')} <span className="text-rose-500">*</span></label>
               <input
                 type="text"
                 value={receiptVoucher}

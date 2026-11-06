@@ -163,7 +163,7 @@ export const ChartCard: React.FC<ChartCardProps> = ({ title, subtitle, icon, act
               onClick={() => setShowTable(s => !s)}
               title={toggleLabel}
               aria-label={toggleLabel}
-              className="p-1.5 rounded-lg text-slate-500 hover:text-brand hover:bg-slate-100 dark:hover:bg-slate-800 dark:text-slate-400"
+              className="btn btn-outline btn-sm btn-icon"
             >
               {showTable ? <BarChart3 size={15} /> : <Table2 size={15} />}
             </button>

@@ -50,30 +50,14 @@
   }
 }
 
-/* Custom sleek scrollbar */
-::-webkit-scrollbar {
-  width: 6px;
-  height: 6px;
-}
-::-webkit-scrollbar-track {
-  background: #f1f5f9;
-}
-.dark ::-webkit-scrollbar-track {
-  background: #0d161a;
-}
-::-webkit-scrollbar-thumb {
-  background: #cbd5e1;
-  border-radius: 9999px;
-}
-.dark ::-webkit-scrollbar-thumb {
-  background: #253944;
-}
-::-webkit-scrollbar-thumb:hover {
-  background: #94a3b8;
-}
-.dark ::-webkit-scrollbar-thumb:hover {
-  background: #344f5e;
-}
+/* Slim scrollbar: 4px thumb on a transparent track (10px hit area), 6px on hover. */
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-corner { background: transparent; }
+::-webkit-scrollbar-thumb { background: #c5cfd8; border-radius: 9999px; border: 3px solid transparent; background-clip: content-box; }
+::-webkit-scrollbar-thumb:hover { background: #8ea0af; border-width: 2px; }
+.dark ::-webkit-scrollbar-thumb { background: #2e4553; background-clip: content-box; }
+.dark ::-webkit-scrollbar-thumb:hover { background: #4a6a7d; background-clip: content-box; }
 
 /* Smooth transitions */
 /* Only cheap properties transition (`all` caused layout work on every hover). */
@@ -201,7 +185,7 @@ button, a, input, select, textarea {
 /* ---- Dialogs --------------------------------------------------------------- */
 .modal-backdrop {
   position: fixed; inset: 0; z-index: 900;
-  display: flex; align-items: center; justify-content: center; padding: 1.5rem;
+  display: flex; align-items: center; justify-content: center; padding: 1rem;
   background: rgba(226, 232, 240, 0.6);
   backdrop-filter: blur(7px) saturate(1.1);
   animation: bf-fade .2s ease-out both;
@@ -209,7 +193,7 @@ button, a, input, select, textarea {
 .dark .modal-backdrop { background: rgba(5, 11, 14, 0.62); }
 .modal-panel:focus, .modal-panel:focus-visible { outline: none; }
 .modal-panel {
-  display: flex; flex-direction: column; max-height: calc(100vh - 3rem);
+  display: flex; flex-direction: column; max-height: calc(100vh - 2rem);
   background: #fff; border: 1px solid rgb(226 232 240); border-radius: 1.5rem;
   box-shadow: 0 32px 80px -16px rgba(15, 23, 42, 0.3), 0 4px 14px rgba(15, 23, 42, 0.07);
   animation: bf-pop .32s var(--bf-ease) both;

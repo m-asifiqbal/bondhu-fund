@@ -349,7 +349,7 @@ export const UserManagementView: React.FC = () => {
           </>
         }
       >
-        <form id="add-user-form" onSubmit={handleCreate} className="space-y-4 text-xs">
+        <form id="add-user-form" onSubmit={handleCreate} className="space-y-3 text-xs">
           <div className="flex items-center gap-4">
             <UserAvatar user={{ avatar: add.avatar, avatar_initials: add.full_name.trim() ? initialsOf(add.full_name) : '?', full_name: add.full_name }}
               className="w-16 h-16 rounded-2xl" textClass="text-lg" />
