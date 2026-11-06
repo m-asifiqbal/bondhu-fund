@@ -95,7 +95,7 @@ Get the latest files from **[Releases](https://github.com/m-asifiqbal/bondhu-fun
 
   | Account | Password | Access |
   |---|---|---|
-  | `admin` | `admin` (you're asked to change it after the first sign-in) | Everything **except data upload** |
+  | `admin` | set by the owner and given separately (only its salted hash is in the code); changeable from the profile screen | Everything **except data upload** |
   | `iqbal_labs` | fixed (given to the owner separately) | Everything, **including data upload**. A protected account: it can't be deleted, edited by others, deactivated, and its password can't be changed. |
 
 - Admins create users, set their passwords and assign roles (Admin, Treasurer, Manager, Auditor). **Auditors are read-only**. Master Data, Users and Settings are Admin-only.

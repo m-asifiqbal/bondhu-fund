@@ -366,7 +366,7 @@ export const CollectionsView: React.FC = () => {
               </p>
             </div>
             <SegmentedTabs ariaLabel={t('members.col_status', 'Payment status')} value={selectedTab} onChange={setSelectedTab}
-              items={tabs.map(tb => ({ key: tb.key, label: tb.key === 'All' ? t('common.all', 'All') : tv(tb.key), count: n(tb.count), accent: tb.active }))} />
+              items={tabs.map(tb => ({ key: tb.key, label: tb.key === 'All' ? t('common.all', 'All') : tv(tb.key), count: n(tb.count) }))} />
           </div>
 
           {/* Filters */}

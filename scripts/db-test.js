@@ -122,18 +122,24 @@ const throws = (fn, re, msg) => { try { fn(); ok(false, `${msg} (no error)`); } 
   A.logout();
   throws(() => store.authorize('getMembers'), /sign in/i, 'no session → API calls refused');
   throws(() => A.login('admin', 'wrong'), /Incorrect/, 'wrong password rejected');
-  const s1 = A.login('admin', 'admin');
-  ok(s1 && s1.isAdmin && !s1.canUpload && s1.mustChangePassword, 'admin/admin signs in (Admin, no upload, asked to change password)');
+  // The owner-set admin password is never stored in the repo: pass it via env to run the admin checks.
+  const adminPw = process.env.BONDHU_ADMIN_PASSWORD;
+  throws(() => A.login('admin', 'admin'), /Incorrect/, 'the old public default password (admin) no longer works');
+  if (!adminPw) { console.log('SKIP  admin sign-in / permission checks (set BONDHU_ADMIN_PASSWORD to run them)'); }
+  else {
+  const s1 = A.login('admin', adminPw);
+  ok(s1 && s1.isAdmin && !s1.canUpload && !s1.mustChangePassword, 'admin signs in with the owner password (Admin, no upload, no forced change)');
   throws(() => store.authorize('bulkAddMembers'), /iqbal_labs/, 'admin cannot upload data');
   throws(() => store.requireUpload(), /iqbal_labs/, 'admin blocked from Excel import');
   throws(() => store.authorize('updateUser', [A.getUsers().find(u => u.username === 'iqbal_labs').id, { full_name: 'x' }]), /protected/, 'admin cannot edit iqbal_labs');
   throws(() => A.setUserPassword(A.getUsers().find(u => u.username === 'iqbal_labs').id, 'newpass1'), /fixed/, 'iqbal_labs password cannot be set by admin');
-  throws(() => A.changeOwnPassword('admin', 'abc'), /at least 6/, 'short password rejected');
-  A.changeOwnPassword('admin', 'Secur3pass');
+  throws(() => A.changeOwnPassword(adminPw, 'abc'), /at least 6/, 'short password rejected');
+  A.changeOwnPassword(adminPw, 'Secur3pass');
   A.logout();
-  throws(() => A.login('admin', 'admin'), /Incorrect/, 'old admin password no longer works');
+  throws(() => A.login('admin', adminPw), /Incorrect/, 'previous admin password no longer works after a change');
   ok(!!A.login('admin', 'Secur3pass'), 'admin signs in with the new password');
   A.logout();
+  }
   throws(() => A.login('iqbal_labs', 'not-the-password'), /Incorrect/, 'iqbal_labs rejects a wrong password');
   // The real system password is never stored in the repo: pass it via env to run these checks.
   const sysPw = process.env.BONDHU_SYSTEM_PASSWORD;
@@ -148,7 +154,7 @@ const throws = (fn, re, msg) => { try { fn(); ok(false, `${msg} (no error)`); } 
     console.log('SKIP  iqbal_labs sign-in checks (set BONDHU_SYSTEM_PASSWORD to run them)');
   }
   for (let i = 0; i < 5; i++) { try { A.login('admin', 'nope'); } catch { /* expected */ } }
-  throws(() => A.login('admin', 'Secur3pass'), /Too many/, 'account locks after 5 wrong attempts');
+  throws(() => A.login('admin', adminPw || 'x'), /Too many/, 'account locks after 5 wrong attempts');
   // reopening restores the fixed account even if it was tampered with in the file
   const health = A.checkAccountingHealth();
   ok(health.fails === 0, `health check on demo data: ${health.passes} pass, ${health.warns} warn, ${health.fails} fail`);

@@ -214,7 +214,7 @@ export const ExcelImportModal: React.FC<Props> = ({ open, onClose, onPasteInstea
             <SegmentedTabs size="sm" value={tab} onChange={setTab}
               items={[
                 { key: 'members' as const, label: t('members.imp_tab_members', 'Members'), count: n(preview.members.length) },
-                { key: 'payments' as const, label: t('members.imp_tab_issues', 'Payment issues'), count: n(payIssues.length), accent: payIssues.length ? 'text-amber-700 dark:text-amber-400' : undefined },
+                { key: 'payments' as const, label: t('members.imp_tab_issues', 'Payment issues'), count: n(payIssues.length) },
               ]} />
             {tab === 'members' && (
               <label className="flex items-center gap-2 text-xs font-semibold text-slate-600 dark:text-slate-300 cursor-pointer">

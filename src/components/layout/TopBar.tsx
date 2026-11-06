@@ -249,7 +249,7 @@ export const TopBar: React.FC = () => {
                 <SegmentedTabs size="sm" value={notifFilter} onChange={setNotifFilter} ariaLabel={t('topbar.notifications', 'System Notifications')}
                   items={[
                     { key: 'all' as const, label: t('common.all', 'All'), count: num((notifications || []).length) },
-                    { key: 'warning' as const, label: t('shell.attention', 'Attention'), accent: 'text-amber-700 dark:text-amber-400' },
+                    { key: 'warning' as const, label: t('shell.attention', 'Attention') },
                     { key: 'info' as const, label: t('shell.updates', 'Updates') },
                   ]} />
               </div>

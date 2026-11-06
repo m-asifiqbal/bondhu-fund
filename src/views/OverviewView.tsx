@@ -5,6 +5,7 @@ import {
   ArrowDownLeft, ArrowUpRight, UserPlus, FileWarning, ShieldCheck, Sparkles, DatabaseBackup, Plus, Timer,
 } from 'lucide-react';
 import { useApp } from '../context/AppContext';
+import { ClockCard, TodayDates } from '../components/common/ClockCard';
 import { MonthPicker } from '../components/common/MonthPicker';
 import { Modal } from '../components/common/Modal';
 import { EChart, ChartCard, chartTheme, baseOption, valueAxis, categoryAxis } from '../components/charts/EChart';
@@ -339,13 +340,16 @@ export const OverviewView: React.FC = () => {
     <div className="p-4 sm:p-6 lg:p-8 space-y-8 max-w-[1600px] mx-auto">
       {/* Header */}
       <div className="flex flex-wrap items-end justify-between gap-4">
+        <div className="flex flex-wrap items-start gap-x-8 gap-y-4 min-w-0">
         <div>
           <h1 className="text-2xl font-black text-slate-900 dark:text-white tracking-tight">{hello}{firstName ? `, ${firstName}` : ''}</h1>
           <p className="text-xs text-slate-500 dark:text-slate-400 mt-1 font-medium">{tr('subtitle')} <b className="text-slate-700 dark:text-slate-200">{fmtMonth(data.month, language as any, false)}</b></p>
+          <TodayDates />
         </div>
-        <div className="flex flex-wrap items-center gap-2 no-print">
+        <ClockCard />
+        </div>
+        <div className="flex flex-wrap items-center gap-2 no-print ml-auto">
           <MonthPicker value={selectedMonth} onChange={setSelectedMonth} />
-          <button onClick={load} title={tr('refresh')} aria-label={tr('refresh')} className="p-2.5 rounded-xl border border-slate-300 dark:border-[#283e4a] bg-white dark:bg-[#16252d] text-slate-600 dark:text-slate-300 hover:text-brand"><RefreshCw size={15} className={loading ? 'animate-spin' : ''} /></button>
           <button onClick={exportCsv} className="flex items-center gap-1.5 px-3.5 py-2.5 bg-white dark:bg-[#16252d] border border-slate-300 dark:border-[#283e4a] rounded-xl text-xs font-bold text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800"><Download size={14} />{tr('export')}</button>
           <button onClick={exportPdf} className="btn btn-primary"><Printer size={14} />{tr('pdf')}</button>
         </div>

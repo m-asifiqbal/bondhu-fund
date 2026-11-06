@@ -251,9 +251,9 @@ export const EntryCenterView: React.FC = () => {
           </label>
           <SegmentedTabs ariaLabel={t('members.entry_type', 'Entry type')} value={entryType} onChange={setEntryType}
             items={[
-              { key: 'money', label: t('members.entry_money', 'Money received'), icon: <Coins size={15} />, accent: 'text-[#0f5a43] dark:text-emerald-300' },
-              { key: 'expense', label: t('members.entry_expense', 'Expense'), icon: <Receipt size={15} />, accent: 'text-rose-700 dark:text-rose-400' },
-              { key: 'investment', label: t('members.entry_investment', 'Investment'), icon: <TrendingUp size={15} />, accent: 'text-blue-700 dark:text-blue-400' },
+              { key: 'money', label: t('members.entry_money', 'Money received'), icon: <Coins size={15} /> },
+              { key: 'expense', label: t('members.entry_expense', 'Expense'), icon: <Receipt size={15} /> },
+              { key: 'investment', label: t('members.entry_investment', 'Investment'), icon: <TrendingUp size={15} /> },
             ]} />
         </div>
 

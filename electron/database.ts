@@ -1241,13 +1241,16 @@ function deleteUser(id: number) {
 // ---------------------------------------------------------------------------
 /**
  * Built-in accounts (ensured on every open):
- *  - admin       : role Admin, initial password "admin" (changeable). Everything except data upload.
+ *  - admin       : role Admin, owner-set initial password (only its scrypt hash is stored here; changeable).
+ *                  Everything except data upload.
  *  - iqbal_labs  : protected system account, fixed password (only its scrypt hash is stored here),
  *                  the ONLY account allowed to upload data (Excel / bulk member import).
  */
 const SYSTEM_USER = 'iqbal_labs';
 const SYSTEM_SALT = '1b67ae44a77d2428a68be9cc886d8780';
 const SYSTEM_HASH = 'e18f832c1169fc1b872765ebfd326224e7e9ac637ea143e0e8b26bcb1650b331a9edf6f1cb9cd3b03fefaa5711d88b098969a050254d52b336ec88a826410b29';
+const ADMIN_SALT = '515617069c45cc20cfa6b6dc74dd1888';
+const ADMIN_HASH = 'b46ed0057df930290b0dc5bc2388a66b0df83fa35bba4e13abef526d5a9fae27120ef525b157f6680aa64718f9108d5dd40fc675dd0ebdcbb2e2248c101b9977';
 const SCRYPT = { N: 16384, r: 8, p: 1 };
 
 interface Session { id: number; username: string; role: string; isSystem: boolean }
@@ -1265,14 +1268,15 @@ function verifyPassword(password: string, salt: string, hash: string) {
 /** Schema v3: is_system flag + the two built-in accounts. Idempotent. */
 function ensureAccounts() {
   addColumn('users', 'is_system', 'INTEGER NOT NULL DEFAULT 0');
-  const admin = get(`SELECT id, password_hash FROM users WHERE username = 'admin'`);
+  const admin = get(`SELECT id, password_hash, password_salt, must_change_password FROM users WHERE username = 'admin'`);
   if (!admin) {
-    const h = hashPassword('admin');
     run(`INSERT INTO users (username, full_name, email, role, avatar_initials, status, password_hash, password_salt, must_change_password)
-         VALUES ('admin','Administrator','','Admin','AD','Active',?,?,1)`, [h.hash, h.salt]);
+         VALUES ('admin','Administrator','','Admin','AD','Active',?,?,0)`, [ADMIN_HASH, ADMIN_SALT]);
   } else if (!admin.password_hash) {
-    const h = hashPassword('admin');
-    run(`UPDATE users SET password_hash = ?, password_salt = ?, must_change_password = 1, status = 'Active', role = 'Admin' WHERE id = ?`, [h.hash, h.salt, admin.id]);
+    run(`UPDATE users SET password_hash = ?, password_salt = ?, must_change_password = 0, status = 'Active', role = 'Admin' WHERE id = ?`, [ADMIN_HASH, ADMIN_SALT, admin.id]);
+  } else if (admin.must_change_password && verifyPassword('admin', admin.password_salt, admin.password_hash)) {
+    // Databases created by earlier versions still carry the old public default password: replace it.
+    run(`UPDATE users SET password_hash = ?, password_salt = ?, must_change_password = 0 WHERE id = ?`, [ADMIN_HASH, ADMIN_SALT, admin.id]);
   }
   const sys = get('SELECT id FROM users WHERE username = ?', [SYSTEM_USER]);
   if (!sys) {

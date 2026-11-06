@@ -6,8 +6,6 @@ export interface SegItem<T extends string> {
   icon?: React.ReactNode;
   /** small count badge after the label */
   count?: React.ReactNode;
-  /** text colour classes while selected (the tab's accent), e.g. "text-rose-700 dark:text-rose-400" */
-  accent?: string;
   title?: string;
 }
 
@@ -21,8 +19,8 @@ interface Props<T extends string> {
 }
 
 /**
- * Segmented control with a light-green selection pill that slides (and resizes) to the chosen tab.
- * The selected tab keeps its accent text colour; the badge pops when it becomes active.
+ * Segmented control with a solid-green selection pill that slides (and resizes) to the chosen tab.
+ * The selected tab is solid green with white text; the badge pops when it becomes active.
  */
 export function SegmentedTabs<T extends string>({ items, value, onChange, size = 'md', className = '', ariaLabel }: Props<T>) {
   const wrap = useRef<HTMLDivElement>(null);
@@ -84,7 +82,7 @@ export function SegmentedTabs<T extends string>({ items, value, onChange, size =
             tabIndex={selected ? 0 : -1}
             title={it.title}
             onClick={() => onChange(it.key)}
-            className={`seg-btn ${selected ? (it.accent || 'text-[#0f5a43] dark:text-emerald-300') : ''}`}
+            className="seg-btn"
           >
             {it.icon}
             <span>{it.label}</span>
