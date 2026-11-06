@@ -86,29 +86,37 @@ export function signatureHtml(op: Operator, receiverName: string | undefined, la
 
 export const PDF_CSS = (landscape: boolean) => `
   ${fontFaceCss()}
-  @page { size: A4 ${landscape ? 'landscape' : 'portrait'}; margin: 0; }
+  /* real page margins: the printable area is inset from every paper edge */
+  @page { size: A4 ${landscape ? 'landscape' : 'portrait'}; margin: ${landscape ? '13mm 15mm 17mm' : '15mm 17mm 19mm'}; }
   * { box-sizing: border-box; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
-  body { font-family: ${FONT_STACK}; color: #0f172a; font-size: 10.5px; margin: 0; }
-  .page { padding: 0; display: flex; flex-direction: column; min-height: ${landscape ? '176mm' : '263mm'}; }
+  body { font-family: ${FONT_STACK}; color: #0f172a; font-size: 10.5px; line-height: 1.4; margin: 0; }
+  .page { display: flex; flex-direction: column; min-height: ${landscape ? '178mm' : '260mm'}; }
   .page.brk { page-break-after: always; }
-  .band { display: flex; justify-content: space-between; align-items: flex-end; border-bottom: 3px solid ${BRAND_HEX}; padding-bottom: 9px; }
-  .org { font-size: 18px; font-weight: 800; color: ${BRAND_HEX}; } .doc { font-size: 12px; color: #334155; font-weight: 700; margin-top: 2px; } .sub { color: #64748b; font-size: 10px; margin-top: 2px; }
-  .gen { color: #64748b; font-size: 9.5px; text-align: right; }
-  .meta { display: flex; flex-wrap: wrap; gap: 4px 22px; margin: 10px 0 2px; color: #475569; } .meta b { color: #0f172a; }
-  .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 7px; margin: 10px 0; }
-  .cards div { border: 1px solid #cbd5e1; border-left: 4px solid ${BRAND_HEX}; border-radius: 8px; padding: 6px 9px; background: #f8fafc; }
-  .cards span { display: block; color: #64748b; font-size: 9px; } .cards b { font-size: 12px; }
-  h3.st { margin: 14px 0 5px; font-size: 12px; color: ${BRAND_HEX}; }
-  table { width: 100%; border-collapse: collapse; } thead { display: table-header-group; } tr { page-break-inside: avoid; }
-  th { background: ${BRAND_HEX}; color: #fff; text-align: left; padding: 6px 7px; font-size: 9.5px; font-weight: 700; }
-  td { padding: 5px 7px; border-bottom: 1px solid #e2e8f0; vertical-align: top; } tbody tr:nth-child(even) td { background: #f8fafc; }
-  .n { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; } .c { text-align: center; } .na { color: #94a3b8; }
-  tfoot td { font-weight: 800; border-top: 2px solid ${BRAND_HEX}; background: #ecfdf5; }
-  .empty { text-align: center; color: #94a3b8; padding: 14px; }
-  .pill { padding: 1px 7px; border-radius: 99px; font-weight: 700; font-size: 9px; } .pill.paid { background: #d1fae5; color: #047857; } .pill.overdue { background: #ffe4e6; color: #be123c; } .pill.pending { background: #fef3c7; color: #b45309; }
+  /* header */
+  .band { display: flex; justify-content: space-between; align-items: center; gap: 24px; background: ${BRAND_HEX}; color: #fff; border-radius: 10px; padding: 13px 18px; border-bottom: 4px solid #d4a73a; }
+  .org { font-size: 19px; font-weight: 800; letter-spacing: .2px; } .doc { font-size: 12px; font-weight: 700; margin-top: 3px; color: #d1fae5; text-transform: uppercase; letter-spacing: 1.2px; }
+  .sub { color: #a7f3d0; font-size: 10px; margin-top: 3px; }
+  .gen { color: #d1fae5; font-size: 9.5px; text-align: right; line-height: 1.6; } .gen b { color: #fff; }
+  .meta { display: flex; flex-wrap: wrap; gap: 4px 20px; margin: 11px 2px 2px; color: #475569; } .meta b { color: #0f172a; }
+  /* summary cards */
+  .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 9px; margin: 12px 0 14px; }
+  .cards div { border: 1px solid #d7e5df; border-top: 3px solid ${BRAND_HEX}; border-radius: 8px; padding: 7px 11px 8px; background: #f4faf7; }
+  .cards span { display: block; color: #64748b; font-size: 9px; text-transform: uppercase; letter-spacing: .5px; } .cards b { font-size: 13px; color: #0b4f3b; }
+  h3.st { margin: 16px 0 6px; font-size: 12px; color: ${BRAND_HEX}; padding-left: 8px; border-left: 4px solid #d4a73a; }
+  /* tables */
+  table { width: 100%; border-collapse: separate; border-spacing: 0; border: 1px solid #cfdcd6; border-radius: 8px; overflow: hidden; }
+  thead { display: table-header-group; } tfoot { display: table-row-group; } tr { page-break-inside: avoid; }
+  th { background: ${BRAND_HEX}; color: #fff; text-align: left; padding: 7px 9px; font-size: 9.5px; font-weight: 700; letter-spacing: .3px; }
+  td { padding: 6px 9px; border-bottom: 1px solid #e5ece9; vertical-align: top; } tbody tr:nth-child(even) td { background: #f6faf8; } tbody tr:last-child td { border-bottom: 0; }
+  .n { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; } .c { text-align: center; } .na { color: #9aa8b5; }
+  tfoot td { font-weight: 800; border-top: 2px solid ${BRAND_HEX}; border-bottom: 0; background: #e6f4ee; color: #0b4f3b; }
+  .empty { text-align: center; color: #94a3b8; padding: 16px; }
+  .pill { display: inline-block; padding: 1px 8px; border-radius: 99px; font-weight: 700; font-size: 9px; } .pill.paid { background: #d1fae5; color: #047857; } .pill.overdue { background: #ffe4e6; color: #be123c; } .pill.pending { background: #fef3c7; color: #b45309; }
+  .note { background: #fffbeb; border: 1px solid #fcd34d; border-radius: 8px; padding: 8px 12px; margin: 0 0 12px; color: #78350f; }
   .grow { flex: 1; }
-  .sign { display: flex; justify-content: space-between; gap: 60px; margin-top: 46px; padding-top: 8px; page-break-inside: avoid; }
-  .sig { width: 42%; } .sig.r { text-align: right; } .sig .line { border-top: 1.5px solid #0f172a; margin-bottom: 5px; height: 0; }
+  /* signatures stay inside the margins */
+  .sign { display: flex; justify-content: space-between; gap: 40px; margin-top: 40px; padding: 0 6px; page-break-inside: avoid; }
+  .sig { width: 40%; } .sig.r { text-align: right; } .sig .line { border-top: 1.5px solid #0f172a; margin-bottom: 5px; height: 0; }
   .sig .cap { font-weight: 800; font-size: 10.5px; } .sig .nm { margin-top: 5px; } .sig .rl { color: #64748b; font-size: 9.5px; }
   .blank { display: inline-block; width: 150px; border-bottom: 1px dotted #475569; height: 11px; vertical-align: bottom; }
 `;
@@ -152,7 +160,7 @@ export async function renderPdf(html: string, landscape: boolean): Promise<Buffe
     await win.loadFile(tmp);
     return await win.webContents.printToPDF({
       printBackground: true, pageSize: 'A4', landscape,
-      margins: { top: 0.5, bottom: 0.6, left: 0.45, right: 0.45 },
+      preferCSSPageSize: true,
       displayHeaderFooter: true, headerTemplate: '<span></span>',
       footerTemplate: '<div style="font-size:8px;width:100%;text-align:center;color:#64748b;font-family:Segoe UI,Arial"><span class="pageNumber"></span> / <span class="totalPages"></span></div>',
     });

@@ -46,6 +46,8 @@ export interface Member {
   last_payment_date?: string;
   current_month_status?: PaymentStatus | null;
   name_bn?: string | null;
+  /** National ID (NID): required for every member; 10, 13 or 17 digits. */
+  nid?: string | null;
   opening_balance?: number;
   notes?: string;
 }

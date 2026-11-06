@@ -78,7 +78,7 @@ export const updateMember = (id: number, d: Partial<Member>) => call<void>('upda
 export const deleteMember = (id: number) => call<void>('deleteMember', id);
 export const getMemberHistory = (memberId: number) => call<CollectionRecord[]>('getMemberHistory', memberId);
 export const getMemberStatement = (memberId: number) => call<MemberStatement>('getMemberStatement', memberId);
-export const bulkAddMembers = (list: Array<{ name: string; phone?: string; email?: string; monthly_due?: number; join_date?: string; designation?: string; opening_balance?: number; notes?: string }>) => call<number>('bulkAddMembers', list);
+export const bulkAddMembers = (list: Array<{ name: string; nid?: string; phone?: string; email?: string; monthly_due?: number; join_date?: string; designation?: string; opening_balance?: number; notes?: string }>) => call<number>('bulkAddMembers', list);
 
 // Collections ----------------------------------------------------------------
 export const getCollections = (month?: string, statusTab = 'All', startDate?: string, endDate?: string, search = '', sortBy = 'newest') =>

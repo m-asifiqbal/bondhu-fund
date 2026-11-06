@@ -20,7 +20,7 @@ const throws = (fn, re, m) => { try { fn(); ok(false, `${m} (no error)`); } catc
   A.resetDatabase(true);
 
   // Members joined 2025-01-01. Opening balances: A 1000, B 1000, C 2000 (total 4000)
-  const mk = (name, opening) => A.addMember({ name, opening_balance: opening, join_date: '2025-01-01', monthly_due: 500 });
+  let nidN = 1990123400000; const mk = (name, opening) => A.addMember({ name, nid: String(++nidN), opening_balance: opening, join_date: '2025-01-01', monthly_due: 500 });
   const a = mk('Member A', 1000), b = mk('Member B', 1000), c = mk('Member C', 2000);
   const inv = A.addInvestment({ name: 'Plot X', sector: 'Land', invested_amount: 3000, purchase_date: '2025-02-01' });
 

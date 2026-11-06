@@ -364,7 +364,7 @@ export const CollectionsView: React.FC = () => {
               <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 dark:text-slate-500" />
               <input
                 type="text"
-                placeholder={t('members.col_searchPh', 'Search member, code, phone or TRX ID…')}
+                placeholder={t('members.col_searchPh', 'Search member, NID, code, phone or TRX ID…')}
                 aria-label={t('members.col_searchPh', 'Search member, code, phone or TRX ID…')}
                 value={searchInput}
                 onChange={e => setSearchInput(e.target.value)}

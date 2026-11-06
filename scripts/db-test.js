@@ -50,9 +50,9 @@ const throws = (fn, re, msg) => { try { fn(); ok(false, `${msg} (no error)`); } 
   ok(A.getUsers().length === 1 && A.getUsers()[0].username === 'admin', 'the protected iqbal_labs account is hidden from everyone but itself');
   ok(A.getMasterData('payment_method').length >= 5, 'default payment methods present');
 
-  const id = A.addMember({ name: 'Test Member', monthly_due: 2500, join_date: '2026-01-15' });
+  const id = A.addMember({ name: 'Test Member', nid: '1990123456001', monthly_due: 2500, join_date: '2026-01-15' });
   ok(id > 0, `addMember -> id ${id}`);
-  const id2 = A.addMember({ name: 'Second Person', member_code: 'BF-0001' }); // duplicate code -> auto
+  const id2 = A.addMember({ name: 'Second Person', nid: '1990123456002', member_code: 'BF-0001' }); // duplicate code -> auto
   ok(A.getMembers().members.find(x => x.id === id2).member_code !== 'BF-0001', 'duplicate member code auto-replaced');
   throws(() => A.addMember({ name: '  ' }), /required/i, 'empty name rejected');
 
@@ -121,6 +121,7 @@ const throws = (fn, re, msg) => { try { fn(); ok(false, `${msg} (no error)`); } 
 
   // 5) Sign-in, permissions, health check
   A.logout();
+  const sysId = 2;   // the hidden built-in iqbal_labs account (getUsers() never lists it for other users)
   throws(() => store.authorize('getMembers'), /sign in/i, 'no session → API calls refused');
   throws(() => A.login('admin', 'wrong'), /Incorrect/, 'wrong password rejected');
   // The owner-set admin password is never stored in the repo: pass it via env to run the admin checks.
@@ -131,9 +132,10 @@ const throws = (fn, re, msg) => { try { fn(); ok(false, `${msg} (no error)`); } 
   const s1 = A.login('admin', adminPw);
   ok(s1 && s1.isAdmin && !s1.canUpload && !s1.mustChangePassword, 'admin signs in with the owner password (Admin, no upload, no forced change)');
   throws(() => store.authorize('bulkAddMembers'), /iqbal_labs/, 'admin cannot upload data');
+  throws(() => store.authorize('deleteMember', [1]), /iqbal_labs/, 'admin cannot delete a member (Super User only)');
   throws(() => store.requireUpload(), /iqbal_labs/, 'admin blocked from Excel import');
-  throws(() => store.authorize('updateUser', [A.getUsers().find(u => u.username === 'iqbal_labs').id, { full_name: 'x' }]), /protected/, 'admin cannot edit iqbal_labs');
-  throws(() => A.setUserPassword(A.getUsers().find(u => u.username === 'iqbal_labs').id, 'newpass1'), /fixed/, 'iqbal_labs password cannot be set by admin');
+  throws(() => store.authorize('updateUser', [sysId, { full_name: 'x' }]), /protected/, 'admin cannot edit iqbal_labs');
+  throws(() => A.setUserPassword(sysId, 'newpass1'), /fixed/, 'iqbal_labs password cannot be set by admin');
   throws(() => A.changeOwnPassword(adminPw, 'abc'), /at least 6/, 'short password rejected');
   A.changeOwnPassword(adminPw, 'Secur3pass');
   A.logout();
@@ -148,6 +150,7 @@ const throws = (fn, re, msg) => { try { fn(); ok(false, `${msg} (no error)`); } 
     const s2 = A.login('IQBAL_LABS', sysPw);
     ok(s2 && s2.canUpload && s2.isAdmin, 'iqbal_labs signs in (case-insensitive username) with upload rights');
     store.authorize('bulkAddMembers'); store.requireUpload();
+    store.authorize('deleteMember', [1]);
     ok(true, 'iqbal_labs may upload');
     throws(() => A.changeOwnPassword(sysPw, 'another1'), /fixed/, 'iqbal_labs password is fixed');
     A.logout();

@@ -25,6 +25,7 @@ interface MemberForm {
   member_code: string;
   name: string;
   name_bn: string;
+  nid: string;
   phone: string;
   email: string;
   designation: string;
@@ -36,9 +37,21 @@ interface MemberForm {
 }
 
 const blankForm = (due: number): MemberForm => ({
-  member_code: '', name: '', name_bn: '', phone: '', email: '', designation: 'Member', status: 'Active',
+  member_code: '', name: '', name_bn: '', nid: '', phone: '', email: '', designation: 'Member', status: 'Active',
   monthly_due: due, join_date: todayISO(), opening_balance: 0, notes: '',
 });
+
+const BN_D = '০১২৩৪৫৬৭৮৯';
+/** NID as typed -> digits only (Bangla digits, spaces and dashes accepted). */
+const normalizeNid = (v: string) => v.replace(/[০-৯]/g, d => String(BN_D.indexOf(d))).replace(/[\s-]/g, '');
+/** Client-side mirror of the server rule: required, digits only, 10 / 13 / 17 long. */
+const nidProblem = (v: string): { key: string; en: string } | null => {
+  const s = normalizeNid(v);
+  if (!s) return { key: 'members.err_nid', en: 'National ID (NID) is required.' };
+  if (!/^\d+$/.test(s)) return { key: 'members.err_nid_digits', en: 'NID must contain digits only.' };
+  if (![10, 13, 17].includes(s.length)) return { key: 'members.err_nid_len', en: 'NID must be 10, 13 or 17 digits.' };
+  return null;
+};
 
 /** Fill {placeholders} in a translated template. */
 const fill = (s: string, vars: Record<string, string | number>) => s.replace(/\{(\w+)\}/g, (_, k) => String(vars[k] ?? ''));
@@ -194,6 +207,7 @@ export const MembersView: React.FC = () => {
       member_code: m.member_code,
       name: m.name,
       name_bn: m.name_bn || '',
+      nid: m.nid || '',
       phone: m.phone || '',
       email: m.email || '',
       designation: m.designation || 'Member',
@@ -213,12 +227,15 @@ export const MembersView: React.FC = () => {
     if (saving) return;
     if (!form.name.trim()) { showToast(t('members.err_name', 'Name is required.'), 'error'); return; }
     if (form.monthly_due === '' || Number(form.monthly_due) < 0) { showToast(t('members.err_due', 'Enter a valid monthly due.'), 'error'); return; }
+    const nidErr = nidProblem(form.nid);
+    if (nidErr) { showToast(t(nidErr.key, nidErr.en), 'error'); return; }
     if (!form.join_date) { showToast(t('members.err_join', 'Join date is required.'), 'error'); return; }
     if (Number(form.opening_balance) < 0) { showToast(t('members.err_opening', 'Opening balance cannot be negative.'), 'error'); return; }
 
     const payload: Partial<Member> = {
       name: form.name.trim(),
       name_bn: form.name_bn.trim() || null,
+      nid: normalizeNid(form.nid),
       phone: form.phone.trim(),
       email: form.email.trim(),
       designation: form.designation.trim() || 'Member',
@@ -293,7 +310,7 @@ export const MembersView: React.FC = () => {
     setOpenRecordModal(true);
   };
 
-  /** CSV columns: Name, Phone, Email, Monthly Due, Join Date (YYYY-MM-DD). A header row is skipped. */
+  /** CSV columns: Name, NID, Phone, Email, Monthly Due, Join Date (YYYY-MM-DD). A header row is skipped. */
   const parsedImport = useMemo(() => csvText
     .split(/\r?\n/)
     .map(l => l.trim())
@@ -301,8 +318,9 @@ export const MembersView: React.FC = () => {
     .map(line => line.split(/[,\t]/).map(s => s.trim().replace(/^"(.*)"$/, '$1')))
     .filter((cols, i) => !(i === 0 && /^name$/i.test(cols[0])))
     .filter(cols => cols[0])
-    .map(([name, phone, email, due, join]) => ({
+    .map(([name, nid, phone, email, due, join]) => ({
       name,
+      nid: nid || '',
       phone: phone || '',
       email: email || '',
       monthly_due: due && !isNaN(Number(due)) ? Number(due) : undefined,
@@ -410,8 +428,8 @@ export const MembersView: React.FC = () => {
             <Search size={15} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400 dark:text-slate-500" />
             <input
               type="text"
-              placeholder={t('members.search_ph', 'Search by name, phone, or member ID')}
-              aria-label={t('members.search_ph', 'Search by name, phone, or member ID')}
+              placeholder={t('members.search_ph', 'Search by name, NID, phone, or member ID')}
+              aria-label={t('members.search_ph', 'Search by name, NID, phone, or member ID')}
               value={searchInput}
               onChange={e => setSearchInput(e.target.value)}
               className="form-input pl-9"
@@ -506,7 +524,7 @@ export const MembersView: React.FC = () => {
                                 )}
                               </span>
                               <span className="text-[11px] text-slate-500 dark:text-slate-400 font-normal">
-                                {[other, m.phone].filter(Boolean).join(' · ') || '—'}
+                                {[other, m.phone, m.nid ? `NID ${m.nid}` : ''].filter(Boolean).join(' · ') || '—'}
                               </span>
                             </div>
                           </div>
@@ -539,10 +557,12 @@ export const MembersView: React.FC = () => {
                               title={t('common.edit', 'Edit')} aria-label={t('common.edit', 'Edit')}>
                               <Edit2 size={14} />
                             </button>
-                            <button type="button" onClick={() => setConfirmDelete(m)} className="btn btn-danger-outline btn-sm btn-icon"
-                              title={t('common.delete', 'Delete')} aria-label={t('common.delete', 'Delete')}>
-                              <Trash2 size={14} />
-                            </button>
+                            {canUpload && (
+                              <button type="button" onClick={() => setConfirmDelete(m)} className="btn btn-danger-outline btn-sm btn-icon"
+                                title={t('common.delete', 'Delete')} aria-label={t('common.delete', 'Delete')}>
+                                <Trash2 size={14} />
+                              </button>
+                            )}
                           </div>
                         </td>
                       </tr>
@@ -596,7 +616,7 @@ export const MembersView: React.FC = () => {
                 </h3>
                 {statement && (
                   <p className="text-[11px] text-slate-500 dark:text-slate-400">
-                    {statement.member.member_code} · {t('members.joined', 'Joined')} {formatDate(statement.member.join_date)} · {tv(statement.member.status)}
+                    {statement.member.member_code}{statement.member.nid ? ` · NID ${statement.member.nid}` : ''} · {t('members.joined', 'Joined')} {formatDate(statement.member.join_date)} · {tv(statement.member.status)}
                   </p>
                 )}
               </div>
@@ -733,6 +753,11 @@ export const MembersView: React.FC = () => {
               <input type="text" lang="bn" value={form.name_bn} onChange={e => setField('name_bn', e.target.value)} className="form-input"
                 title={t('members.name_bn_hint', 'Shown when the app is in Bangla.')}
                 placeholder={t('members.name_bn_ph', 'Optional, e.g. রফিক হাসান')} />
+            </div>
+            <div>
+              <label className="form-label">{t('members.nid', 'National ID (NID)')} <span className="text-rose-500">*</span></label>
+              <input type="text" inputMode="numeric" value={form.nid} onChange={e => setField('nid', e.target.value)} className="form-input font-mono tracking-wide"
+                placeholder={t('members.nid_ph', '10, 13 or 17 digits')} maxLength={25} />
             </div>
             <div>
               <label className="form-label">{t('members.phone', 'Mobile phone')}</label>
@@ -876,14 +901,14 @@ export const MembersView: React.FC = () => {
         <div className="space-y-4 text-xs">
           <p className="text-[11px] text-slate-500 dark:text-slate-400 leading-relaxed">
             {t('members.import_help', 'Paste one member per line. Columns:')}{' '}
-            <span className="font-mono font-bold">{t('members.import_cols', 'Name, Phone, Email, Monthly Due, Join Date (YYYY-MM-DD)')}</span>.{' '}
-            {t('members.import_help2', 'Only the name is required; a blank due uses the default from Settings and a blank join date uses today.')}
+            <span className="font-mono font-bold">{t('members.import_cols', 'Name, NID, Phone, Email, Monthly Due, Join Date (YYYY-MM-DD)')}</span>.{' '}
+            {t('members.import_help2', 'Name and a valid NID (10, 13 or 17 digits) are required; a blank due uses the default from Settings and a blank join date uses today.')}
           </p>
           <textarea
             rows={8}
             value={csvText}
             onChange={e => setCsvText(e.target.value)}
-            placeholder={t('members.import_ph', 'Name, Phone, Email, Monthly Due, Join Date')}
+            placeholder={t('members.import_ph', 'Name, NID, Phone, Email, Monthly Due, Join Date')}
             aria-label={t('members.import_title', 'Import members (CSV)')}
             className="form-input font-mono !text-[12px]"
           />
@@ -894,6 +919,7 @@ export const MembersView: React.FC = () => {
                   <tr>
 <th className="py-2 px-3 w-12 text-center">{t('common.no', 'No.')}</th>
                     <th className="py-2 px-3">{t('members.name', 'Full name')}</th>
+                    <th className="py-2 px-3">NID</th>
                     <th className="py-2 px-3">{t('members.phone', 'Mobile phone')}</th>
                     <th className="py-2 px-3">{t('members.email', 'Email')}</th>
                     <th className="py-2 px-3">{t('common.monthly_due', 'Monthly due')}</th>
@@ -905,6 +931,7 @@ export const MembersView: React.FC = () => {
                     <tr key={i}>
                       <td className="py-1.5 px-3 text-center text-slate-400 dark:text-slate-500 font-semibold tabular-nums">{serial(i + 1)}</td>
                       <td className="py-1.5 px-3 font-bold">{r.name}</td>
+                      <td className="py-1.5 px-3 font-mono">{r.nid || '—'}</td>
                       <td className="py-1.5 px-3">{r.phone || '—'}</td>
                       <td className="py-1.5 px-3">{r.email || '—'}</td>
                       <td className="py-1.5 px-3">{formatCurrency(r.monthly_due ?? defaultDue)}</td>

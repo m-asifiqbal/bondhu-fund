@@ -92,6 +92,8 @@ function ensureV2Columns() {
   ]) addColumn('users', c, d);
   addColumn('members', 'name_bn', 'TEXT');
   addColumn('users', 'full_name_bn', 'TEXT');
+  addColumn('members', 'nid', 'TEXT');
+  run("CREATE UNIQUE INDEX IF NOT EXISTS idx_members_nid ON members(nid) WHERE nid IS NOT NULL AND nid != ''");
   addColumn('master_data', 'name_bn', 'TEXT');
   for (const [, n, , bn] of DEFAULT_MASTER) run('UPDATE master_data SET name_bn = ? WHERE name = ? AND name_bn IS NULL', [bn, n]);
   addColumn('audit_log', 'user_id', 'INTEGER');
@@ -510,7 +512,7 @@ function duesForMonth(mk: string, today = todayISO()) {
   return {
     sql: `
       SELECT m.id AS member_id, m.member_code, m.name AS member_name, m.name_bn AS member_name_bn, m.phone AS member_phone,
-             m.monthly_due, m.avatar_initials,
+             m.monthly_due, m.avatar_initials, m.nid AS member_nid,
              c.id AS payment_id, c.payment_date, COALESCE(c.contribution_amount,0) AS contribution_amount,
              COALESCE(c.late_fee,0) AS late_fee, COALESCE(c.total_amount,0) AS total_amount,
              c.payment_method, c.trx_id, c.note, c.created_at,
@@ -744,6 +746,24 @@ function deleteInvestmentReturn(id: number) {
 // ---------------------------------------------------------------------------
 // Members
 // ---------------------------------------------------------------------------
+// ---- National ID (NID) -----------------------------------------------------------------
+const BN_DIGITS = '০১২৩৪৫৬৭৮৯';
+/** Validates a National ID: Bangla or English digits, 10, 13 or 17 long (spaces and dashes ignored). Never throws. */
+export function checkNid(raw: unknown): { ok: boolean; value: string; error: string } {
+  const s = String(raw ?? '').replace(/[০-৯]/g, d => String(BN_DIGITS.indexOf(d))).replace(/[\s-]/g, '');
+  if (!s) return { ok: false, value: '', error: 'National ID (NID) is required.' };
+  if (!/^\d+$/.test(s)) return { ok: false, value: '', error: 'NID must contain digits only.' };
+  if (![10, 13, 17].includes(s.length)) return { ok: false, value: '', error: 'NID must be 10, 13 or 17 digits.' };
+  return { ok: true, value: s, error: '' };
+}
+function nidOrFail(raw: unknown, exceptId?: number): string {
+  const c = checkNid(raw);
+  if (!c.ok) fail(c.error);
+  const dup = get('SELECT member_code, name FROM members WHERE nid = ?' + (exceptId ? ' AND id != ?' : ''), exceptId ? [(c as any).value, exceptId] : [(c as any).value]);
+  if (dup) fail(`This NID already belongs to ${dup.member_code} ${dup.name}.`);
+  return (c as any).value;
+}
+
 function getNextMemberCode(extra?: string[]) {
   const used = new Set<number>();
   for (const r of all('SELECT member_code FROM members')) {
@@ -770,7 +790,7 @@ function getMembers(search = '', status = 'All', page = 1, limit = 10, month?: s
     WITH paid AS (SELECT member_id, SUM(contribution_amount) s, MAX(payment_date) last FROM collections GROUP BY member_id),
          cur AS (SELECT member_id, id FROM collections WHERE payment_month = ?)
     SELECT m.id, m.member_code, m.name, m.phone, m.email, m.designation, m.status, m.monthly_due, m.join_date,
-           m.avatar_initials, m.notes, m.opening_balance, m.name_bn,
+           m.avatar_initials, m.notes, m.opening_balance, m.name_bn, m.nid,
            m.opening_balance + COALESCE(p.s,0) AS total_contributed, p.last AS last_payment_date,
            CASE WHEN cur.id IS NOT NULL THEN 'Paid'
                 WHEN m.status != 'Active' OR substr(m.join_date,1,7) > ? THEN NULL
@@ -781,9 +801,10 @@ function getMembers(search = '', status = 'All', page = 1, limit = 10, month?: s
   const where: string[] = [];
   const params: any[] = [];
   if (search?.trim()) {
-    where.push('(name LIKE ? OR name_bn LIKE ? OR phone LIKE ? OR member_code LIKE ? OR email LIKE ?)');
+    where.push('(name LIKE ? OR name_bn LIKE ? OR phone LIKE ? OR member_code LIKE ? OR email LIKE ? OR nid LIKE ?)');
     const q = `%${search.trim()}%`;
-    params.push(q, q, q, q, q);
+    const qn = `%${search.trim().replace(/[০-৯]/g, d => String(BN_DIGITS.indexOf(d))).replace(/[\s-]/g, '')}%`;   // NID typed with Bangla digits or dashes
+    params.push(q, q, q, q, q, qn);
   }
   if (status && status !== 'All') {
     if (status === 'Active' || status === 'Inactive') { where.push('status = ?'); params.push(status); }
@@ -808,7 +829,7 @@ function getMembers(search = '', status = 'All', page = 1, limit = 10, month?: s
 }
 
 function getAllMembersLite() {
-  return all(`SELECT id, member_code, name, name_bn, phone, monthly_due, status, avatar_initials FROM members ORDER BY name COLLATE NOCASE`);
+  return all(`SELECT id, member_code, name, name_bn, phone, nid, monthly_due, status, avatar_initials FROM members ORDER BY name COLLATE NOCASE`);
 }
 
 function validateMember(d: any) {
@@ -818,17 +839,18 @@ function validateMember(d: any) {
 
 function addMember(d: any) {
   validateMember(d);
+  const nid = nidOrFail(d.nid);
   const s = settingsMap();
   let code = d.member_code?.trim();
   if (!code || get('SELECT 1 FROM members WHERE member_code = ?', [code])) code = getNextMemberCode();
   const name = d.name.trim();
   const id = tx(() => {
-    run(`INSERT INTO members (member_code, name, name_bn, phone, email, designation, status, monthly_due, join_date, avatar_initials, opening_balance, notes)
-         VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`,
+    run(`INSERT INTO members (member_code, name, name_bn, phone, email, designation, status, monthly_due, join_date, avatar_initials, opening_balance, notes, nid)
+         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`,
       [code, name, d.name_bn?.trim() || null, d.phone?.trim() || '', d.email?.trim() || '', d.designation || 'Member', d.status || 'Active',
         d.monthly_due !== undefined && d.monthly_due !== '' ? Number(d.monthly_due) : Number(s.default_monthly_due),
         toISODate(d.join_date) || todayISO(), d.avatar_initials || initials(name),
-        Number(d.opening_balance ?? d.total_contributed) || 0, d.notes || '']);
+        Number(d.opening_balance ?? d.total_contributed) || 0, d.notes || '', nid]);
     const newId = lastId();
     audit('create', 'member', newId, `${code} ${name}`);
     return newId;
@@ -845,6 +867,7 @@ function updateMember(id: number, d: any) {
     monthly_due: d.monthly_due !== undefined ? Number(d.monthly_due) : undefined,
     join_date: d.join_date ? toISODate(d.join_date) : undefined, notes: d.notes,
     opening_balance: d.opening_balance !== undefined ? Number(d.opening_balance) : undefined,
+    nid: d.nid !== undefined ? nidOrFail(d.nid, id) : undefined,
     avatar_initials: d.name ? initials(d.name) : undefined,
   };
   const keys = Object.keys(fields).filter(k => fields[k] !== undefined);
@@ -868,7 +891,7 @@ function updateMember(id: number, d: any) {
 function deleteMember(id: number) {
   const payments = num('SELECT COUNT(*) FROM collections WHERE member_id = ?', [id]);
   if (get('SELECT 1 FROM member_settlements WHERE member_id = ?', [id])) fail('This member has a settlement record, so the member cannot be deleted.');
-  if (payments > 0) fail(`This member has ${payments} payment record(s). Set the member to Inactive instead, so the fund history stays correct.`);
+  if (payments > 0) fail(`This member has ${payments} payment record(s). Settle the member so they become Inactive instead, so the fund history stays correct.`);
   tx(() => {
     const m = get('SELECT member_code, name FROM members WHERE id = ?', [id]);
     run('DELETE FROM members WHERE id = ?', [id]);
@@ -930,6 +953,18 @@ export function getStatementsData(memberIds?: number[]) {
 function bulkAddMembers(list: any[]) {
   const s = settingsMap();
   const batch: string[] = [];
+  // every person needs a valid, unique NID: check the whole list first so nothing is half-imported
+  const nids = new Map<string, number>();
+  (list || []).forEach((m, i) => {
+    if (!String(m?.name || '').trim()) return;
+    const c = checkNid(m?.nid);
+    if (!c.ok) fail(`Row ${i + 1} (${String(m.name).trim()}): ${c.error}`);
+    const v = (c as any).value as string;
+    if (nids.has(v)) fail(`Row ${i + 1}: NID ${v} is also used in row ${nids.get(v)}.`);
+    nids.set(v, i + 1);
+    const dup = get('SELECT member_code, name FROM members WHERE nid = ?', [v]);
+    if (dup) fail(`Row ${i + 1}: NID ${v} already belongs to ${dup.member_code} ${dup.name}.`);
+  });
   const count = tx(() => {
     let c = 0;
     for (const m of list || []) {
@@ -937,11 +972,11 @@ function bulkAddMembers(list: any[]) {
       if (!name) continue;
       const code = getNextMemberCode(batch);
       batch.push(code);
-      run(`INSERT INTO members (member_code, name, phone, email, designation, status, monthly_due, join_date, avatar_initials, opening_balance, notes)
-           VALUES (?,?,?,?,?,'Active',?,?,?,?,?)`,
+      run(`INSERT INTO members (member_code, name, phone, email, designation, status, monthly_due, join_date, avatar_initials, opening_balance, notes, nid)
+           VALUES (?,?,?,?,?,'Active',?,?,?,?,?,?)`,
         [code, name, String(m.phone || '').trim(), String(m.email || '').trim(), String(m.designation || 'Member').trim(),
           Number(m.monthly_due) || Number(s.default_monthly_due), toISODate(m.join_date) || todayISO(), initials(name),
-          Number(m.opening_balance) || 0, String(m.notes || '')]);
+          Number(m.opening_balance) || 0, String(m.notes || ''), (checkNid(m.nid) as any).value]);
       c++;
     }
     audit('import', 'member', null, `${c} members imported`);
@@ -967,7 +1002,9 @@ function planImport(p: ParsedWorkbook, opts: ImportOptions = {}) {
   const today = todayISO();
   const curM = currentMonthKey();
   const defDue = Number(s.default_monthly_due) || 0;
-  const dbMembers = all('SELECT id, member_code, name, monthly_due, join_date, status, opening_balance FROM members');
+  const dbMembers = all('SELECT id, member_code, name, monthly_due, join_date, status, opening_balance, nid FROM members');
+  const dbByNid = new Map<string, any>(dbMembers.filter(x => x.nid).map(x => [String(x.nid), x] as [string, any]));
+  const seenNid = new Map<string, number>();
   const dbByCode = new Map(dbMembers.map(m => [String(m.member_code).toLowerCase(), m]));
   const dbByName = new Map<string, Row[]>();
   for (const m of dbMembers) {
@@ -1011,6 +1048,20 @@ function planImport(p: ParsedWorkbook, opts: ImportOptions = {}) {
     const action: 'new' | 'update' | 'skip' = existing ? (existingMode === 'update' ? 'update' : 'skip') : 'new';
     if (existing && action === 'skip') msgs.push({ level: 'warning', text: `${code} already exists — details not changed (choose "Update existing members" to apply changes)` });
     if (!existing && !code) { code = getNextMemberCode(reservedCodes); reservedCodes.push(code); }
+    // National ID: required for every new member; checked for format and for duplicates (in the app and in the file)
+    let nid = '';
+    {
+      const c = checkNid(m.nid);
+      if (c.ok) {
+        nid = c.value;
+        const other = dbByNid.get(nid);
+        if (other && (!existing || Number(other.id) !== Number(existing.id))) msgs.push({ level: 'error', text: `NID already belongs to ${other.member_code} ${other.name}` });
+        if (seenNid.has(nid)) msgs.push({ level: 'error', text: `NID appears twice in the file (row ${seenNid.get(nid)})` });
+        else seenNid.set(nid, m.row);
+      } else if (!existing || String(m.nid || '').trim()) {
+        msgs.push({ level: 'error', text: c.error });
+      }
+    }
     // an exit must go through a recorded settlement — an import may not deactivate / reactivate / re-base anyone
     if (!existing && status === 'Inactive') msgs.push({ level: 'error', text: 'New members must be imported as Active. Use Settle & deactivate in the app when someone leaves.' });
     if (existing && action === 'update') {
@@ -1022,7 +1073,7 @@ function planImport(p: ParsedWorkbook, opts: ImportOptions = {}) {
     }
     const level: Level = msgs.some(x => x.level === 'error') ? 'error' : msgs.length ? 'warning' : 'ok';
     return {
-      row: m.row, code, name, name_bn: m.name_bn, phone: m.phone, email: m.email, designation: m.designation || 'Member',
+      row: m.row, code, name, name_bn: m.name_bn, nid, phone: m.phone, email: m.email, designation: m.designation || 'Member',
       status: status || 'Active', monthly_due: m.monthly_due ?? (existing ? Number(existing.monthly_due) : defDue),
       join_date: m.join_date, opening_balance: m.opening_balance ?? 0, notes: m.notes,
       existingId: existing ? Number(existing.id) : null, action: level === 'error' ? 'error' as const : action, level, messages: msgs,
@@ -1124,16 +1175,16 @@ export function commitMemberImport(p: ParsedWorkbook, opts: ImportOptions = {}) 
     let created = 0, updated = 0, paymentsAdded = 0, amount = 0;
     for (const m of plan.members) {
       if (m.action === 'new') {
-        run(`INSERT INTO members (member_code, name, name_bn, phone, email, designation, status, monthly_due, join_date, avatar_initials, opening_balance, notes)
-             VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`,
-          [m.code, m.name, m.name_bn || null, m.phone, m.email, m.designation, m.status, m.monthly_due, m.join_date, initials(m.name), m.opening_balance, m.notes]);
+        run(`INSERT INTO members (member_code, name, name_bn, phone, email, designation, status, monthly_due, join_date, avatar_initials, opening_balance, notes, nid)
+             VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+          [m.code, m.name, m.name_bn || null, m.phone, m.email, m.designation, m.status, m.monthly_due, m.join_date, initials(m.name), m.opening_balance, m.notes, m.nid || null]);
         idByRow.set(m.row, lastId());
         created++;
       } else if (m.action === 'update' && m.existingId) {
-        run(`UPDATE members SET name = ?, name_bn = COALESCE(NULLIF(?, ''), name_bn), phone = COALESCE(NULLIF(?, ''), phone), email = COALESCE(NULLIF(?, ''), email),
+        run(`UPDATE members SET nid = COALESCE(NULLIF(?, ''), nid), name = ?, name_bn = COALESCE(NULLIF(?, ''), name_bn), phone = COALESCE(NULLIF(?, ''), phone), email = COALESCE(NULLIF(?, ''), email),
                designation = ?, status = ?, monthly_due = ?, join_date = ?, avatar_initials = ?, opening_balance = ?, notes = COALESCE(NULLIF(?, ''), notes),
                updated_at = datetime('now','localtime') WHERE id = ?`,
-          [m.name, m.name_bn, m.phone, m.email, m.designation, m.status, m.monthly_due, m.join_date, initials(m.name), m.opening_balance, m.notes, m.existingId]);
+          [m.nid, m.name, m.name_bn, m.phone, m.email, m.designation, m.status, m.monthly_due, m.join_date, initials(m.name), m.opening_balance, m.notes, m.existingId]);
         idByRow.set(m.row, m.existingId);
         updated++;
       } else if (m.action === 'skip' && m.existingId) {
@@ -1161,7 +1212,7 @@ export function commitMemberImport(p: ParsedWorkbook, opts: ImportOptions = {}) 
 
 /** Members + payment grid for "Export to Excel" (same layout as the import template). */
 export function exportMembersData() {
-  const members = all(`SELECT member_code, name, name_bn, phone, email, designation, status, monthly_due, join_date, opening_balance, notes FROM members ORDER BY member_code`);
+  const members = all(`SELECT member_code, name, name_bn, nid, phone, email, designation, status, monthly_due, join_date, opening_balance, notes FROM members ORDER BY member_code`);
   const payments = all(`SELECT m.member_code, c.payment_month, c.contribution_amount FROM collections c JOIN members m ON m.id = c.member_id`) as
     Array<{ member_code: string; payment_month: string; contribution_amount: number }>;
   const first = all('SELECT MIN(payment_month) AS f FROM collections')[0]?.f || currentMonthKey();
@@ -1198,8 +1249,8 @@ function getCollections(month?: string, statusTab = 'All', startDate?: string, e
   if (statusTab && statusTab !== 'All') { where.push('status = ?'); params.push(statusTab); }
   if (search?.trim()) {
     const q = `%${search.trim()}%`;
-    where.push('(member_name LIKE ? OR member_code LIKE ? OR trx_id LIKE ? OR member_phone LIKE ?)');
-    params.push(q, q, q, q);
+    where.push('(member_name LIKE ? OR member_code LIKE ? OR trx_id LIKE ? OR member_phone LIKE ? OR member_nid LIKE ?)');
+    params.push(q, q, q, q, q);
   }
   const s = toISODate(startDate), e = toISODate(endDate);
   if (s) { where.push('payment_date >= ?'); params.push(s); }
@@ -1653,7 +1704,7 @@ const UPLOAD = new Set(['bulkAddMembers']);                          // + Excel 
 const ADMIN = new Set(['cancelSettlement', 'addUser', 'deleteUser', 'setUserPassword', 'saveAppSettings', 'resetDatabase', 'loadDemoData',
   'addMasterItem', 'updateMasterItem', 'deleteMasterItem']);
 const READ = /^(get|suggest|preview|export)/;
-const SYSTEM_ONLY = new Set(['loadDemoData', 'checkAccountingHealth']);   // iqbal_labs only
+const SYSTEM_ONLY = new Set(['loadDemoData', 'checkAccountingHealth', 'deleteMember']);   // iqbal_labs only
 
 /** Throws unless the signed-in user may call `method` with `args`. Called by main.ts for every IPC call. */
 export function authorize(method: string, args: any[] = []) {
@@ -2015,6 +2066,10 @@ function checkAccountingHealth() {
   add('mem_values', 'Member dues and opening balances are valid', 'fail',
     all(`SELECT member_code, name, monthly_due, opening_balance, join_date FROM members WHERE monthly_due < 0 OR opening_balance < 0 OR TRIM(name) = '' OR NOT ${iso('join_date')}`),
     r => `${r.member_code} ${r.name}: due ${r.monthly_due}, opening ${r.opening_balance}, joined "${r.join_date}"`);
+  add('mem_nid', 'Every member has a National ID (NID)', 'warn',
+    all(`SELECT member_code, name FROM members WHERE nid IS NULL OR TRIM(nid) = ''`), r => `${r.member_code} ${r.name}: NID missing`);
+  add('mem_nid_fmt', 'National IDs are valid and unique', 'fail',
+    all(`SELECT member_code, name, nid FROM members WHERE nid IS NOT NULL AND TRIM(nid) != '' AND (nid GLOB '*[^0-9]*' OR LENGTH(nid) NOT IN (10, 13, 17))`), r => `${r.member_code} ${r.name}: "${r.nid}" is not a valid NID`);
   add('mem_future', 'No members joining in the future', 'warn',
     all('SELECT member_code, name, join_date FROM members WHERE join_date > ?', [today]), r => `${r.member_code} ${r.name}: ${r.join_date}`);
 
@@ -2121,11 +2176,11 @@ function loadDemoData() {
       const join = addMonths(start, i < 20 ? 0 : Math.floor(rnd() * 14));
       const due = i % 7 === 0 ? 3000 : 2000;
       const reliability = i % 9 === 3 ? 0.6 : i % 5 === 1 ? 0.85 : 0.97;
-      run(`INSERT INTO members (member_code, name, phone, email, status, monthly_due, join_date, avatar_initials, opening_balance)
-           VALUES (?,?,?,?,?,?,?,?,?)`,
+      run(`INSERT INTO members (member_code, name, phone, email, status, monthly_due, join_date, avatar_initials, opening_balance, nid)
+           VALUES (?,?,?,?,?,?,?,?,?,?)`,
         [`BF-${pad4(i + 1)}`, name, `01${7 + (i % 3)}${String(10000000 + Math.floor(rnd() * 89999999)).slice(0, 8)}`,
           `${name.toLowerCase().replace(/\s+/g, '.')}@example.com`, i === 29 ? 'Inactive' : 'Active', due, `${join}-0${1 + (i % 9)}`,
-          initials(name), i < 20 ? due * 18 : 0]);
+          initials(name), i < 20 ? due * 18 : 0, String(1990123456000 + i * 7919)]);
       const mid = lastId();
       for (let k = join; k <= (i === 29 ? addMonths(cur, -4) : cur); k = addMonths(k, 1)) {
         const dueDate = dueDateOf(k, dd);

@@ -10,7 +10,7 @@ import { MonthPicker } from '../components/common/MonthPicker';
 import { DatePicker } from '../components/common/DatePicker';
 import { todayISO } from '../utils/date';
 
-type LiteMember = Pick<Member, 'id' | 'member_code' | 'name' | 'phone' | 'monthly_due' | 'status' | 'avatar_initials'> & { name_bn?: string | null };
+type LiteMember = Pick<Member, 'id' | 'member_code' | 'name' | 'phone' | 'nid' | 'monthly_due' | 'status' | 'avatar_initials'> & { name_bn?: string | null };
 type EntryType = 'money' | 'expense' | 'investment' | 'return';
 type Num = number | '';
 
@@ -121,7 +121,7 @@ export const EntryCenterView: React.FC = () => {
     return {
       value: m.id,
       label: bnName(m.name, m.name_bn),
-      subLabel: [other, m.phone].filter(Boolean).join(' · '),
+      subLabel: [other, m.phone, m.nid ? `NID ${m.nid}` : ''].filter(Boolean).join(' · '),
       badge: m.member_code,
       badgeColor: 'bg-emerald-100 dark:bg-emerald-950/80 text-emerald-800 dark:text-emerald-300',
     };

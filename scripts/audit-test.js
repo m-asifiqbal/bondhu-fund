@@ -43,8 +43,8 @@ function audit(step, unrealized = 0, portfolio = null) {
   A.saveAppSettings({ monthly_due_day: '10', late_fee_amount: '300' });
 
   // ---------- members ----------
-  const m1 = A.addMember({ name: 'Audit One', opening_balance: 500, join_date: '2026-01-01', monthly_due: 1000 }); book.opening += 500;
-  const m2 = A.addMember({ name: 'Audit Two', opening_balance: 0, join_date: '2026-01-01', monthly_due: 2000 });
+  const m1 = A.addMember({ name: 'Audit One', nid: '1990123450001', opening_balance: 500, join_date: '2026-01-01', monthly_due: 1000 }); book.opening += 500;
+  const m2 = A.addMember({ name: 'Audit Two', nid: '1990123450002', opening_balance: 0, join_date: '2026-01-01', monthly_due: 2000 });
   audit('members created');
   throws(() => A.addMember({ name: '' }), /name/i, 'member needs a name');
   throws(() => A.addMember({ name: 'X', monthly_due: -5 }), /positive/i, 'negative due refused');

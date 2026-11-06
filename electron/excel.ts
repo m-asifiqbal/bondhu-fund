@@ -16,6 +16,7 @@ export interface RawMember {
   code: string;
   name: string;
   name_bn: string;
+  nid: string;
   phone: string;
   email: string;
   designation: string;
@@ -144,6 +145,7 @@ export function parseMonth(v: ExcelJS.CellValue): string | null {
 // Header matching (English or Bangla, with or without "*")
 // ---------------------------------------------------------------------------
 const MEMBER_FIELDS: Array<[keyof RawMember, RegExp]> = [
+  ['nid', /\bnid\b|national\s*id|জাতীয়\s*পরিচয়|এনআইডি/i],
   ['code', /member\s*(code|id)|^code$|সদস্য\s*(কোড|আইডি)/i],
   ['name_bn', /name\s*\(?\s*bangla|bangla\s*name|বাংলা(য়)?\s*নাম|নাম\s*\(বাংলা/i],
   ['name', /^\s*(full\s*)?name|^নাম|সদস্যের নাম/i],
@@ -206,7 +208,7 @@ export async function parseWorkbook(buffer: Buffer): Promise<ParsedWorkbook> {
     if (Number.isNaN(ob)) problems.push('Opening balance is not a number');
     if (jd === 'invalid') problems.push('Join date is not a valid date (use DD/MM/YYYY)');
     out.members.push({
-      row: r, code, name, name_bn: text(get('name_bn')), phone: ascii(text(get('phone'))), email: text(get('email')),
+      row: r, code, name, name_bn: text(get('name_bn')), nid: ascii(text(get('nid'))), phone: ascii(text(get('phone'))), email: text(get('email')),
       designation: text(get('designation')), status: text(get('status')),
       monthly_due: Number.isNaN(due) ? null : due, join_date: jd === 'invalid' ? null : jd,
       opening_balance: Number.isNaN(ob) ? null : ob, notes: text(get('notes')), problems,
@@ -355,6 +357,7 @@ export async function buildTemplate(opts: { orgName: string; defaultDue: number;
     { header: 'Member Code\nসদস্য কোড', key: 'code', width: 16 },
     { header: 'Name *\nনাম', key: 'name', width: 26 },
     { header: 'Name (Bangla)\nবাংলায় নাম', key: 'name_bn', width: 24 },
+    { header: 'National ID (NID) *\nজাতীয় পরিচয়পত্র নম্বর', key: 'nid', width: 24 },
     { header: 'Phone\nমোবাইল', key: 'phone', width: 16 },
     { header: 'Email\nইমেইল', key: 'email', width: 26 },
     { header: 'Designation\nপদবি', key: 'designation', width: 16 },
@@ -378,6 +381,7 @@ export async function buildTemplate(opts: { orgName: string; defaultDue: number;
   ms.getColumn('monthly_due').numFmt = '#,##0';
   ms.getColumn('opening_balance').numFmt = '#,##0';
   ms.getColumn('phone').numFmt = '@';
+  ms.getColumn('nid').numFmt = '@';
   for (let i = 2; i <= 1000; i++) {
     ms.getCell(`G${i}`).dataValidation = { type: 'list', allowBlank: true, formulae: ['"Active,Inactive"'], showErrorMessage: true, errorTitle: 'Status', error: 'Choose Active or Inactive' };
     ms.getCell(`I${i}`).dataValidation = { type: 'date', operator: 'greaterThan', allowBlank: true, formulae: [new Date(1990, 0, 1)], showErrorMessage: true, errorTitle: 'Join date', error: 'Enter a date like 15/01/2024' };
@@ -430,7 +434,7 @@ export async function buildMembersExport(members: any[], payments: Array<{ membe
   const ms = wb.addWorksheet('Members', { views: [{ state: 'frozen', ySplit: 1, xSplit: 2 }] });
   ms.columns = [
     { header: 'Member Code\nসদস্য কোড', key: 'member_code', width: 16 }, { header: 'Name *\nনাম', key: 'name', width: 26 },
-    { header: 'Name (Bangla)\nবাংলায় নাম', key: 'name_bn', width: 24 }, { header: 'Phone\nমোবাইল', key: 'phone', width: 16 },
+    { header: 'Name (Bangla)\nবাংলায় নাম', key: 'name_bn', width: 24 }, { header: 'National ID (NID) *\nজাতীয় পরিচয়পত্র নম্বর', key: 'nid', width: 24 }, { header: 'Phone\nমোবাইল', key: 'phone', width: 16 },
     { header: 'Email\nইমেইল', key: 'email', width: 26 }, { header: 'Designation\nপদবি', key: 'designation', width: 16 },
     { header: 'Status\nঅবস্থা', key: 'status', width: 12 }, { header: 'Monthly Due\nমাসিক চাঁদা', key: 'monthly_due', width: 14 },
     { header: 'Join Date *\nযোগদানের তারিখ', key: 'join_date', width: 16 }, { header: 'Opening Balance\nআগের মোট পরিশোধ', key: 'opening_balance', width: 18 },
@@ -440,7 +444,7 @@ export async function buildMembersExport(members: any[], payments: Array<{ membe
   for (const m of members) {
     const [y, mo, d] = String(m.join_date || '').split('-').map(Number);
     const na = (x: any) => (x === null || x === undefined || String(x).trim() === '' ? 'N/A' : x);
-    ms.addRow({ ...m, name_bn: na(m.name_bn), phone: na(m.phone), email: na(m.email), designation: na(m.designation), notes: na(m.notes), join_date: y ? new Date(Date.UTC(y, mo - 1, d)) : null });
+    ms.addRow({ ...m, name_bn: na(m.name_bn), nid: na(m.nid), phone: na(m.phone), email: na(m.email), designation: na(m.designation), notes: na(m.notes), join_date: y ? new Date(Date.UTC(y, mo - 1, d)) : null });
   }
   ms.getColumn('join_date').numFmt = 'dd/mm/yyyy';
   const ps = wb.addWorksheet('Payment History', { views: [{ state: 'frozen', ySplit: 1, xSplit: 2 }] });
