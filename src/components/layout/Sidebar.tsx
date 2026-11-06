@@ -221,21 +221,27 @@ export const Sidebar: React.FC = () => {
   const itemRefs = useRef<Record<string, HTMLButtonElement | null>>({});
   const [ind, setInd] = useState<{ y: number; h: number } | null>(null);
   const [indReady, setIndReady] = useState(false);
+  const activeRef = useRef(activeTab);
+  activeRef.current = activeTab;
   const measureInd = () => {
-    const b = itemRefs.current[activeTab];
-    setInd(b ? { y: b.offsetTop, h: b.offsetHeight } : null);
+    const b = itemRefs.current[activeRef.current];
+    const y = b ? b.offsetTop : -1, h = b ? b.offsetHeight : 0;
+    setInd(prev => (b ? (prev && prev.y === y && prev.h === h ? prev : { y, h }) : prev === null ? prev : null));
   };
+  const measureIndRef = useRef(measureInd);
+  measureIndRef.current = measureInd;
   useLayoutEffect(() => {
     measureInd();
     const id = requestAnimationFrame(() => setIndReady(true));
     return () => cancelAnimationFrame(id);
   }, [activeTab, isCollapsed, navSections]); // eslint-disable-line react-hooks/exhaustive-deps
   useLayoutEffect(() => {
-    const ro = new ResizeObserver(measureInd);
+    const run = () => measureIndRef.current();
+    const ro = new ResizeObserver(run);
     if (navRef.current) ro.observe(navRef.current);
-    (document as any).fonts?.ready?.then(measureInd);
+    (document as any).fonts?.ready?.then(run);
     return () => ro.disconnect();
-  }); // eslint-disable-line react-hooks/exhaustive-deps
+  }, []);
 
   return (
     <aside

@@ -7,6 +7,7 @@ import {
 import type { Investment, InvestmentReturn, ReturnsSummary } from '../types';
 import { Modal } from '../components/common/Modal';
 import { SegmentedTabs } from '../components/common/SegmentedTabs';
+import { ChipTabs } from '../components/common/ChipTabs';
 import { SearchableSelect, SelectOption } from '../components/common/SearchableSelect';
 import { DatePicker } from '../components/common/DatePicker';
 import { todayISO } from '../utils/date';
@@ -144,7 +145,7 @@ export const InvestmentReturnsView: React.FC = () => {
 
       <div className="card-base overflow-hidden">
         <div className="p-4 flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 dark:border-slate-800">
-          <SegmentedTabs ariaLabel={t('ret.filter', 'Entry type')} value={filter} onChange={(k: any) => setFilter(k as Filter)}
+          <ChipTabs ariaLabel={t('ret.filter', 'Entry type')} value={filter} onChange={(k: any) => setFilter(k as Filter)}
             items={[{ key: 'All', label: t('ret.f_all', 'All') }, { key: 'Profit', label: t('ret.f_profit', 'Benefit') }, { key: 'Loss', label: t('ret.f_loss', 'Loss') }]} />
           <div className="w-64">
             <SearchableSelect options={[{ value: '', label: t('ret.all_inv', 'All investments') } as SelectOption, ...invOptions]} value={invFilter}

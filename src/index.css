@@ -314,3 +314,22 @@ html[lang="bn"] body :where(p, span, label, td, th, li, button, h1, h2, h3, h4) 
 .nav-item-active > span { animation: nav-label-in .35s var(--bf-ease); }
 @keyframes nav-label-in { from { opacity: .4; transform: translateX(-6px); } to { opacity: 1; transform: none; } }
 @media (prefers-reduced-motion: reduce) { .nav-ind-anim, .nav-item, .nav-icon { transition: none !important; } .nav-item-active .nav-icon, .nav-item-active > span { animation: none; } }
+
+/* ---- Selection chips (filters): rounded pills, each selectable on its own -------- */
+.chip {
+  display: inline-flex; align-items: center; gap: .4rem; height: 2rem; padding: 0 .9rem; border-radius: 999px; white-space: nowrap;
+  font-size: .78rem; font-weight: 700; color: #475569; background: #fff; border: 1.5px solid #c3ced8; cursor: pointer;
+  transition: background-color .22s ease, border-color .22s ease, color .22s ease, box-shadow .25s ease, transform .18s var(--bf-ease);
+}
+.dark .chip { background: transparent; color: #9db0bd; border-color: #34505e; }
+.chip:hover:not([aria-selected="true"]) { border-color: #5fb89c; color: #0f6b50; background: #f1faf6; transform: translateY(-1px); }
+.dark .chip:hover:not([aria-selected="true"]) { border-color: #3aae86; color: #fff; background: rgba(58, 174, 134, .12); }
+.chip:active { transform: scale(.95); }
+.chip[aria-selected="true"] { background: var(--bf-green); border-color: var(--bf-green); color: #fff; box-shadow: 0 4px 10px -4px rgba(15, 107, 80, .6); animation: chip-pop .3s var(--bf-ease); }
+.dark .chip[aria-selected="true"] { background: #059669; border-color: #059669; }
+.chip:focus-visible { outline: none; box-shadow: 0 0 0 3px rgba(16, 185, 129, .4); }
+.chip-count { display: inline-flex; align-items: center; justify-content: center; min-width: 1.25rem; height: 1.25rem; padding: 0 .35rem; border-radius: 999px;
+  font-size: .66rem; font-weight: 800; background: rgba(100, 116, 139, .16); transition: background-color .22s ease; }
+.chip[aria-selected="true"] .chip-count { background: rgba(255, 255, 255, .26); }
+@keyframes chip-pop { 0% { transform: scale(.92); } 60% { transform: scale(1.05); } 100% { transform: scale(1); } }
+@media (prefers-reduced-motion: reduce) { .chip { transition: none !important; animation: none !important; } }

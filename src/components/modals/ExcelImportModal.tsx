@@ -3,7 +3,7 @@ import {
   FileSpreadsheet, Download, FolderOpen, CheckCircle2, AlertTriangle, XCircle, ArrowLeft, Upload, Users, Receipt,
   CalendarRange, Info, Loader2, ClipboardList, ShieldCheck,
 } from 'lucide-react';
-import { SegmentedTabs } from '../common/SegmentedTabs';
+import { ChipTabs } from '../common/ChipTabs';
 import { Modal } from '../common/Modal';
 import { SearchableSelect } from '../common/SearchableSelect';
 import { useApp } from '../../context/AppContext';
@@ -211,7 +211,7 @@ export const ExcelImportModal: React.FC<Props> = ({ open, onClose, onPasteInstea
           {s.examplesSkipped > 0 && <p className="text-[11px] text-slate-500">{t('members.imp_examples', '{n} example rows (codes starting with EX-) were ignored.').replace('{n}', n(s.examplesSkipped))}</p>}
 
           <div className="flex flex-wrap items-center gap-3">
-            <SegmentedTabs size="sm" value={tab} onChange={setTab}
+            <ChipTabs value={tab} onChange={setTab}
               items={[
                 { key: 'members' as const, label: t('members.imp_tab_members', 'Members'), count: n(preview.members.length) },
                 { key: 'payments' as const, label: t('members.imp_tab_issues', 'Payment issues'), count: n(payIssues.length) },

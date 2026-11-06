@@ -17,7 +17,7 @@ import {
   AlertTriangle,
 } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
-import { SegmentedTabs } from '../common/SegmentedTabs';
+import { ChipTabs } from '../common/ChipTabs';
 import { ProfileMenu, UserAvatar, useOutsideClose } from './Sidebar';
 import type { AppNotification, NavTab } from '../../types';
 
@@ -247,7 +247,7 @@ export const TopBar: React.FC = () => {
               </div>
 
               <div className="pt-3 pb-2">
-                <SegmentedTabs size="sm" value={notifFilter} onChange={setNotifFilter} ariaLabel={t('topbar.notifications', 'System Notifications')}
+                <ChipTabs value={notifFilter} onChange={setNotifFilter} ariaLabel={t('topbar.notifications', 'System Notifications')}
                   items={[
                     { key: 'all' as const, label: t('common.all', 'All'), count: num((notifications || []).length) },
                     { key: 'warning' as const, label: t('shell.attention', 'Attention') },

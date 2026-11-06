@@ -17,7 +17,7 @@ import {
   Ban,
   Users,
 } from 'lucide-react';
-import { SegmentedTabs } from '../components/common/SegmentedTabs';
+import { ChipTabs } from '../components/common/ChipTabs';
 import { useApp } from '../context/AppContext';
 import { getCollections, deletePayment, saveTextFile } from '../services/db';
 import { CollectionRecord, CollectionStats, PaymentStatus } from '../types';
@@ -365,7 +365,7 @@ export const CollectionsView: React.FC = () => {
                 {t('members.col_ledgerSub', 'Review contribution status and payment details.')}
               </p>
             </div>
-            <SegmentedTabs ariaLabel={t('members.col_status', 'Payment status')} value={selectedTab} onChange={setSelectedTab}
+            <ChipTabs ariaLabel={t('members.col_status', 'Payment status')} value={selectedTab} onChange={setSelectedTab}
               items={tabs.map(tb => ({ key: tb.key, label: tb.key === 'All' ? t('common.all', 'All') : tv(tb.key), count: n(tb.count) }))} />
           </div>
 
