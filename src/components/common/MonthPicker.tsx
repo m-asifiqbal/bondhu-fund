@@ -125,7 +125,7 @@ export const MonthPicker: React.FC<MonthPickerProps> = ({
         type="button"
         onClick={() => setIsOpen(!isOpen)}
         className={`flex items-center gap-2 bg-white border-[1.5px] rounded-xl font-bold transition-[border-color,box-shadow] duration-150 shadow-sm ${
-          variant === 'field' ? 'w-full h-11 px-3.5 text-[13px] font-semibold dark:bg-[#101b21]' : 'px-3.5 py-2 text-xs dark:bg-[#16252d]'
+          variant === 'field' ? 'w-full h-11 px-3.5 text-[13px] font-semibold dark:bg-[#101b21]' : 'h-10 px-3.5 text-xs dark:bg-[#16252d]'
         } ${
           isOpen
             ? 'border-[#0f6b50] dark:border-emerald-500 ring-[3px] ring-[#0f6b50]/15 text-slate-900 dark:text-white'

@@ -338,22 +338,24 @@ export const OverviewView: React.FC = () => {
 
   return (
     <div className="p-4 sm:p-6 lg:p-8 space-y-8 max-w-[1600px] mx-auto">
-      {/* Header */}
-      <div className="flex flex-wrap items-end justify-between gap-4">
-        <div className="flex flex-wrap items-start gap-x-8 gap-y-4 min-w-0">
-        <div>
-          <h1 className="text-2xl font-black text-slate-900 dark:text-white tracking-tight">{hello}{firstName ? `, ${firstName}` : ''}</h1>
-          <p className="text-xs text-slate-500 dark:text-slate-400 mt-1 font-medium">{tr('subtitle')} <b className="text-slate-700 dark:text-slate-200">{fmtMonth(data.month, language as any, false)}</b></p>
-          <TodayDates />
+      {/* Header: one compact section. Row 1: greeting | actions (top right). Row 2: dates | clock. */}
+      <section className="card-base px-5 py-4 lg:px-6">
+        <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_auto] gap-x-8 gap-y-3 items-center">
+        <div className="min-w-0 ">
+          <h1 className="text-2xl font-black text-slate-900 dark:text-white tracking-tight leading-tight">{hello}{firstName ? `, ${firstName}` : ''}</h1>
+          <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5 font-medium">{tr('subtitle')} <b className="text-slate-700 dark:text-slate-200">{fmtMonth(data.month, language as any, false)}</b></p>
         </div>
-        <ClockCard />
-        </div>
-        <div className="flex flex-wrap items-center gap-2 no-print ml-auto">
+        <div className="flex flex-wrap items-center gap-2 no-print lg:justify-end">
           <MonthPicker value={selectedMonth} onChange={setSelectedMonth} />
-          <button onClick={exportCsv} className="flex items-center gap-1.5 px-3.5 py-2.5 bg-white dark:bg-[#16252d] border border-slate-300 dark:border-[#283e4a] rounded-xl text-xs font-bold text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800"><Download size={14} />{tr('export')}</button>
+          <button onClick={exportCsv} className="btn btn-outline"><Download size={14} />{tr('export')}</button>
           <button onClick={exportPdf} className="btn btn-primary"><Printer size={14} />{tr('pdf')}</button>
         </div>
-      </div>
+        </div>
+        <div className="mt-3 pt-3 border-t border-slate-200 dark:border-[#22353f] flex flex-wrap items-center justify-between gap-x-8 gap-y-3">
+          <TodayDates />
+          <ClockCard />
+        </div>
+      </section>
 
       {/* KPI tiles */}
       <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
