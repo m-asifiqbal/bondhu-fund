@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
+import { MoneyInput } from '../components/common/MoneyInput';
 import { serial } from '../utils/i18n';
 import { Plus, TrendingUp, TrendingDown, Scale, CalendarDays, Trash2, Check } from 'lucide-react';
 import { useApp } from '../context/AppContext';
@@ -217,7 +218,7 @@ export const InvestmentReturnsView: React.FC = () => {
           <DatePicker label={t('common.date', 'Date')} required clearable={false} value={date} max={todayISO()} onChange={setDate} />
           <div>
             <label className="form-label">{t('common.amount', 'Amount')} <span className="text-rose-500">*</span></label>
-            <input type="number" min={0} step="0.01" value={amount} onChange={e => setAmount(e.target.value === '' ? '' : Number(e.target.value))} className="form-input font-bold tabular-nums" />
+            <MoneyInput min={0} step="0.01" value={amount} onChange={e => setAmount(e.target.value === '' ? '' : Number(e.target.value))} className="form-input font-bold tabular-nums" />
           </div>
           <SearchableSelect label={type === 'Profit' ? t('ret.col_via', 'Received through') : t('ret.via_optional', 'Paid through (optional)')} required={type === 'Profit'}
             options={methodOptions} value={method} onChange={v => setMethod(String(v ?? ''))} placeholder={t('members.pay_method_ph', 'Select method…')} />

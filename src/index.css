@@ -171,10 +171,10 @@ button, a, input, select, textarea {
   .btn-danger-outline { @apply bg-white dark:bg-transparent text-rose-600 dark:text-rose-400; border-color: #fda4af; }
   .btn-danger-outline:not(:disabled):hover { @apply bg-rose-50 dark:bg-rose-950/40; border-color: #e11d48; }
 
-  .btn-sm { @apply px-3 text-xs; height: 2rem; border-radius: .7rem; }
-  .btn-icon { @apply px-0; width: 2rem; height: 2rem; border-radius: .7rem; }
+  .btn-sm { @apply px-3 text-xs; height: 2rem; border-radius: .39rem; }
+  .btn-icon { @apply px-0; width: 2rem; height: 2rem; border-radius: .39rem; }
   .btn-icon.btn-md { width: 2.5rem; height: 2.5rem; }
-  .btn-lg { @apply px-6 text-sm; height: 3rem; border-radius: .85rem; }
+  .btn-lg { @apply px-6 text-sm; height: 3rem; border-radius: .54rem; }
   .btn-block { @apply w-full; }
 
   /* Old names kept so existing markup keeps working */
@@ -194,7 +194,7 @@ button, a, input, select, textarea {
 .modal-panel:focus, .modal-panel:focus-visible { outline: none; }
 .modal-panel {
   display: flex; flex-direction: column; max-height: calc(100vh - 2rem);
-  background: #fff; border: 1px solid rgb(226 232 240); border-radius: 1.5rem;
+  background: #fff; border: 1px solid rgb(226 232 240); border-radius: 1.1875rem;
   box-shadow: 0 32px 80px -16px rgba(15, 23, 42, 0.3), 0 4px 14px rgba(15, 23, 42, 0.07);
   animation: bf-pop .32s var(--bf-ease) both;
   outline: none;
@@ -206,7 +206,7 @@ button, a, input, select, textarea {
 /* Close button: red outline + red cross */
 .modal-close {
   display: grid; place-items: center; width: 2.25rem; height: 2.25rem; flex-shrink: 0;
-  border-radius: .75rem; border: 1.5px solid #fb7185; color: #e11d48; background: transparent;
+  border-radius: .4375rem; border: 1.5px solid #fb7185; color: #e11d48; background: transparent;
   transition: background-color .16s ease, border-color .16s ease, box-shadow .2s ease, transform .14s var(--bf-ease);
 }
 .modal-close svg { transition: transform .28s var(--bf-ease); }
@@ -227,7 +227,7 @@ button, a, input, select, textarea {
 /* ---- Segmented tabs (sliding solid-green selection) ---------------------------
    Concentric corners: inner radius = outer radius - border - padding, so the pill follows the track exactly. */
 .seg {
-  --seg-r: 1rem; --seg-bw: 1.5px; --seg-p: .25rem; --seg-ri: calc(var(--seg-r) - var(--seg-bw) - var(--seg-p));
+  --seg-r: .6875rem; --seg-bw: 1.5px; --seg-p: .25rem; --seg-ri: calc(var(--seg-r) - var(--seg-bw) - var(--seg-p));
   position: relative; display: inline-flex; align-items: stretch; max-width: 100%; overflow-x: auto; padding: var(--seg-p); gap: 0;
   border-radius: var(--seg-r); border: var(--seg-bw) solid #cfd9d4; background: #f3f7f5; scrollbar-width: none;
 }
@@ -255,7 +255,7 @@ button, a, input, select, textarea {
 .seg-count { display: inline-flex; align-items: center; justify-content: center; min-width: 1.35rem; height: 1.35rem; padding: 0 .35rem; border-radius: 999px;
   font-size: .68rem; font-weight: 800; background: rgba(100, 116, 139, .14); transition: background-color .22s ease, color .22s ease, transform .3s var(--bf-ease); }
 .seg-btn[aria-selected="true"] .seg-count { background: rgba(255, 255, 255, .24); color: #fff; transform: scale(1.06); }
-.seg-sm { --seg-r: .875rem; }
+.seg-sm { --seg-r: .5625rem; }
 .seg-sm .seg-btn { min-height: 1.9rem; padding: 0 .75rem; font-size: .72rem; }
 }
 
@@ -278,7 +278,7 @@ html[lang="bn"] body :where(p, span, label, td, th, li, button, h1, h2, h3, h4) 
 /* ---- Compact table density (un-layered so it wins over utilities) ------------- */
 /* Row actions: small square buttons with a soft 2dp elevation */
 .btn-act, main table .btn-icon {
-  width: 1.75rem; height: 1.75rem; min-width: 1.75rem; padding: 0; border-radius: .55rem;
+  width: 1.75rem; height: 1.75rem; min-width: 1.75rem; padding: 0; border-radius: .24rem;
   box-shadow: 0 2px 2px rgba(15, 23, 42, .12), 0 3px 1px -2px rgba(15, 23, 42, .10), 0 1px 5px rgba(15, 23, 42, .16);
 }
 .dark .btn-act, .dark main table .btn-icon { box-shadow: 0 2px 2px rgba(0, 0, 0, .35), 0 3px 1px -2px rgba(0, 0, 0, .3), 0 1px 5px rgba(0, 0, 0, .4); }
@@ -294,7 +294,7 @@ html[lang="bn"] body :where(p, span, label, td, th, li, button, h1, h2, h3, h4) 
 
 /* ---- Sidebar navigation: gliding selection pill ------------------------------ */
 .nav-ind {
-  position: absolute; left: .75rem; right: .75rem; top: 0; border-radius: .8rem; pointer-events: none; z-index: 0;
+  position: absolute; left: .75rem; right: .75rem; top: 0; border-radius: .49rem; pointer-events: none; z-index: 0;
   background: linear-gradient(135deg, #3aae86 0%, #2f9e78 100%);           /* light green, day */
   box-shadow: 0 6px 14px -6px rgba(47, 158, 120, .65), inset 0 1px 0 rgba(255, 255, 255, .28);
   will-change: transform, height;
@@ -337,12 +337,12 @@ html[lang="bn"] body :where(p, span, label, td, th, li, button, h1, h2, h3, h4) 
 /* ---- Sidebar: section spacing, collapsed icon state, readable tooltip -------------- */
 .nav-section-sep { border-top: 1px solid #e6edf2; }
 .dark .nav-section-sep { border-top-color: #22353f; }
-.nav-item-collapsed { width: 2.9rem; height: 2.9rem; margin-left: auto; margin-right: auto; padding: 0 !important; border-radius: .9rem; }
+.nav-item-collapsed { width: 2.9rem; height: 2.9rem; margin-left: auto; margin-right: auto; padding: 0 !important; border-radius: .59rem; }
 .nav-item-collapsed:not(.nav-item-active):hover { transform: scale(1.06); }
-.nav-ind-collapsed { left: 50%; right: auto; width: 2.9rem; margin-left: -1.45rem; border-radius: .9rem; }
+.nav-ind-collapsed { left: 50%; right: auto; width: 2.9rem; margin-left: -1.45rem; border-radius: .59rem; }
 .nav-tip {
   position: fixed; z-index: 70; transform: translateY(-50%); pointer-events: none; white-space: nowrap;
-  padding: .55rem .95rem; border-radius: .75rem; font-size: 1rem; font-weight: 700; letter-spacing: .01em;
+  padding: .55rem .95rem; border-radius: .4375rem; font-size: 1rem; font-weight: 700; letter-spacing: .01em;
   background: #0f1f27; color: #fff; box-shadow: 0 10px 26px -8px rgba(0, 0, 0, .5); animation: nav-tip-in .16s var(--bf-ease);
 }
 .nav-tip::before { content: ''; position: absolute; left: -5px; top: 50%; width: 10px; height: 10px; margin-top: -5px; background: inherit; transform: rotate(45deg); border-radius: 2px; }
@@ -368,8 +368,8 @@ html[lang="bn"] body :where(p, span, label, td, th, li, button, h1, h2, h3, h4) 
 /* ---- Table action icon tooltip (same style as the collapsed sidebar labels) ---- */
 .act-tip {
   position: fixed; z-index: 70; transform: translate(-50%, calc(-100% - 12px)); pointer-events: none; white-space: nowrap;
-  padding: .55rem .95rem; border-radius: .75rem; font-size: 1rem; font-weight: 700; letter-spacing: .01em;
-  background: #0f1f27; color: #fff; box-shadow: 0 10px 26px -8px rgba(0, 0, 0, .5); animation: act-tip-in .16s var(--bf-ease);
+  padding: .4rem .7rem; border-radius: .29rem; font-size: .7rem; font-weight: 700; letter-spacing: .01em;
+  background: #0f1f27; color: #fff; box-shadow: 0 8px 20px -8px rgba(0, 0, 0, .5); animation: act-tip-in .16s var(--bf-ease);
 }
 .act-tip::before { content: ''; position: absolute; left: 50%; bottom: -5px; width: 10px; height: 10px; margin-left: -5px; background: inherit; transform: rotate(45deg); border-radius: 2px; }
 .act-tip-below { transform: translate(-50%, 12px); }
@@ -379,3 +379,13 @@ html[lang="bn"] body :where(p, span, label, td, th, li, button, h1, h2, h3, h4) 
 /* sticky member columns (Members table) */
 .sticky-col-edge { box-shadow: 8px 0 8px -8px rgba(15, 23, 42, .22); }
 .dark .sticky-col-edge { box-shadow: 8px 0 8px -8px rgba(0, 0, 0, .6); }
+
+@media print { .print-only.sig-flex { display: flex !important; } }
+
+/* ---- Money fields: currency symbol at the start, no spinner arrows on any number field ---- */
+input[type=number]::-webkit-outer-spin-button, input[type=number]::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+input[type=number] { -moz-appearance: textfield; appearance: textfield; }
+.money-field { position: relative; display: block; }
+.money-field .money-prefix { position: absolute; left: .95rem; top: 50%; transform: translateY(-50%); font-weight: 800; font-size: .8rem; color: #64748b; pointer-events: none; letter-spacing: .02em; }
+.dark .money-field .money-prefix { color: #94a3b8; }
+.money-field input.money-input { padding-left: 3.1rem; }

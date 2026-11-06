@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
+import { MoneyInput } from '../components/common/MoneyInput';
 import { History, Check, RotateCcw, Coins, Receipt, TrendingUp, TrendingDown, Landmark, Info } from 'lucide-react';
 import { SegmentedTabs } from '../components/common/SegmentedTabs';
 import { useApp } from '../context/AppContext';
@@ -323,7 +324,7 @@ export const EntryCenterView: React.FC = () => {
                     </div>
                     <div>
                       <label className="form-label">{t('members.entry_contribution', 'Contribution amount')} <Req /></label>
-                      <input type="number" min={0} value={contributionAmount} onChange={e => setContributionAmount(toNum(e.target.value))} className="form-input font-bold" required />
+                      <MoneyInput min={0} value={contributionAmount} onChange={e => setContributionAmount(toNum(e.target.value))} className="form-input font-bold" required />
                       <p className="form-hint">{t('members.entry_contribution_hint', "Defaults to the member's monthly due.")}</p>
                     </div>
                   </div>
@@ -331,7 +332,7 @@ export const EntryCenterView: React.FC = () => {
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     <div>
                       <label className="form-label">{t('members.entry_late_fee', 'Late fee')}</label>
-                      <input type="number" min={0} value={lateFee} onChange={e => setLateFee(toNum(e.target.value))} className="form-input font-semibold" />
+                      <MoneyInput min={0} value={lateFee} onChange={e => setLateFee(toNum(e.target.value))} className="form-input font-semibold" />
                       <p className="form-hint">{t('members.entry_late_fee_hint', 'Suggested from the due day in Settings; you can change it.')}</p>
                     </div>
                     <div>
@@ -381,7 +382,7 @@ export const EntryCenterView: React.FC = () => {
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     <div>
                       <label className="form-label">{t('members.entry_amount', 'Amount')} <Req /></label>
-                      <input type="number" min={0} value={expenseAmount} onChange={e => setExpenseAmount(toNum(e.target.value))} className="form-input font-bold" required />
+                      <MoneyInput min={0} value={expenseAmount} onChange={e => setExpenseAmount(toNum(e.target.value))} className="form-input font-bold" required />
                     </div>
                     <div>
                       <DatePicker label={t('members.entry_exp_date', 'Expense date')} required clearable={false} value={expenseDate} max={todayISO()} onChange={setExpenseDate} />
@@ -421,7 +422,7 @@ export const EntryCenterView: React.FC = () => {
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     <div>
                       <label className="form-label">{t('common.amount', 'Amount')} <Req /></label>
-                      <input type="number" min={0} step="0.01" value={retAmount} onChange={e => setRetAmount(toNum(e.target.value))} className="form-input font-bold tabular-nums" />
+                      <MoneyInput min={0} step="0.01" value={retAmount} onChange={e => setRetAmount(toNum(e.target.value))} className="form-input font-bold tabular-nums" />
                     </div>
                     <DatePicker label={t('common.date', 'Date')} required clearable={false} value={retDate} max={todayISO()} onChange={setRetDate} />
                   </div>
@@ -462,12 +463,11 @@ export const EntryCenterView: React.FC = () => {
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     <div>
                       <label className="form-label">{t('members.entry_inv_amount', 'Invested amount')} <Req /></label>
-                      <input type="number" min={0} value={invAmount} onChange={e => setInvAmount(toNum(e.target.value))} className="form-input font-bold" required />
+                      <MoneyInput min={0} value={invAmount} onChange={e => setInvAmount(toNum(e.target.value))} className="form-input font-bold" required />
                     </div>
                     <div>
                       <label className="form-label">{t('members.entry_inv_value', 'Current estimated value')}</label>
-                      <input
-                        type="number"
+                      <MoneyInput
                         min={0}
                         value={invEstVal}
                         placeholder={invAmount === '' ? '' : (language === 'bn' ? toBanglaDigits(invAmount) : String(invAmount))}

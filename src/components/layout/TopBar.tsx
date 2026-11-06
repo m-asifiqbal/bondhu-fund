@@ -334,7 +334,7 @@ export const TopBar: React.FC = () => {
             aria-expanded={showProfileMenu}
             className={`rounded-xl p-0.5 transition-all ring-2 ${showProfileMenu ? 'ring-emerald-500' : 'ring-transparent hover:ring-slate-300 dark:hover:ring-slate-600'}`}
           >
-            <UserAvatar user={currentUser} className="w-8 h-8 rounded-[10px]" />
+            <UserAvatar user={currentUser} className="w-8 h-8 rounded-[6px]" />
           </button>
           {showProfileMenu && <ProfileMenu onClose={closeProfile} className="absolute right-0 top-12 w-64" />}
         </div>

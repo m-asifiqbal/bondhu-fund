@@ -212,6 +212,7 @@ export interface AppInfo {
 export interface TrendPoint {
   month: string; expected: number; collected: number; lateFees: number; rate: number;
   expenses: number; invested: number; fundBalance: number; cashInHand: number;
+  returnProfit: number; returnLoss: number;
 }
 
 export interface OverviewData {
@@ -226,6 +227,8 @@ export interface OverviewData {
     activeMembers: number; totalMembers: number; newMembersThisMonth: number;
     invested: number; portfolioValue: number; unrealizedGain: number; investmentCount: number;
     totalArrears: number; membersInArrears: number;
+    monthReturnProfit: number; monthReturnLoss: number; monthReturnCount: number; yearReturnProfit: number; yearReturnLoss: number;
+    lifetimeReturnProfit: number; lifetimeReturnLoss: number; lifetimeReturnCount: number;
   };
   trend: TrendPoint[];
   expenseByCategory: Array<{ name: string; value: number; count: number }>;

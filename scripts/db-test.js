@@ -46,7 +46,8 @@ const throws = (fn, re, msg) => { try { fn(); ok(false, `${msg} (no error)`); } 
   if (fs.existsSync(freshDb)) fs.unlinkSync(freshDb);
   await store.openDatabase(freshDb, wasm);
   ok(A.getDatabaseStats().members === 0, 'fresh database starts empty');
-  ok(A.getUsers().length === 2 && A.getUsers().every(u => u.role === 'Admin'), 'fresh database has the two built-in accounts (admin, iqbal_labs)');
+  ok(A.getDatabaseStats().users === 2, 'fresh database has the two built-in accounts (admin, iqbal_labs)');
+  ok(A.getUsers().length === 1 && A.getUsers()[0].username === 'admin', 'the protected iqbal_labs account is hidden from everyone but itself');
   ok(A.getMasterData('payment_method').length >= 5, 'default payment methods present');
 
   const id = A.addMember({ name: 'Test Member', monthly_due: 2500, join_date: '2026-01-15' });
@@ -72,7 +73,7 @@ const throws = (fn, re, msg) => { try { fn(); ok(false, `${msg} (no error)`); } 
   ok(stm.rows.length >= 1, `statement rows ${stm.rows.length}`);
 
   throws(() => A.addUser({ username: 'admin', full_name: 'X' }), /taken/, 'duplicate username rejected');
-  throws(() => A.deleteUser(A.getUsers().find(u => u.username === 'iqbal_labs').id), /protected/, 'iqbal_labs cannot be deleted');
+  throws(() => A.deleteUser(A.getUsers().find(u => u.username === 'admin').id + 1), /protected|not found/i, 'iqbal_labs cannot be deleted');
   const cat = A.getMasterData('expense_category')[0];
   A.addExpense({ title: 'Tea', category: cat.name, amount: 120, expense_date: store.todayISO() });
   throws(() => A.deleteMasterItem(cat.id), /in use|used by/, 'in-use category cannot be deleted');

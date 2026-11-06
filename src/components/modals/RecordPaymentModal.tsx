@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
+import { MoneyInput } from '../common/MoneyInput';
 import { Check, Receipt } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import { getAllMembersLite, recordPayment, suggestLateFee } from '../../services/db';
@@ -208,8 +209,7 @@ export const RecordPaymentModal: React.FC = () => {
 
         <div>
           <label className="form-label">{t('members.pay_contribution', 'Contribution')} <span className="text-rose-500">*</span></label>
-          <input
-            type="number"
+          <MoneyInput
             min={0}
             value={amount}
             onChange={e => setAmount(e.target.value === '' ? '' : Number(e.target.value))}
@@ -222,8 +222,7 @@ export const RecordPaymentModal: React.FC = () => {
             <span>{t('members.late_fee', 'Late fee')}</span>
             <span className="text-[11px] font-medium text-slate-500 dark:text-slate-400 truncate">{t('members.pay_late_fee_hint', 'Suggested from settings; you can change it.')}</span>
           </label>
-          <input
-            type="number"
+          <MoneyInput
             min={0}
             value={lateFee}
             onChange={e => setLateFee(e.target.value === '' ? '' : Number(e.target.value))}

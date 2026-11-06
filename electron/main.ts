@@ -4,6 +4,8 @@ import * as fs from 'fs';
 import * as store from './database';
 import { buildTemplate, parseWorkbook, buildMembersExport, type ParsedWorkbook } from './excel';
 import { buildStatementsXlsx, buildStatementsHtml, type StatementsData } from './statements';
+import { encryptBackup, decryptBackup, decryptBackupWithMaster, deriveMasterKeys, hasMasterRecovery, isEncryptedBackup, validatePin } from './backup-crypto';
+import { buildTableXlsx, buildTableHtml, buildVoucherHtml, renderPdf, type ExportDoc, type VoucherData, type Lang } from './exporter';
 
 /** Parsed import files waiting for confirmation (token → workbook). Kept in memory only. */
 const pendingImports = new Map<string, { parsed: ParsedWorkbook; fileName: string }>();
@@ -238,15 +240,18 @@ function registerIpc() {
     };
   }));
 
-  ipcMain.handle('db:backup', () => wrap(async () => {
+  /** Manual backup: always encrypted with the PIN the user chose (.bfbak). */
+  ipcMain.handle('db:backup', (_e, pin: string) => wrap(async () => {
     store.requireSession();
+    validatePin(pin);                                             // refuse before opening any dialog
     const res = await dialog.showSaveDialog(mainWindow!, {
-      title: 'Save database backup',
-      defaultPath: path.join(app.getPath('documents'), `BondhuFund_Backup_${stamp()}.db`),
-      filters: [{ name: 'Bondhu Fund backup', extensions: ['db'] }],
+      title: 'Save encrypted database backup',
+      defaultPath: path.join(app.getPath('documents'), `BondhuFund_Backup_${stamp()}.bfbak`),
+      filters: [{ name: 'Bondhu Fund encrypted backup', extensions: ['bfbak'] }],
     });
     if (res.canceled || !res.filePath) return { canceled: true };
-    const bytes = store.exportBytes();
+    const pub = store.getMasterRecoveryPub();
+    const bytes = encryptBackup(store.exportBytes(), pin, pub ? Buffer.from(pub, 'base64') : null);
     const tmp = `${res.filePath}.tmp`;
     fs.writeFileSync(tmp, bytes);
     fs.renameSync(tmp, res.filePath);
@@ -254,25 +259,87 @@ function registerIpc() {
     return { canceled: false, filePath: res.filePath, fileName: path.basename(res.filePath), fileSize: bytes.length };
   }));
 
-  const restoreFrom = (file: string) => {
-    const bytes = fs.readFileSync(file);
+  const restoreBytes = (bytes: Buffer, name: string, origin: string) => {
     const safety = snapshot('PreRestore');       // current data is always kept first
     store.replaceWith(bytes);                     // validates + migrates; throws before touching anything if invalid
     store.revalidateSession();                    // signed-in user may not exist in the restored data
-    store.logBackup(path.basename(file), file, bytes.length, 'Restored');
-    return { canceled: false, fileName: path.basename(file), safetySnapshot: safety };
+    store.logBackup(name, origin, bytes.length, 'Restored');
+    return { canceled: false, fileName: name, safetySnapshot: safety };
   };
+  const restoreFrom = (file: string) => restoreBytes(fs.readFileSync(file), path.basename(file), file);
+
+  // An encrypted file that was picked and now waits for its PIN (kept only in memory; never the PIN).
+  let pendingRestore: { file: string; bytes: Buffer } | null = null;
+  let pinFails = 0, pinLockedUntil = 0;
 
   ipcMain.handle('db:restore', () => wrap(async () => {
     store.requireAdmin();
     const res = await dialog.showOpenDialog(mainWindow!, {
       title: 'Choose a Bondhu Fund backup to restore',
       properties: ['openFile'],
-      filters: [{ name: 'SQLite database', extensions: ['db', 'sqlite', 'sqlite3'] }, { name: 'All files', extensions: ['*'] }],
+      filters: [{ name: 'Bondhu Fund backup', extensions: ['bfbak', 'db', 'sqlite', 'sqlite3'] }, { name: 'All files', extensions: ['*'] }],
     });
     if (res.canceled || !res.filePaths[0]) return { canceled: true };
-    return restoreFrom(res.filePaths[0]);
+    const bytes = fs.readFileSync(res.filePaths[0]);
+    if (isEncryptedBackup(bytes)) {
+      pendingRestore = { file: res.filePaths[0], bytes };
+      return { canceled: false, needsPin: true, fileName: path.basename(res.filePaths[0]), masterRecovery: hasMasterRecovery(bytes) && !!store.api.getSession()?.canUpload };
+    }
+    return restoreBytes(bytes, path.basename(res.filePaths[0]), res.filePaths[0]);   // older, unencrypted backup
   }));
+
+  ipcMain.handle('db:restore-pin', (_e, pin: string) => wrap(() => {
+    store.requireAdmin();
+    if (!pendingRestore) throw new Error('Choose the backup file again.');
+    if (Date.now() < pinLockedUntil) throw new Error(`Too many wrong PINs. Try again in ${Math.ceil((pinLockedUntil - Date.now()) / 1000)} seconds.`);
+    let plain: Buffer;
+    try {
+      plain = decryptBackup(pendingRestore.bytes, String(pin ?? ''));
+    } catch (e: any) {
+      if (++pinFails >= 5) { pinFails = 0; pinLockedUntil = Date.now() + 60_000; }
+      throw new Error(e.message);
+    }
+    pinFails = 0;
+    const { file } = pendingRestore;
+    pendingRestore = null;
+    return restoreBytes(plain, path.basename(file), file);
+  }));
+
+  const requireSystem = () => { store.requireSession(); if (!(store.api.getSession() as any)?.canUpload) throw new Error('Only the iqbal_labs Super User can do this.'); };
+
+  /** Super User: is the backup-recovery key set up? */
+  ipcMain.handle('master:status', () => wrap(() => { requireSystem(); return { enabled: !!store.getMasterRecoveryPub() }; }));
+
+  /** Super User: create (or replace) the recovery key. Needs the account password again + the master PIN. Nothing secret is stored. */
+  ipcMain.handle('master:setup', (_e, password: string, masterPin: string) => wrap(() => {
+    requireSystem();
+    if (!store.verifySystemPassword(password)) throw new Error('Incorrect password.');
+    if (typeof masterPin !== 'string' || masterPin.length < 4) throw new Error('The master PIN must be at least 4 characters.');
+    store.setMasterRecoveryPub(deriveMasterKeys(masterPin, password).publicKey.toString('base64'));
+    return { enabled: true };
+  }));
+
+  /** Super User: open the picked encrypted backup when its owner forgot the PIN. */
+  ipcMain.handle('db:restore-master', (_e, password: string, masterPin: string) => wrap(() => {
+    requireSystem();
+    store.requireAdmin();
+    if (!pendingRestore) throw new Error('Choose the backup file again.');
+    if (Date.now() < pinLockedUntil) throw new Error(`Too many wrong attempts. Try again in ${Math.ceil((pinLockedUntil - Date.now()) / 1000)} seconds.`);
+    if (!store.verifySystemPassword(password)) { if (++pinFails >= 5) { pinFails = 0; pinLockedUntil = Date.now() + 60_000; } throw new Error('Incorrect password.'); }
+    let plain: Buffer;
+    try {
+      plain = decryptBackupWithMaster(pendingRestore.bytes, masterPin, password);
+    } catch (e: any) {
+      if (++pinFails >= 5) { pinFails = 0; pinLockedUntil = Date.now() + 60_000; }
+      throw new Error(e.message);
+    }
+    pinFails = 0;
+    const { file } = pendingRestore;
+    pendingRestore = null;
+    return restoreBytes(plain, path.basename(file), file);
+  }));
+
+  ipcMain.handle('db:restore-cancel', () => { pendingRestore = null; return { ok: true, data: null }; });
 
   ipcMain.handle('db:restore-snapshot', (_e, fileName: string) => wrap(() => {
     store.requireAdmin();
@@ -368,36 +435,60 @@ function registerIpc() {
     return { canceled: false, filePath: res.filePath };
   }));
 
+  // ---- Shared export helpers: operator (signed-in user), save dialog -------------------------------
+  const operator = () => {
+    const sess: any = store.api.getSession();
+    return { name: String(sess?.user?.full_name || sess?.user?.username || 'N/A'), role: String(sess?.user?.role || 'N/A') };
+  };
+  const pickFile = async (title: string, defaultName: string, ext: 'pdf' | 'xlsx') => {
+    const res = await dialog.showSaveDialog(mainWindow!, {
+      title, defaultPath: path.join(app.getPath('documents'), path.basename(defaultName)),
+      filters: [ext === 'pdf' ? { name: 'PDF', extensions: ['pdf'] } : { name: 'Excel workbook', extensions: ['xlsx'] }],
+    });
+    return res.canceled || !res.filePath ? null : res.filePath;
+  };
+  const safeName = (v: string) => String(v).replace(/[^A-Za-z0-9_-]+/g, '_').replace(/^_+|_+$/g, '').slice(0, 40);
+
   /** Member statement(s) as PDF or Excel. memberId = one member; null = every member. */
-  ipcMain.handle('members:export-statements', (_e, memberId: number | null, format: 'pdf' | 'xlsx') => wrap(async () => {
+  ipcMain.handle('members:export-statements', (_e, memberId: number | null, format: 'pdf' | 'xlsx', lang?: Lang) => wrap(async () => {
     store.requireSession();
     const data = store.getStatementsData(memberId ? [Number(memberId)] : undefined) as unknown as StatementsData;
     if (!data.statements.length) throw new Error('There are no members to export.');
     const ext = format === 'xlsx' ? 'xlsx' : 'pdf';
     const day = new Date().toISOString().slice(0, 10);
-    const safe = (v: string) => String(v).replace(/[^A-Za-z0-9_-]+/g, '_').replace(/^_+|_+$/g, '').slice(0, 30);
     const one = data.statements.length === 1 ? data.statements[0].member : null;
-    const name = one ? `Statement_${one.member_code}_${safe(one.name) || 'member'}_${day}.${ext}` : `BondhuFund_All_Statements_${day}.${ext}`;
-    const res = await dialog.showSaveDialog(mainWindow!, {
-      title: one ? 'Save member statement' : 'Save all member statements',
-      defaultPath: path.join(app.getPath('documents'), name),
-      filters: [ext === 'pdf' ? { name: 'PDF', extensions: ['pdf'] } : { name: 'Excel workbook', extensions: ['xlsx'] }],
-    });
-    if (res.canceled || !res.filePath) return { canceled: true };
-    if (ext === 'xlsx') {
-      fs.writeFileSync(res.filePath, await buildStatementsXlsx(data));
-    } else {
-      // render the statements in a hidden window so the PDF never depends on what is on screen
-      const tmp = path.join(app.getPath('temp'), `bf-statement-${Date.now()}.html`);
-      fs.writeFileSync(tmp, buildStatementsHtml(data), 'utf8');
-      const win = new BrowserWindow({ show: false, webPreferences: { sandbox: true, contextIsolation: true, javascript: false } });
-      try {
-        await win.loadFile(tmp);
-        fs.writeFileSync(res.filePath, await win.webContents.printToPDF({ printBackground: true, pageSize: 'A4', margins: { marginType: 'none' } }));
-      } finally { win.destroy(); try { fs.unlinkSync(tmp); } catch { /* temp file */ } }
-    }
-    shell.openPath(res.filePath);
-    return { canceled: false, filePath: res.filePath, count: data.statements.length };
+    const name = one ? `Statement_${one.member_code}_${safeName(one.name) || 'member'}_${day}.${ext}` : `BondhuFund_All_Statements_${day}.${ext}`;
+    const file = await pickFile(one ? 'Save member statement' : 'Save all member statements', name, ext);
+    if (!file) return { canceled: true };
+    const op = operator();
+    if (ext === 'xlsx') fs.writeFileSync(file, await buildStatementsXlsx(data, op, lang || 'en'));
+    else fs.writeFileSync(file, await renderPdf(buildStatementsHtml(data, op, lang || 'en'), true));
+    shell.openPath(file);
+    return { canceled: false, filePath: file, count: data.statements.length };
+  }));
+
+  /** Any report / list: the renderer sends a plain document description; this makes the styled PDF or Excel file. */
+  ipcMain.handle('export:table', (_e, doc: ExportDoc, format: 'pdf' | 'xlsx', fileName: string) => wrap(async () => {
+    store.requireSession();
+    if (!doc || !Array.isArray(doc.sections)) throw new Error('Nothing to export.');
+    const ext = format === 'xlsx' ? 'xlsx' : 'pdf';
+    const file = await pickFile('Save ' + (ext === 'pdf' ? 'PDF' : 'Excel file'), `${safeName(fileName || 'BondhuFund_Report') || 'BondhuFund_Report'}.${ext}`, ext);
+    if (!file) return { canceled: true };
+    const op = operator();
+    if (ext === 'xlsx') fs.writeFileSync(file, await buildTableXlsx(doc, op));
+    else fs.writeFileSync(file, await renderPdf(buildTableHtml(doc, op), !!doc.landscape));
+    shell.openPath(file);
+    return { canceled: false, filePath: file };
+  }));
+
+  /** Payment voucher as a proper PDF with authorized + receiver signatures. */
+  ipcMain.handle('export:voucher', (_e, v: VoucherData) => wrap(async () => {
+    store.requireSession();
+    const file = await pickFile('Save payment voucher', `Voucher_${safeName(v.member_code || 'member')}_${safeName(v.payment_month || '')}.pdf`, 'pdf');
+    if (!file) return { canceled: true };
+    fs.writeFileSync(file, await renderPdf(buildVoucherHtml(v, operator()), false));
+    shell.openPath(file);
+    return { canceled: false, filePath: file };
   }));
 
   ipcMain.handle('file:save-pdf', (_e, defaultName: string, landscape?: boolean) => wrap(async () => {

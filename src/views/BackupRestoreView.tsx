@@ -15,12 +15,17 @@ import {
 } from 'lucide-react';
 import { Modal } from '../components/common/Modal';
 import { HealthCheckCard } from '../components/HealthCheckCard';
+import { PinDialog } from '../components/modals/PinDialog';
+import { MasterRecoveryCard } from '../components/MasterRecoveryCard';
 import { useApp } from '../context/AppContext';
 import {
   performBackup,
   performRestore,
   resetDatabase,
   loadDemoData,
+  restoreWithPin,
+  restoreWithMaster,
+  cancelPendingRestore,
   getBackupLogs,
   getAppInfo,
   listSnapshots,
@@ -115,7 +120,7 @@ const ConfirmDialog: React.FC<{ state: ConfirmState; onClose: () => void }> = ({
 };
 
 export const BackupRestoreView: React.FC = () => {
-  const { showToast, triggerRefresh, refreshKey, t, tv, formatDate, language, toBanglaDigits, isAdmin } = useApp();
+  const { showToast, triggerRefresh, refreshKey, t, tv, formatDate, language, toBanglaDigits, isAdmin, canUpload } = useApp();
   const n = useCallback((v: number | string) => (language === 'bn' ? toBanglaDigits(v) : String(v)), [language, toBanglaDigits]);
   const kb = (v: number | string) => `${n(v)} ${t('finance.backup_kb', 'KB')}`;
   const [info, setInfo] = useState<AppInfo | null>(null);
@@ -157,21 +162,40 @@ export const BackupRestoreView: React.FC = () => {
 
   const afterChange = () => { triggerRefresh(); load(); };
 
-  const handleBackupNow = async () => {
+  // Backups are always encrypted: the PIN dialog opens first, the file is only written after a valid PIN.
+  const [pinDlg, setPinDlg] = useState<null | { mode: 'set' } | { mode: 'enter'; fileName: string; master?: boolean }>(null);
+  const handleBackupNow = () => setPinDlg({ mode: 'set' });
+
+  const submitBackupPin = async (pin: string): Promise<string | null> => {
     setBusy('backup');
     try {
-      const res = await performBackup();
-      if (res.canceled) showToast(t('finance.backup_canceled', 'Backup canceled.'), 'info');
-      else if (res.success) {
+      const res = await performBackup(pin);
+      if (res.canceled) { showToast(t('finance.backup_canceled', 'Backup canceled.'), 'info'); setPinDlg(null); return null; }
+      if (res.success) {
         setLastSavedPath(res.filePath || null);
-        showToast(`${t('finance.backup_saved_to', 'Backup saved to')} ${res.filePath || ''}`);
-        afterChange();
-      } else showToast(res.error || t('finance.backup_failed', 'Backup failed.'), 'error');
-    } catch (e: any) {
-      showToast(e.message, 'error');
-    } finally {
-      setBusy(null);
+        showToast(`${t('finance.backup_saved_to', 'Encrypted backup saved to')} ${res.filePath || ''}`);
+        setPinDlg(null); afterChange(); return null;
+      }
+      return res.error || t('finance.backup_failed', 'Backup failed.');
+    } finally { setBusy(null); }
+  };
+
+  const submitMasterRestore = async (password: string, masterPin: string): Promise<string | null> => {
+    const res = await restoreWithMaster(password, masterPin);
+    if (res.success) {
+      showToast(`${t('finance.backup_restored_from', 'Restored from')} "${res.fileName}". ${t('finance.backup_safety_snapshot', 'Safety snapshot')}: ${baseName(res.safetySnapshot)}`);
+      setPinDlg(null); afterChange(); return null;
     }
+    return res.error || t('finance.backup_restore_failed', 'Restore failed.');
+  };
+
+  const submitRestorePin = async (pin: string): Promise<string | null> => {
+    const res = await restoreWithPin(pin);
+    if (res.success) {
+      showToast(`${t('finance.backup_restored_from', 'Restored from')} "${res.fileName}". ${t('finance.backup_safety_snapshot', 'Safety snapshot')}: ${baseName(res.safetySnapshot)}`);
+      setPinDlg(null); afterChange(); return null;
+    }
+    return res.error || t('finance.backup_restore_failed', 'Restore failed.');
   };
 
   const askRestoreFromFile = () => setConfirm({
@@ -189,6 +213,7 @@ export const BackupRestoreView: React.FC = () => {
     onConfirm: async () => {
       try {
         const res = await performRestore();
+        if (res.needsPin) { setPinDlg({ mode: 'enter', fileName: res.fileName || '', master: !!res.masterRecovery }); return; }
         if (res.canceled) showToast(t('finance.backup_restore_canceled', 'Restore canceled.'), 'info');
         else if (res.success) {
           showToast(`${t('finance.backup_restored_from', 'Restored from')} "${res.fileName}". ${t('finance.backup_safety_snapshot', 'Safety snapshot')}: ${baseName(res.safetySnapshot)}`);
@@ -319,7 +344,8 @@ export const BackupRestoreView: React.FC = () => {
         </p>
       </div>
 
-      <HealthCheckCard />
+      {canUpload && <MasterRecoveryCard />}
+      {canUpload && <HealthCheckCard />}
 
       {/* Status */}
       <div className="card-base p-6">
@@ -522,7 +548,7 @@ export const BackupRestoreView: React.FC = () => {
               <span>{t('finance.backup_clear_all', 'Clear all business data')}</span>
             </button>
           </div>
-          <div className="pt-4 border-t border-slate-200 dark:border-slate-800">
+          {canUpload && <div className="pt-4 border-t border-slate-200 dark:border-slate-800">
             <p className="text-xs text-slate-600 dark:text-slate-400 leading-relaxed">
               {t('finance.backup_demo_desc', 'Replace business data with sample records to try the app.')}
             </p>
@@ -530,11 +556,15 @@ export const BackupRestoreView: React.FC = () => {
               <Sparkles size={14} />
               <span>{t('finance.backup_load_demo', 'Load demo data')}</span>
             </button>
-          </div>
+          </div>}
         </div>
       </div>
 
       {confirm && <ConfirmDialog state={confirm} onClose={() => setConfirm(null)} />}
+      <PinDialog open={!!pinDlg} mode={pinDlg?.mode || 'set'} fileName={pinDlg && pinDlg.mode === 'enter' ? pinDlg.fileName : undefined}
+        onSubmit={pinDlg?.mode === 'enter' ? submitRestorePin : submitBackupPin}
+        onMasterSubmit={pinDlg?.mode === 'enter' && pinDlg.master ? submitMasterRestore : undefined}
+        onClose={() => { if (pinDlg?.mode === 'enter') cancelPendingRestore(); setPinDlg(null); }} />
     </div>
   );
 };

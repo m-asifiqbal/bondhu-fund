@@ -18,8 +18,13 @@ interface ElectronAPI {
   isElectron: boolean;
   call: (method: string, args: unknown[]) => Promise<Result<any>>;
   appInfo: () => Promise<Result<AppInfo>>;
-  backup: () => Promise<Result<{ canceled: boolean; filePath?: string; fileName?: string; fileSize?: number }>>;
-  restore: () => Promise<Result<{ canceled: boolean; fileName?: string; safetySnapshot?: string }>>;
+  backup: (pin: string) => Promise<Result<{ canceled: boolean; filePath?: string; fileName?: string; fileSize?: number }>>;
+  restore: () => Promise<Result<{ canceled: boolean; needsPin?: boolean; masterRecovery?: boolean; fileName?: string; safetySnapshot?: string }>>;
+  restoreMaster: (password: string, masterPin: string) => Promise<Result<{ canceled: boolean; fileName?: string; safetySnapshot?: string }>>;
+  masterStatus: () => Promise<Result<{ enabled: boolean }>>;
+  masterSetup: (password: string, masterPin: string) => Promise<Result<{ enabled: boolean }>>;
+  restorePin: (pin: string) => Promise<Result<{ canceled: boolean; fileName?: string; safetySnapshot?: string }>>;
+  restoreCancel: () => Promise<Result<null>>;
   restoreSnapshot: (fileName: string) => Promise<Result<{ canceled: boolean; fileName?: string; safetySnapshot?: string }>>;
   listSnapshots: () => Promise<Result<SnapshotFile[]>>;
   snapshotNow: () => Promise<Result<string>>;
@@ -31,7 +36,9 @@ interface ElectronAPI {
   importPreview: (token: string, opts: ImportOptions) => Promise<Result<ImportPreview>>;
   importCommit: (token: string, opts: ImportOptions) => Promise<Result<ImportResult>>;
   exportMembersXlsx: () => Promise<Result<{ canceled: boolean; filePath?: string }>>;
-  exportStatements: (memberId: number | null, format: 'pdf' | 'xlsx') => Promise<Result<{ canceled: boolean; filePath?: string; count?: number }>>;
+  exportStatements: (memberId: number | null, format: 'pdf' | 'xlsx', lang?: string) => Promise<Result<{ canceled: boolean; filePath?: string; count?: number }>>;
+  exportTable: (doc: unknown, format: 'pdf' | 'xlsx', fileName: string) => Promise<Result<{ canceled: boolean; filePath?: string }>>;
+  exportVoucher: (v: unknown) => Promise<Result<{ canceled: boolean; filePath?: string }>>;
 }
 
 declare global {
@@ -126,23 +133,45 @@ export const openBackupsFolder = () => unwrap(bridge().openBackupsFolder());
 export const resetDatabase = (keepSetup = true) => call<void>('resetDatabase', keepSetup);
 export const loadDemoData = () => call<void>('loadDemoData');
 
-export async function performBackup(): Promise<{ success: boolean; canceled?: boolean; filePath?: string; error?: string }> {
+/** Encrypted backup: the PIN is required and is never stored. */
+export async function performBackup(pin: string): Promise<{ success: boolean; canceled?: boolean; filePath?: string; error?: string }> {
   try {
-    const r = await unwrap(bridge().backup());
+    const r = await unwrap(bridge().backup(pin));
     return { success: !r.canceled, canceled: r.canceled, filePath: r.filePath };
   } catch (e: any) {
     return { success: false, error: e.message };
   }
 }
 
-export async function performRestore(): Promise<{ success: boolean; canceled?: boolean; fileName?: string; safetySnapshot?: string; error?: string }> {
+/** Picks a backup file. Encrypted files come back with needsPin; finish with restoreWithPin(). */
+export async function performRestore(): Promise<{ success: boolean; canceled?: boolean; needsPin?: boolean; masterRecovery?: boolean; fileName?: string; safetySnapshot?: string; error?: string }> {
   try {
     const r = await unwrap(bridge().restore());
-    return { success: !r.canceled, canceled: r.canceled, fileName: r.fileName, safetySnapshot: r.safetySnapshot };
+    return { success: !r.canceled && !r.needsPin, canceled: r.canceled, needsPin: r.needsPin, masterRecovery: r.masterRecovery, fileName: r.fileName, safetySnapshot: r.safetySnapshot };
   } catch (e: any) {
     return { success: false, error: e.message };
   }
 }
+
+export async function restoreWithPin(pin: string): Promise<{ success: boolean; fileName?: string; safetySnapshot?: string; error?: string }> {
+  try {
+    const r = await unwrap(bridge().restorePin(pin));
+    return { success: true, fileName: r.fileName, safetySnapshot: r.safetySnapshot };
+  } catch (e: any) {
+    return { success: false, error: e.message };
+  }
+}
+export async function restoreWithMaster(password: string, masterPin: string): Promise<{ success: boolean; fileName?: string; safetySnapshot?: string; error?: string }> {
+  try {
+    const r = await unwrap(bridge().restoreMaster(password, masterPin));
+    return { success: true, fileName: r.fileName, safetySnapshot: r.safetySnapshot };
+  } catch (e: any) {
+    return { success: false, error: e.message };
+  }
+}
+export const getMasterStatus = () => unwrap(bridge().masterStatus());
+export const setupMasterRecovery = (password: string, masterPin: string) => unwrap(bridge().masterSetup(password, masterPin));
+export const cancelPendingRestore = () => { void bridge().restoreCancel(); };
 
 export async function restoreSnapshot(fileName: string) {
   try {
@@ -192,7 +221,10 @@ export const previewImport = (token: string, opts: ImportOptions) => unwrap(brid
 export const commitImport = (token: string, opts: ImportOptions) => unwrap(bridge().importCommit(token, opts));
 export const exportMembersToExcel = () => unwrap(bridge().exportMembersXlsx());
 /** Statement of one member (id) or of every member (null), as PDF or Excel. */
-export const exportStatements = (memberId: number | null, format: 'pdf' | 'xlsx') => unwrap(bridge().exportStatements(memberId, format));
+export const exportStatements = (memberId: number | null, format: 'pdf' | 'xlsx', lang?: string) => unwrap(bridge().exportStatements(memberId, format, lang));
+/** Styled PDF / Excel of any list or report (see utils/exportDoc.ts). */
+export const exportTable = (doc: unknown, format: 'pdf' | 'xlsx', fileName: string) => unwrap(bridge().exportTable(doc, format, fileName));
+export const exportVoucher = (v: unknown) => unwrap(bridge().exportVoucher(v));
 // Sign-in & health --------------------------------------------------------------------------
 export const login = (username: string, password: string) => call<SessionInfo>('login', username, password);
 export const logout = () => call<void>('logout');

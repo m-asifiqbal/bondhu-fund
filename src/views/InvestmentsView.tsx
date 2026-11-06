@@ -1,4 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
+import { MoneyInput } from '../components/common/MoneyInput';
+import { DownloadMenu } from '../components/common/DownloadMenu';
+import { cell, type ExportDoc } from '../utils/exportDoc';
 import { serial } from '../utils/i18n';
 import {
   Plus,
@@ -28,7 +31,7 @@ import {
   updateInvestment,
   updateInvestmentValuation,
   deleteInvestment,
-  saveTextFile,
+  exportTable,
   toCsv,
 } from '../services/db';
 import { Investment, InvestmentStatus } from '../types';
@@ -92,6 +95,7 @@ export const InvestmentsView: React.FC = () => {
     toBanglaDigits,
     language,
     masterData,
+    settings,
   } = useApp();
 
   const [investments, setInvestments] = useState<Investment[]>([]);
@@ -378,31 +382,32 @@ export const InvestmentsView: React.FC = () => {
     setSortBy('newest');
   };
 
-  const handleExport = async () => {
+  const handleExport = async (format: 'pdf' | 'xlsx') => {
     if (investments.length === 0) {
       showToast(t('finance.inv_nothing_to_export', 'There are no investments to export.'), 'info');
       return;
     }
     try {
-      const csv = toCsv(
-        ['Name', 'Sector', 'Purchase Date', 'Invested', 'Estimated Value', 'Unrealized Gain', 'Status', 'Review Date', 'Sold Date', 'Sold Amount', 'Realized Gain', 'Location', 'Notes'],
-        investments.map(i => [
-          i.name,
-          i.sector,
-          i.purchase_date,
-          i.invested_amount,
-          i.current_estimated_value,
-          i.status === 'Sold' ? '' : i.gain_loss,
-          i.status,
-          i.review_date || '',
-          i.sold_date || '',
-          i.sold_amount ?? '',
-          i.status === 'Sold' ? realizedGain(i) : '',
-          i.location_details || '',
-          i.notes || '',
-        ])
-      );
-      const res = await saveTextFile(`Bondhu_Fund_Investments_${todayISO()}.csv`, csv, [{ name: 'CSV', extensions: ['csv'] }]);
+      const sumCost = investments.reduce((a, i) => a + (Number(i.invested_amount) || 0), 0);
+      const sumVal = investments.reduce((a, i) => a + (i.status === 'Sold' ? Number(i.sold_amount) || 0 : Number(i.current_estimated_value) || 0), 0);
+      const m = (n: any) => cell(n, n === null || n === undefined || n === '' ? '' : formatCurrency(Number(n)));
+      const doc: ExportDoc = {
+        orgName: settings?.organization_name || 'Bondhu Fund', title: t('finance.inv_title', 'Investment portfolio'), lang: language === 'bn' ? 'bn' : 'en', landscape: true, generatedOn: todayISO(),
+        summary: [[investedLabel, formatCurrency(sumCost)], [estimatedLabel, formatCurrency(sumVal)], [t('finance.records', 'records'), String(investments.length)]],
+        sections: [{
+          columns: [
+            { header: t('finance.inv_investment', 'Investment') }, { header: t('finance.inv_sector', 'Sector') }, { header: t('finance.inv_purchased', 'Purchased'), kind: 'date' },
+            { header: investedLabel, kind: 'money' }, { header: estimatedLabel, kind: 'money' }, { header: t('finance.inv_gain', 'Gain'), kind: 'money' }, { header: t('common.status', 'Status') },
+            { header: t('finance.inv_review', 'Review date'), kind: 'date' }, { header: t('finance.inv_sold_date', 'Sold date'), kind: 'date' }, { header: t('finance.inv_sold_amount', 'Sold amount'), kind: 'money' }, { header: t('finance.inv_location', 'Location') },
+          ],
+          rows: investments.map(i => [
+            cell(i.name), cell(tv(i.sector)), cell(i.purchase_date, formatDate(i.purchase_date)), m(i.invested_amount), m(i.current_estimated_value),
+            m(i.status === 'Sold' ? realizedGain(i) : i.gain_loss), cell(tv(i.status)), cell(i.review_date, i.review_date ? formatDate(i.review_date) : ''),
+            cell(i.sold_date, i.sold_date ? formatDate(i.sold_date) : ''), m(i.sold_amount ?? null), cell(i.location_details),
+          ]),
+        }],
+      };
+      const res = await exportTable(doc, format, `Bondhu_Fund_Investments_${todayISO()}`);
       if (!res.canceled) showToast(t('finance.export_saved', 'Export saved.'));
     } catch (err: any) {
       showToast(err.message, 'error');
@@ -478,13 +483,7 @@ export const InvestmentsView: React.FC = () => {
             <FileText size={14} className="text-slate-500 dark:text-slate-400" />
             <span>{t('finance.inv_detailed_form', 'Use detailed entry form')}</span>
           </button>
-          <button
-            onClick={handleExport}
-            className="btn btn-outline"
-          >
-            <Download size={14} className="text-slate-500 dark:text-slate-400" />
-            <span>{t('common.export_csv', 'Export CSV')}</span>
-          </button>
+          <DownloadMenu label={t('common.export', 'Export')} title={t('common.export', 'Export')} onPick={handleExport} />
           <button
             onClick={openAdd}
             className="btn btn-primary"
@@ -938,12 +937,11 @@ export const InvestmentsView: React.FC = () => {
             />
             <div>
               <label className="form-label">{investedLabel} <span className="text-rose-500">*</span></label>
-              <input type="number" min="0" step="any" value={form.invested_amount} onChange={set('invested_amount')} className="form-input font-bold tabular-nums" placeholder="0" required />
+              <MoneyInput min="0" step="any" value={form.invested_amount} onChange={set('invested_amount')} className="form-input font-bold tabular-nums" placeholder="0" required />
             </div>
             <div>
               <label className="form-label">{t('finance.inv_current_value', 'Current estimated value')}</label>
-              <input
-                type="number"
+              <MoneyInput
                 min="0"
                 step="any"
                 value={form.current_estimated_value}
@@ -976,7 +974,7 @@ export const InvestmentsView: React.FC = () => {
               <>
                 <div>
                   <label className="form-label">{t('finance.inv_sold_amount', 'Sale amount')} <span className="text-rose-500">*</span></label>
-                  <input type="number" min="0" step="any" value={form.sold_amount} onChange={set('sold_amount')} className="form-input font-bold tabular-nums" required />
+                  <MoneyInput min="0" step="any" value={form.sold_amount} onChange={set('sold_amount')} className="form-input font-bold tabular-nums" required />
                 </div>
                 <DatePicker
                   label={t('finance.inv_sold_date', 'Sale date')}
@@ -1045,7 +1043,7 @@ export const InvestmentsView: React.FC = () => {
             </div>
             <div>
               <label className="form-label">{t('finance.inv_new_value', 'New estimated market value')} <span className="text-rose-500">*</span></label>
-              <input type="number" min="0" step="any" value={newEstVal} onChange={e => setNewEstVal(e.target.value)} className="form-input font-bold" required autoFocus />
+              <MoneyInput min="0" step="any" value={newEstVal} onChange={e => setNewEstVal(e.target.value)} className="form-input font-bold" required autoFocus />
             </div>
           </form>
         )}
@@ -1076,7 +1074,7 @@ export const InvestmentsView: React.FC = () => {
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div>
                 <label className="form-label">{t('finance.inv_sold_amount', 'Sale amount')} <span className="text-rose-500">*</span></label>
-                <input type="number" min="0" step="any" value={soldAmount} onChange={e => setSoldAmount(e.target.value)} className="form-input font-bold" required autoFocus />
+                <MoneyInput min="0" step="any" value={soldAmount} onChange={e => setSoldAmount(e.target.value)} className="form-input font-bold" required autoFocus />
               </div>
               <div>
                 <DatePicker

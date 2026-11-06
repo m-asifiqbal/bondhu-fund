@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { serial } from '../utils/i18n';
-import {
+import { Scale,
   Wallet, Landmark, HandCoins, AlertTriangle, Building2, Receipt, TrendingUp, TrendingDown, Minus,
   Download, Printer, RefreshCw, Users, CalendarDays, PieChart as PieIcon, Activity, BellRing,
   ArrowDownLeft, ArrowUpRight, UserPlus, FileWarning, ShieldCheck, Sparkles, DatabaseBackup, Plus, Timer,
@@ -10,8 +10,10 @@ import { ClockCard, TodayDates } from '../components/common/ClockCard';
 import { MonthPicker } from '../components/common/MonthPicker';
 import { Modal } from '../components/common/Modal';
 import { EChart, ChartCard, chartTheme, baseOption, valueAxis, categoryAxis } from '../components/charts/EChart';
-import { getOverviewData, loadDemoData, saveTextFile, savePdf, toCsv } from '../services/db';
-import { formatMonth as fmtMonth, toMonthKey } from '../utils/date';
+import { getOverviewData, loadDemoData, savePdf, exportTable } from '../services/db';
+import { cell, type ExportDoc } from '../utils/exportDoc';
+import { PrintSignatures } from '../components/common/PrintSignatures';
+import { formatMonth as fmtMonth, toMonthKey, todayISO } from '../utils/date';
 import { toBanglaDigits } from '../utils/i18n';
 import type { OverviewData } from '../types';
 
@@ -38,7 +40,7 @@ const L = {
   emptyTitle: ['Welcome to Bondhu Fund', 'বন্ধু ফান্ডে স্বাগতম'],
   emptyBody: ['Your database is empty. Add members to start tracking dues, or restore an existing backup.', 'ডাটাবেস খালি। সদস্য যোগ করুন অথবা ব্যাকআপ রিস্টোর করুন।'],
   addMember: ['Add first member', 'প্রথম সদস্য যোগ করুন'], restore: ['Restore a backup', 'ব্যাকআপ রিস্টোর'], demo: ['Explore with demo data', 'ডেমো ডেটা দেখুন'],
-  export: ['Export CSV', 'CSV এক্সপোর্ট'], pdf: ['Save PDF', 'PDF সংরক্ষণ'], rate: ['collection rate', 'আদায় হার'],
+  export: ['Export Excel', 'এক্সেল এক্সপোর্ট'], pdf: ['Save PDF', 'PDF সংরক্ষণ'], rate: ['collection rate', 'আদায় হার'],
   refresh: ['Refresh', 'রিফ্রেশ'], saved: ['Saved', 'সংরক্ষিত হয়েছে'], demoTitle: ['Load demo data?', 'ডেমো ডেটা লোড করবেন?'],
   demoBody: ['This fills the app with sample members, payments, expenses and investments so you can explore. You can clear it later from Backup & Restore.', 'অ্যাপটি ঘুরে দেখার জন্য নমুনা সদস্য, পেমেন্ট, খরচ ও বিনিয়োগ যোগ হবে। পরে ব্যাকআপ ও রিস্টোর থেকে এগুলো মুছে ফেলা যাবে।'],
   demoLoad: ['Load demo data', 'ডেমো ডেটা লোড করুন'], demoLoaded: ['Demo data loaded', 'ডেমো ডেটা লোড হয়েছে'], cancel: ['Cancel', 'বাতিল'],
@@ -47,6 +49,8 @@ const L = {
   hMethod: ['Method', 'মাধ্যম'], hMember: ['Member', 'সদস্য'], hTotal: ['Total', 'মোট'], paidFor: ['paid for', 'পরিশোধ করেছেন —'], joined: ['joined', 'যোগ দিয়েছেন'],
   lateFees: ['Late fees collected', 'আদায়কৃত বিলম্ব ফি'], lateMonth: ['This month', 'এ মাসে'], lateYear: ['This year', 'এ বছরে'],
   latePayments: ['late payments', 'টি বিলম্বিত পেমেন্ট'], lateAll: ['All time', 'সর্বমোট'], lateToDate: ['to date', 'পর্যন্ত'], lateLast: ['last month', 'গত মাসে'],
+  retBenefit: ['Investment benefit', 'বিনিয়োগ থেকে লাভ'], retLoss: ['Investment loss', 'বিনিয়োগে ক্ষতি'], retNet: ['Net investment result', 'নিট বিনিয়োগ ফলাফল'],
+  retChart: ['Investment benefit & loss', 'বিনিয়োগের লাভ ও ক্ষতি'], benefit: ['Benefit', 'লাভ'], lossT: ['Loss', 'ক্ষতি'], net: ['Net', 'নিট'], retEntries: ['entries', 'টি এন্ট্রি'],
   members_n: ['members', 'জন সদস্য'], gain: ['gain', 'লাভ'], loss: ['loss', 'ক্ষতি'], noData: ['No data for this period yet.', 'এই সময়ের কোনো তথ্য নেই।'],
 };
 type Key = keyof typeof L;
@@ -58,7 +62,7 @@ export const OverviewView: React.FC = () => {
   const {
     selectedMonth, setSelectedMonth, isDarkMode, language, formatCurrency, formatDate, currentUser, refreshKey,
     triggerRefresh, showToast, setActiveTab, tv, setMemberFilterStatus, setOpenRecordModal, setSelectedMemberIdForPayment,
-    bnName,
+    bnName, settings, canUpload,
   } = useApp();
   const tr = useCallback((k: Key) => L[k][language === 'bn' ? 1 : 0], [language]);
   const [data, setData] = useState<OverviewData | null>(null);
@@ -126,6 +130,21 @@ export const OverviewView: React.FC = () => {
       series: [
         { name: tr('expected'), type: 'bar', barGap: '8%', barMaxWidth: 14, itemStyle: { borderRadius: [4, 4, 0, 0], opacity: 0.35 }, label: valLbl('top'), labelLayout: noOverlap, emphasis: valEmph, data: data.trend.map(p => p.expected) },
         { name: tr('collectedShort'), type: 'bar', barMaxWidth: 14, itemStyle: { borderRadius: [4, 4, 0, 0] }, label: valLbl('top'), labelLayout: noOverlap, emphasis: valEmph, data: data.trend.map(p => p.collected) },
+      ],
+    };
+
+    const returnsChart = {
+      ...baseOption(th),
+      color: [th.status.good, th.status.critical, th.cat[0]],
+      grid: { left: 8, right: 12, top: 36, bottom: 4, containLabel: true },
+      tooltip: { ...(baseOption(th) as any).tooltip, trigger: 'axis', axisPointer: { type: 'shadow' }, formatter: tipMoney },
+      legend: { ...(baseOption(th) as any).legend, data: [tr('benefit'), tr('lossT'), tr('net')] },
+      xAxis: categoryAxis(th, months),
+      yAxis: valueAxis(th, compact),
+      series: [
+        { name: tr('benefit'), type: 'bar', stack: 'ret', barMaxWidth: 18, itemStyle: { borderRadius: [4, 4, 0, 0] }, label: valLbl('top'), labelLayout: noOverlap, emphasis: valEmph, data: data.trend.map(p => p.returnProfit || 0) },
+        { name: tr('lossT'), type: 'bar', stack: 'ret', barMaxWidth: 18, itemStyle: { borderRadius: [0, 0, 4, 4] }, label: valLbl('bottom'), labelLayout: noOverlap, emphasis: valEmph, data: data.trend.map(p => -(p.returnLoss || 0)) },
+        { name: tr('net'), type: 'line', smooth: false, symbol: 'circle', symbolSize: 7, showSymbol: true, lineStyle: { width: 2 }, z: 5, data: data.trend.map(p => (p.returnProfit || 0) - (p.returnLoss || 0)) },
       ],
     };
 
@@ -266,7 +285,7 @@ export const OverviewView: React.FC = () => {
         data: data.paymentMethods.map(m => m.value) }],
     };
 
-    return { expectedVsCollected, statusDonut, growth, flow, portfolio, expenseDonut, heat, top, methods };
+    return { expectedVsCollected, statusDonut, returnsChart, growth, flow, portfolio, expenseDonut, heat, top, methods };
     // money/compact/mLabel/tr/digits/formatDate all derive from `language`; tv also tracks master data.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [data, th, language, tv]);
@@ -277,11 +296,17 @@ export const OverviewView: React.FC = () => {
   const exportCsv = async () => {
     if (!data) return;
     try {
-      const csv = toCsv(
-        ['Month', 'Expected', 'Collected', 'Late fees', 'Collection rate %', 'Expenses', 'New investments', 'Fund balance', 'Cash in hand'],
-        data.trend.map(p => [p.month, p.expected, p.collected, p.lateFees, p.rate, p.expenses, p.invested, Math.round(p.fundBalance), Math.round(p.cashInHand)]),
-      );
-      const r = await saveTextFile(`BondhuFund_Overview_${data.month}.csv`, csv);
+      const m = (n: number) => cell(n, money(n));
+      const doc: ExportDoc = {
+        orgName: settings?.organization_name || 'Bondhu Fund', title: language === 'bn' ? 'সারসংক্ষেপ — ১২ মাসের হিসাব' : 'Overview — 12-month summary', subtitle: data.month,
+        lang: language === 'bn' ? 'bn' : 'en', landscape: true, generatedOn: todayISO(),
+        sections: [{
+          columns: [{ header: 'Month' }, { header: 'Expected', kind: 'money' }, { header: 'Collected', kind: 'money' }, { header: 'Late fees', kind: 'money' }, { header: 'Collection rate', kind: 'pct' },
+            { header: 'Expenses', kind: 'money' }, { header: 'New investments', kind: 'money' }, { header: 'Fund balance', kind: 'money' }, { header: 'Cash in hand', kind: 'money' }],
+          rows: data.trend.map(p => [cell(p.month, mLabel(p.month)), m(p.expected), m(p.collected), m(p.lateFees), cell(p.rate, digits(p.rate) + '%'), m(p.expenses), m(p.invested), m(Math.round(p.fundBalance)), m(Math.round(p.cashInHand))]),
+        }],
+      };
+      const r = await exportTable(doc, 'xlsx', `BondhuFund_Overview_${data.month}`);
       if (!r.canceled) showToast(`${tr('saved')}: ${r.filePath}`);
     } catch (e: any) { showToast(e.message, 'error'); }
   };
@@ -331,10 +356,10 @@ export const OverviewView: React.FC = () => {
           <div className="w-14 h-14 mx-auto rounded-2xl bg-brand-light dark:bg-emerald-950/60 text-brand dark:text-emerald-400 flex items-center justify-center"><Sparkles size={26} /></div>
           <h1 className="mt-5 text-2xl font-black text-slate-900 dark:text-white">{tr('emptyTitle')}</h1>
           <p className="mt-2 text-sm text-slate-600 dark:text-slate-300 max-w-lg mx-auto">{tr('emptyBody')}</p>
-          <div className="mt-7 grid grid-cols-1 sm:grid-cols-3 gap-3">
+          <div className={`mt-7 grid grid-cols-1 gap-3 ${canUpload ? 'sm:grid-cols-3' : 'sm:grid-cols-2'}`}>
             <button onClick={() => setActiveTab('members')} className="flex flex-col items-center gap-2 p-4 rounded-2xl bg-brand text-white hover:bg-brand-hover font-bold text-sm"><UserPlus size={20} />{tr('addMember')}</button>
             <button onClick={() => setActiveTab('backup')} className="flex flex-col items-center gap-2 p-4 rounded-2xl border border-slate-300 dark:border-[#283e4a] text-slate-800 dark:text-slate-100 hover:bg-slate-50 dark:hover:bg-slate-800 font-bold text-sm"><DatabaseBackup size={20} />{tr('restore')}</button>
-            <button disabled={busy} onClick={() => setDemoOpen(true)} className="flex flex-col items-center gap-2 p-4 rounded-2xl border border-slate-300 dark:border-[#283e4a] text-slate-800 dark:text-slate-100 hover:bg-slate-50 dark:hover:bg-slate-800 font-bold text-sm disabled:opacity-50"><Sparkles size={20} />{tr('demo')}</button>
+            {canUpload && <button disabled={busy} onClick={() => setDemoOpen(true)} className="flex flex-col items-center gap-2 p-4 rounded-2xl border border-slate-300 dark:border-[#283e4a] text-slate-800 dark:text-slate-100 hover:bg-slate-50 dark:hover:bg-slate-800 font-bold text-sm disabled:opacity-50"><Sparkles size={20} />{tr('demo')}</button>}
           </div>
         </div>
         <Modal open={demoOpen} onClose={() => setDemoOpen(false)} size="sm" tone="brand" locked={busy} icon={<Sparkles size={18} />} title={tr('demoTitle')}
@@ -406,6 +431,30 @@ export const OverviewView: React.FC = () => {
             </div>
           </div>
         </button>
+        {/* Investment benefit / loss */}
+        <Kpi accent="green" icon={<TrendingUp size={16} />} label={`${tr('retBenefit')} · ${fmtMonth(data.month, language as any, true)}`} value={money(k.monthReturnProfit)} onClick={() => setActiveTab('returns')}
+          foot={<span className="text-[11px] text-slate-500 dark:text-slate-400 truncate">{tr('lateYear')} {money(k.yearReturnProfit)} · {tr('lateAll')} {money(k.lifetimeReturnProfit)}</span>} />
+        <Kpi accent="rose" icon={<TrendingDown size={16} />} label={`${tr('retLoss')} · ${fmtMonth(data.month, language as any, true)}`} value={money(k.monthReturnLoss)} onClick={() => setActiveTab('returns')}
+          foot={<span className="text-[11px] text-slate-500 dark:text-slate-400 truncate">{tr('lateYear')} {money(k.yearReturnLoss)} · {tr('lateAll')} {money(k.lifetimeReturnLoss)}</span>} />
+        <button onClick={() => setActiveTab('returns')} className="card-base accent-blue p-4 text-left flex flex-col gap-3 min-w-0 sm:col-span-2 hover:shadow-md hover:-translate-y-0.5 cursor-pointer">
+          <div className="flex items-center justify-between gap-2">
+            <span className="text-[11px] font-bold text-slate-500 dark:text-slate-400 truncate">{tr('retNet')}</span>
+            <span className="w-7 h-7 shrink-0 rounded-lg bg-blue-50 dark:bg-blue-950/50 text-blue-600 dark:text-blue-400 flex items-center justify-center"><Scale size={16} /></span>
+          </div>
+          <div className="grid grid-cols-3 gap-4">
+            {[
+              { l: `${tr('lateMonth')}`, v: k.monthReturnProfit - k.monthReturnLoss },
+              { l: `${tr('lateYear')} · ${digits(data.month.slice(0, 4))}`, v: k.yearReturnProfit - k.yearReturnLoss },
+              { l: tr('lateAll'), v: k.lifetimeReturnProfit - k.lifetimeReturnLoss },
+            ].map((x, i) => (
+              <div key={i} className={`min-w-0 ${i ? 'border-l border-slate-200 dark:border-[#22353f] pl-4' : ''}`}>
+                <div className="text-[10px] font-bold uppercase tracking-wide text-slate-400 truncate">{x.l}</div>
+                <div className={`text-xl font-black tracking-tight tabular-nums truncate ${x.v > 0 ? 'text-emerald-600 dark:text-emerald-400' : x.v < 0 ? 'text-rose-600 dark:text-rose-400' : 'text-slate-900 dark:text-white'}`}>{x.v > 0 ? '+' : x.v < 0 ? '−' : ''}{money(Math.abs(x.v))}</div>
+              </div>
+            ))}
+          </div>
+          <div className="text-[11px] text-slate-500 dark:text-slate-400 truncate">{digits(k.lifetimeReturnCount)} {tr('retEntries')}</div>
+        </button>
       </div>
 
       {/* Collections */}
@@ -452,6 +501,11 @@ export const OverviewView: React.FC = () => {
             empty={data.expenseByCategory.length === 0} emptyText={tr('noData')}
             table={{ headers: [tr('hCategory'), tr('hAmount'), tr('hEntries')], rows: data.expenseByCategory.map(c => [tv(c.name), money(c.value), digits(c.count)]) }}>
             <EChart option={opts.expenseDonut} height={260} ariaLabel={tr('byCategory')} />
+          </ChartCard>
+          <ChartCard className="xl:col-span-2" title={tr('retChart')} subtitle={tr('last12')} icon={<TrendingUp size={15} />}
+            empty={data.trend.every(p => !p.returnProfit && !p.returnLoss)} emptyText={tr('noData')}
+            table={{ headers: [tr('hMonth'), tr('benefit'), tr('lossT'), tr('net')], rows: data.trend.map(p => [mLabel(p.month), money(p.returnProfit || 0), money(p.returnLoss || 0), money((p.returnProfit || 0) - (p.returnLoss || 0))]) }}>
+            <EChart option={opts.returnsChart} height={260} ariaLabel={tr('retChart')} />
           </ChartCard>
         </div>
       </Section>
@@ -560,6 +614,7 @@ export const OverviewView: React.FC = () => {
           )}
         </section>
       </div>
+      <PrintSignatures />
     </div>
   );
 };

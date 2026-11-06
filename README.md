@@ -368,7 +368,7 @@ npm run electron:dev     # Vite dev server + Electron, with hot reload for the U
 | `npm run typecheck` | TypeScript check for the renderer and main process |
 | `npm run test:import` | Excel import suite: template, a messy realistic workbook (Bangla digits, P markers, duplicates, future months), preview, commit, re-import, export round trip |
 | `npm run test:db` | Database test suite (fresh DB, CRUD, rules, reconciliation, backup/restore). Add `-- path\to\old.db` to also test migrating a copy of an older database. |
-| `npm run screenshots` | Regenerates the 3 images in `docs/screenshots/` using demo data in a temporary profile (set `BONDHU_ADMIN_PASSWORD` to the admin password) |
+| `npm run screenshots` | Regenerates the 3 images in `docs/screenshots/` using demo data in a temporary profile (set `BONDHU_SYSTEM_PASSWORD` to the iqbal_labs password) |
 | `npm run build:all` | Production build of the renderer (`dist/`) and main process (`dist-electron/`) |
 | `npm start` | Run the production build locally |
 | `npm run dist` | Build `release/BondhuFund-Setup-x.y.z.exe` and `release/BondhuFund-Portable-x.y.z.exe` |

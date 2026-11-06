@@ -9,7 +9,7 @@ const root = path.resolve(__dirname, '..');
 
 esbuild.buildSync({
   absWorkingDir: root,
-  entryPoints: ['electron/main.ts', 'electron/preload.ts', 'electron/database.ts', 'electron/excel.ts'],
+  entryPoints: ['electron/main.ts', 'electron/preload.ts', 'electron/database.ts', 'electron/excel.ts', 'electron/backup-crypto.ts'],
   outdir: 'dist-electron',
   bundle: true,
   platform: 'node',

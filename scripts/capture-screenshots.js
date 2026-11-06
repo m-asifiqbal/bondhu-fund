@@ -1,9 +1,9 @@
 /**
  * Captures the three documentation screenshots of the real app into docs/screenshots/.
  *
- *   BONDHU_ADMIN_PASSWORD=<admin password> npm run screenshots
+ *   BONDHU_SYSTEM_PASSWORD=<iqbal_labs password> npm run screenshots
  *
- * Runs the compiled app (dist + dist-electron) in an isolated, throw-away profile, signs in as the admin,
+ * Runs the compiled app (dist + dist-electron) in an isolated, throw-away profile, signs in as iqbal_labs (the only account allowed to load demo data),
  * loads demo data and sets a sample logo. Your real data is never touched.
  * Output: 01-overview.png (light), 02-collections.png (light), 03-dark-overview.png (dark).
  */
@@ -35,8 +35,8 @@ function done() {
 }
 
 async function run(win) {
-  const pw = process.env.BONDHU_ADMIN_PASSWORD;
-  if (!pw) throw new Error('Set BONDHU_ADMIN_PASSWORD to the admin password.');
+  const pw = process.env.BONDHU_SYSTEM_PASSWORD;
+  if (!pw) throw new Error('Set BONDHU_SYSTEM_PASSWORD to the iqbal_labs password (only that account may load demo data).');
   win.unmaximize();
   win.setContentSize(1440, 900);
   const js = code => win.webContents.executeJavaScript(code, true);
@@ -51,7 +51,7 @@ async function run(win) {
   const prefs = dark => js(`localStorage.setItem('bondhu_language','en'); localStorage.setItem('bondhu_dark_mode','${dark}'); localStorage.setItem('bondhu_sidebar_collapsed','false'); location.reload()`);
 
   await sleep(1500);
-  await js(`window.electronAPI.call('login', ['admin', ${JSON.stringify(pw)}])`);
+  await js(`window.electronAPI.call('login', ['iqbal_labs', ${JSON.stringify(pw)}])`);
   const logo = 'data:image/png;base64,' + fs.readFileSync(path.join(root, 'build', 'icon.png')).toString('base64');
   await js(`window.electronAPI.call('loadDemoData', [])`);
   await js(`window.electronAPI.call('saveAppSettings', [{ organization_name: 'Bondhu Fund', organization_name_bn: 'বন্ধু ফান্ড', org_logo: ${JSON.stringify(logo)} }])`);

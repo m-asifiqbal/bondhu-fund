@@ -20,7 +20,7 @@ import {
 } from 'lucide-react';
 import { ChipTabs } from '../components/common/ChipTabs';
 import { useApp } from '../context/AppContext';
-import { getCollections, deletePayment, saveTextFile } from '../services/db';
+import { getCollections, deletePayment, exportVoucher } from '../services/db';
 import { CollectionRecord, CollectionStats, PaymentStatus } from '../types';
 import { MonthPicker } from '../components/common/MonthPicker';
 import { SearchableSelect, SelectOption } from '../components/common/SearchableSelect';
@@ -207,11 +207,13 @@ export const CollectionsView: React.FC = () => {
 
   const handleDownloadVoucher = async (r: CollectionRecord) => {
     try {
-      const res = await saveTextFile(
-        `Voucher_${r.member_code || r.member_id}_${r.payment_month}.txt`,
-        voucherText(r),
-        [{ name: 'Text', extensions: ['txt'] }]
-      );
+      const res = await exportVoucher({
+        orgName: settings?.organization_name || 'Bondhu Fund', lang: language === 'bn' ? 'bn' : 'en', no: String(r.payment_id ?? r.id ?? ''),
+        member_code: r.member_code, member_name: r.member_name, member_name_bn: r.member_name_bn, payment_month: r.payment_month, monthLabel: formatMonth(r.payment_month),
+        payment_date: r.payment_date, payment_method: r.payment_method, trx_id: r.trx_id, note: r.note,
+        contribution: Number(r.contribution_amount) || 0, late_fee: Number(r.late_fee) || 0, total: Number(r.total_amount || (Number(r.contribution_amount) || 0) + (Number(r.late_fee) || 0)),
+        currency: language === 'bn' ? '৳' : (settings?.currency_symbol || 'TK'), generatedOn: todayISO(),
+      });
       if (!res.canceled) showToast(t('members.col_voucherSaved', 'Voucher saved.'));
     } catch (e: any) {
       showToast(e.message, 'error');

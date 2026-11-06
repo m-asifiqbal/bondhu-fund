@@ -4,7 +4,8 @@ import {
   AlertTriangle, ShieldCheck, Loader2, Inbox, RefreshCw, ChevronDown, Check, Search,
 } from 'lucide-react';
 import { useApp } from '../context/AppContext';
-import { getAllMembersLite, saveTextFile, savePdf, toCsv } from '../services/db';
+import { getAllMembersLite, exportTable } from '../services/db';
+import { cell, type ExportDoc } from '../utils/exportDoc';
 import { MonthPicker } from '../components/common/MonthPicker';
 import { SearchableSelect, SelectOption } from '../components/common/SearchableSelect';
 import { DatePicker } from '../components/common/DatePicker';
@@ -64,7 +65,7 @@ const defaultCols = (cols: ColumnDef[]) => new Set(cols.filter(c => c.default !=
 export const ReportsView: React.FC = () => {
   const {
     t, tv, bnName, language, formatCurrency, formatDate, formatMonth, toBanglaDigits, selectedMonth, showToast, refreshKey,
-    settings, orgName, masterData,
+    settings, orgName, masterData, canUpload,
   } = useApp();
   const bn = language === 'bn';
   const num = (n: number | string) => (bn ? toBanglaDigits(n) : String(n));
@@ -219,31 +220,35 @@ export const ReportsView: React.FC = () => {
   const totalLabel = t('reports.total', 'Total');
   const fileBase = data ? `BondhuFund_${def.file}_${data.fileTag}`.replace(/[\\/:*?"<>|\s]+/g, '_') : '';
 
-  // ---- Export (CSV keeps English headers + raw values) -------------------------
-  const csvSection = (cols: ColumnDef[], rows: Record<string, any>[]) => {
-    const body = rows.map(r => cols.map(c => r[c.key] ?? ''));
-    if (cols.some(c => c.total) && rows.length) {
-      const tot = totalsFor(cols, rows);
-      body.push(cols.map((c, i) => (c.total ? tot[c.key] : i === 0 ? 'TOTAL' : '')));
-    }
-    return toCsv(cols.map(c => c.label), body);
+  // ---- Export (styled Excel / PDF from the shared exporter: N/A for blanks, Bangla fonts, signatures) ----
+  const plain = (v: any, kind: any): string => {
+    if (v === null || v === undefined || v === '') return '';
+    if (kind === 'status') return fmt.bn ? fmt.tv(String(v)) : String(v);
+    const x = formatCell(v, kind, fmt);
+    return typeof x === 'string' ? x : String(v);
   };
+  const kindOf = (k: any) => (k === 'money' ? 'money' : k === 'number' ? 'int' : k === 'percent' ? 'pct' : k === 'date' ? 'date' : 'text');
+  const section = (sTitle: string | undefined, cols: ColumnDef[], rows: Record<string, any>[]) => {
+    const tot = cols.some(c => c.total) && rows.length ? totalsFor(cols, rows) : null;
+    return {
+      title: sTitle,
+      columns: cols.map(c => ({ header: bn ? c.bn : c.label, kind: kindOf(c.kind) as any })),
+      rows: rows.map(r => cols.map(c => cell(c.kind === 'name' || c.kind === 'tv' || c.kind === 'status' || c.kind === 'month' || c.kind === 'datetime' ? plain(r[c.key], c.kind) || null : r[c.key], plain(r[c.key], c.kind)))),
+      totals: tot ? cols.map((c, i) => (c.total ? cell(tot[c.key], plain(tot[c.key], c.kind)) : i === 0 ? cell('', totalLabel) : cell(''))) : undefined,
+    };
+  };
+  const buildDoc = (): ExportDoc => ({
+    orgName: settings?.organization_name || 'Bondhu Fund', title, subtitle: data!.fileTag, lang: bn ? 'bn' : 'en', landscape: shownColumns.length > 6, generatedOn: generatedAt,
+    summary: data!.summary.map(s => [bn ? s.bn : s.label, plain(s.value, s.kind) || String(s.value)] as [string, string]),
+    sections: [section(undefined, shownColumns, data!.rows), ...(data!.extra || []).filter(x => x.rows.length).map(x => section(x.title, x.columns, x.rows))],
+  });
 
   const exportCsv = async () => {
     if (!data || !data.rows.length) return;
     setExporting('csv');
     try {
-      const meta = toCsv([], [
-        [settings?.organization_name || 'Bondhu Fund'],
-        [def.title],
-        ['Period', data.fileTag],
-        ['Generated', generatedAt],
-        ...data.summary.map(s => [s.label, s.value]),
-      ]).replace(/^\r\n/, '');
-      const parts = [meta, csvSection(shownColumns, data.rows)];
-      for (const x of data.extra || []) if (x.rows.length) parts.push(toCsv([x.title], []).trim() + '\r\n' + csvSection(x.columns, x.rows));
-      const res = await saveTextFile(`${fileBase}.csv`, parts.join('\r\n\r\n'), [{ name: 'CSV (Excel)', extensions: ['csv'] }]);
-      if (!res.canceled) showToast(t('reports.csv_saved', 'CSV saved') + (res.filePath ? `: ${res.filePath}` : ''), 'success');
+      const res = await exportTable(buildDoc(), 'xlsx', fileBase);
+      if (!res.canceled) showToast(t('reports.xlsx_saved', 'Excel file saved') + (res.filePath ? `: ${res.filePath}` : ''), 'success');
     } catch (e: any) {
       showToast(e.message, 'error');
     } finally {
@@ -256,8 +261,7 @@ export const ReportsView: React.FC = () => {
     setExporting('pdf');
     setChooserOpen(false);
     try {
-      // Wide tables print in landscape so columns aren't squeezed.
-      const res = await savePdf(`${fileBase}.pdf`, shownColumns.length > 6);
+      const res = await exportTable(buildDoc(), 'pdf', fileBase);
       if (!res.canceled) showToast(t('reports.pdf_saved', 'PDF saved') + (res.filePath ? `: ${res.filePath}` : ''), 'success');
     } catch (e: any) {
       showToast(e.message, 'error');
@@ -334,7 +338,7 @@ export const ReportsView: React.FC = () => {
           <button onClick={exportCsv} disabled={!data || !data.rows.length || !!exporting || loading}
             className="btn btn-outline">
             {exporting === 'csv' ? <Loader2 size={15} className="animate-spin" /> : <FileSpreadsheet size={15} className="text-emerald-600" />}
-            <span>{t('reports.export_csv', 'Export CSV')}</span>
+            <span>{t('reports.export_xlsx', 'Export Excel')}</span>
           </button>
           <button onClick={exportPdf} disabled={!data || !!exporting || loading}
             className="btn btn-primary">
@@ -346,7 +350,7 @@ export const ReportsView: React.FC = () => {
 
       {/* Report picker */}
       <div className="no-print grid grid-cols-2 lg:grid-cols-4 gap-3">
-        {REPORTS.map(r => {
+        {REPORTS.filter(r => r.id !== 'audit' || canUpload).map(r => {
           const Icon = r.icon;
           const active = r.id === reportId;
           return (

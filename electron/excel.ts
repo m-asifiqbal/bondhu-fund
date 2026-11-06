@@ -66,6 +66,7 @@ function cellValue(v: ExcelJS.CellValue): unknown {
     if ('text' in o) return o.text;                           // hyperlink
     if ('error' in o) return null;
   }
+  if (typeof v === 'string' && /^\s*(n\/?a|-{1,2}|—)\s*$/i.test(v)) return null;   // exported blanks read back as empty
   return v;
 }
 
@@ -438,7 +439,8 @@ export async function buildMembersExport(members: any[], payments: Array<{ membe
   styleHeader(ms.getRow(1));
   for (const m of members) {
     const [y, mo, d] = String(m.join_date || '').split('-').map(Number);
-    ms.addRow({ ...m, join_date: y ? new Date(Date.UTC(y, mo - 1, d)) : null });
+    const na = (x: any) => (x === null || x === undefined || String(x).trim() === '' ? 'N/A' : x);
+    ms.addRow({ ...m, name_bn: na(m.name_bn), phone: na(m.phone), email: na(m.email), designation: na(m.designation), notes: na(m.notes), join_date: y ? new Date(Date.UTC(y, mo - 1, d)) : null });
   }
   ms.getColumn('join_date').numFmt = 'dd/mm/yyyy';
   const ps = wb.addWorksheet('Payment History', { views: [{ state: 'frozen', ySplit: 1, xSplit: 2 }] });

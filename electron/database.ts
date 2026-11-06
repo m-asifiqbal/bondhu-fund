@@ -1427,12 +1427,15 @@ function deleteExpense(id: number) {
 // Never send credential columns to the renderer.
 const USER_COLS = `id, username, full_name, email, role, avatar_initials, status, created_at, phone, designation, address, bio, avatar,
   last_login_at, updated_at, is_system, (password_hash IS NOT NULL) AS has_password`;
-const getUsers = () => all(`SELECT ${USER_COLS} FROM users ORDER BY id`);
+/** The protected iqbal_labs super-user account is visible only to itself. */
+const seesSystem = () => !!getSession()?.canUpload;
+const getUsers = () => all(`SELECT ${USER_COLS} FROM users ${seesSystem() ? '' : 'WHERE is_system = 0'} ORDER BY id`);
 
 /** Profile page: user + activity statistics from the audit log. */
 function getUserProfile(id: number) {
   const user = get(`SELECT ${USER_COLS} FROM users WHERE id = ?`, [id]);
   if (!user) fail('User not found.');
+  if (!seesSystem() && get('SELECT 1 FROM users WHERE id = ? AND is_system = 1', [id])) fail('User not found.');
   const byAction = all(`SELECT action, entity, COUNT(*) AS count FROM audit_log WHERE user_id = ? GROUP BY action, entity ORDER BY count DESC`, [id]);
   const span = get(`SELECT MIN(at) AS first_at, MAX(at) AS last_at, COUNT(*) AS total FROM audit_log WHERE user_id = ?`, [id]) || {};
   const monthly = all(`SELECT substr(at,1,7) AS month, COUNT(*) AS count FROM audit_log WHERE user_id = ? AND at >= ? GROUP BY month ORDER BY month`,
@@ -1575,6 +1578,21 @@ function login(username: string, password: string) {
   return getSession();
 }
 
+/** Re-check the protected iqbal_labs password (used before creating its recovery key). */
+export function verifySystemPassword(password: string): boolean {
+  const u = get('SELECT password_salt, password_hash FROM users WHERE is_system = 1');
+  return !!u && !!u.password_hash && verifyPassword(String(password || ''), u.password_salt, u.password_hash);
+}
+/** Public half of the Super User's backup-recovery key (base64) — safe to keep in the database. */
+export function getMasterRecoveryPub(): string | null {
+  return get(`SELECT value FROM app_settings WHERE key = 'master_recovery_pub'`)?.value || null;
+}
+export function setMasterRecoveryPub(b64: string) {
+  run(`INSERT OR REPLACE INTO app_settings (key, value) VALUES ('master_recovery_pub', ?)`, [b64]);
+  audit('update', 'settings', null, 'backup master recovery key set');
+  mutated();
+}
+
 function logout() {
   if (session) { audit('logout', 'user', session.id, session.username); mutated(); }
   session = null;
@@ -1631,12 +1649,14 @@ const UPLOAD = new Set(['bulkAddMembers']);                          // + Excel 
 const ADMIN = new Set(['cancelSettlement', 'addUser', 'deleteUser', 'setUserPassword', 'saveAppSettings', 'resetDatabase', 'loadDemoData',
   'addMasterItem', 'updateMasterItem', 'deleteMasterItem']);
 const READ = /^(get|suggest|preview|export)/;
+const SYSTEM_ONLY = new Set(['loadDemoData', 'checkAccountingHealth']);   // iqbal_labs only
 
 /** Throws unless the signed-in user may call `method` with `args`. Called by main.ts for every IPC call. */
 export function authorize(method: string, args: any[] = []) {
   if (PUBLIC.has(method)) return;
   const s = getSession();
   if (!s) fail('Your session has ended. Please sign in again.');
+  if (SYSTEM_ONLY.has(method) && !s.canUpload) fail('This is available only to the iqbal_labs account.');
   if (UPLOAD.has(method) && !s.canUpload) fail('Data upload is only available to the iqbal_labs account.');
   if (ADMIN.has(method) && !s.isAdmin) fail('Only an Admin can do this.');
   if (method === 'updateUser') {
@@ -1761,10 +1781,17 @@ function getOverviewData(month?: string) {
       month: k, expected: s.expected, collected: s.collected, lateFees: s.lateFees, rate: s.rate,
       expenses: num('SELECT SUM(amount) FROM expenses WHERE substr(expense_date,1,7) = ?', [k]),
       invested: num('SELECT SUM(invested_amount) FROM investments WHERE substr(purchase_date,1,7) = ?', [k]),
+      returnProfit: num(`SELECT SUM(amount) FROM investment_returns WHERE entry_type = 'Profit' AND substr(entry_date,1,7) = ?`, [k]),
+      returnLoss: num(`SELECT SUM(amount) FROM investment_returns WHERE entry_type = 'Loss' AND substr(entry_date,1,7) = ?`, [k]),
       fundBalance: p.fundBalance, cashInHand: p.cashInHand,
     });
   }
   const from12 = `${addMonths(mk, -11)}-01`;
+  // investment benefit / loss entries: selected month, year to date, all time
+  const retSum = (where: string, params: any[]) => get(`SELECT COALESCE(SUM(CASE entry_type WHEN 'Profit' THEN amount END),0) p, COALESCE(SUM(CASE entry_type WHEN 'Loss' THEN amount END),0) l, COUNT(*) n FROM investment_returns WHERE ${where}`, params) || {};
+  const rMonth = retSum('substr(entry_date,1,7) = ?', [mk]);
+  const rYear = retSum('substr(entry_date,1,4) = ? AND entry_date <= ?', [mk.slice(0, 4), asOf]);
+  const rAll = retSum('entry_date <= ?', [asOf]);
 
   // arrears: unpaid past-due months per active member (since joining)
   const dd = dueDay();
@@ -1810,6 +1837,9 @@ function getOverviewData(month?: string) {
       monthLateFees: Number(lfMonth.v) || 0, monthLateCount: Number(lfMonth.n) || 0, prevMonthLateFees: Number(lfPrev.v) || 0,
       yearLateFees: Number(lfYear.v) || 0, yearLateCount: Number(lfYear.n) || 0, lifetimeLateFees: Number(lfAll.v) || 0,
       monthExpenses, prevMonthExpenses, outstanding: ms.outstanding,
+      monthReturnProfit: Number(rMonth.p) || 0, monthReturnLoss: Number(rMonth.l) || 0, monthReturnCount: Number(rMonth.n) || 0,
+      yearReturnProfit: Number(rYear.p) || 0, yearReturnLoss: Number(rYear.l) || 0,
+      lifetimeReturnProfit: Number(rAll.p) || 0, lifetimeReturnLoss: Number(rAll.l) || 0, lifetimeReturnCount: Number(rAll.n) || 0,
       paid: ms.paid, pending: ms.pending, overdue: ms.overdue, dueMembers: ms.total,
       activeMembers: num(`SELECT COUNT(*) FROM members WHERE status='Active'`),
       totalMembers: num('SELECT COUNT(*) FROM members'),
@@ -1877,7 +1907,9 @@ function getTransactions(startDate?: string, endDate?: string, type = 'All') {
 }
 
 function getAuditLog(limit = 200) {
-  return all('SELECT * FROM audit_log ORDER BY id DESC LIMIT ?', [Math.min(Number(limit) || 200, 5000)]);
+  // activity of the protected iqbal_labs account is hidden from everyone else
+  const hide = seesSystem() ? '' : `WHERE COALESCE(user_name, '') NOT IN (SELECT username FROM users WHERE is_system = 1) AND COALESCE(user_id, 0) NOT IN (SELECT id FROM users WHERE is_system = 1)`;
+  return all(`SELECT * FROM audit_log ${hide} ORDER BY id DESC LIMIT ?`, [Math.min(Number(limit) || 200, 5000)]);
 }
 
 function getDynamicNotifications() {

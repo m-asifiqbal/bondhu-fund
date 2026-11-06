@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
+import { MoneyInput } from '../components/common/MoneyInput';
 import {
   ImagePlus,
   Trash2,
@@ -260,7 +261,7 @@ export const SettingsView: React.FC = () => {
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
                   <label className="form-label">{t('admin.settings_default_due', 'Default monthly due')}</label>
-                  <input type="number" min={0} value={form.default_monthly_due} onChange={e => set('default_monthly_due', e.target.value)} className={inputCls('default_monthly_due', 'font-bold')} />
+                  <MoneyInput min={0} value={form.default_monthly_due} onChange={e => set('default_monthly_due', e.target.value)} className={inputCls('default_monthly_due', 'font-bold')} />
                   {fieldErr('default_monthly_due')}
                 </div>
                 <div>
@@ -270,7 +271,7 @@ export const SettingsView: React.FC = () => {
                 </div>
                 <div>
                   <label className="form-label">{t('admin.settings_late_fee', 'Late fee amount')}</label>
-                  <input type="number" min={0} value={form.late_fee_amount} onChange={e => set('late_fee_amount', e.target.value)} className={inputCls('late_fee_amount', 'font-bold')} />
+                  <MoneyInput min={0} value={form.late_fee_amount} onChange={e => set('late_fee_amount', e.target.value)} className={inputCls('late_fee_amount', 'font-bold')} />
                   {fieldErr('late_fee_amount')}
                 </div>
                 <div>

@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
+import { MoneyInput } from '../components/common/MoneyInput';
 import { serial } from '../utils/i18n';
 import {
   Plus, Upload, Search, ChevronLeft, ChevronRight, X, UserPlus, Edit2, Trash2, Receipt, FileSpreadsheet, Users,
@@ -85,7 +86,7 @@ export const MembersView: React.FC = () => {
     if (dlBusy) return;
     setDlBusy(memberId ?? 'all');
     try {
-      const r = await exportStatements(memberId, format);
+      const r = await exportStatements(memberId, format, language);
       if (!r.canceled) showToast(`${memberId ? t('members.dl_one_saved', 'Statement saved') : t('members.dl_all_saved', 'All statements saved')}${r.filePath ? `: ${r.filePath}` : ''}`);
     } catch (e: any) { showToast(e.message, 'error'); } finally { setDlBusy(null); }
   };
@@ -752,8 +753,7 @@ export const MembersView: React.FC = () => {
             </div>
             <div>
               <label className="form-label">{t('common.monthly_due', 'Monthly due')} <span className="text-rose-500">*</span></label>
-              <input
-                type="number"
+              <MoneyInput
                 min={0}
                 value={form.monthly_due}
                 onChange={e => setField('monthly_due', e.target.value === '' ? '' : Number(e.target.value))}
@@ -770,8 +770,7 @@ export const MembersView: React.FC = () => {
             />
             <div>
               <label className="form-label">{t('members.opening_balance', 'Contributions before using the app')}</label>
-              <input
-                type="number"
+              <MoneyInput
                 min={0}
                 value={form.opening_balance}
                 onChange={e => setField('opening_balance', e.target.value === '' ? '' : Number(e.target.value))}

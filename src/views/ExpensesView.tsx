@@ -1,4 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
+import { MoneyInput } from '../components/common/MoneyInput';
+import { DownloadMenu } from '../components/common/DownloadMenu';
+import { cell, type ExportDoc } from '../utils/exportDoc';
 import { serial } from '../utils/i18n';
 import {
   Plus,
@@ -25,7 +28,7 @@ import {
   updateExpense,
   deleteExpense,
   verifyExpenseReceipt,
-  saveTextFile,
+  exportTable,
   toCsv,
 } from '../services/db';
 import { Expense } from '../types';
@@ -89,6 +92,7 @@ export const ExpensesView: React.FC = () => {
     language,
     setActiveTab,
     masterData,
+    settings,
   } = useApp();
 
   const [expenses, setExpenses] = useState<Expense[]>([]);
@@ -237,17 +241,26 @@ export const ExpensesView: React.FC = () => {
     setFormOpen(false);
   };
 
-  const handleExport = async () => {
+  const handleExport = async (format: 'pdf' | 'xlsx') => {
     if (expenses.length === 0) {
       showToast(t('finance.exp_nothing_to_export', 'There are no expenses to export.'), 'info');
       return;
     }
     try {
-      const csv = toCsv(
-        ['Date', 'Title', 'Category', 'Payee', 'Amount', 'Receipt Ref', 'Status', 'Notes'],
-        expenses.map(e => [e.expense_date, e.title, e.category, e.payee, e.amount, e.receipt_ref, e.status, e.notes || ''])
-      );
-      const res = await saveTextFile(`Bondhu_Fund_Expenses_${todayISO()}.csv`, csv, [{ name: 'CSV', extensions: ['csv'] }]);
+      const total = expenses.reduce((a, e) => a + (Number(e.amount) || 0), 0);
+      const doc: ExportDoc = {
+        orgName: settings?.organization_name || 'Bondhu Fund', title: t('finance.exp_title', 'Operating expenses'), lang: language === 'bn' ? 'bn' : 'en', landscape: true, generatedOn: todayISO(),
+        summary: [[t('finance.exp_total_all', 'Total expenses'), formatCurrency(total)], [t('finance.records', 'records'), String(expenses.length)]],
+        sections: [{
+          columns: [
+            { header: t('common.date', 'Date'), kind: 'date' }, { header: t('finance.exp_title_col', 'Title') }, { header: t('finance.exp_category', 'Category') }, { header: t('finance.exp_payee', 'Payee') },
+            { header: t('common.amount', 'Amount'), kind: 'money' }, { header: t('finance.exp_receipt_ref', 'Receipt ref') }, { header: t('common.status', 'Status') }, { header: t('members.note', 'Notes') },
+          ],
+          rows: expenses.map(e => [cell(e.expense_date, formatDate(e.expense_date)), cell(e.title), cell(tv(e.category)), cell(e.payee), cell(e.amount, formatCurrency(e.amount)), cell(e.receipt_ref), cell(tv(e.status)), cell(e.notes)]),
+          totals: [cell(''), cell(''), cell(''), cell('', t('reports.total', 'Total')), cell(total, formatCurrency(total)), cell(''), cell(''), cell('')],
+        }],
+      };
+      const res = await exportTable(doc, format, `Bondhu_Fund_Expenses_${todayISO()}`);
       if (!res.canceled) showToast(t('finance.export_saved', 'Export saved.'));
     } catch (e: any) {
       showToast(e.message, 'error');
@@ -364,13 +377,7 @@ export const ExpensesView: React.FC = () => {
         </div>
         <div className="flex flex-wrap items-center gap-3">
           <MonthPicker value={selectedMonth} onChange={setSelectedMonth} align="right" />
-          <button
-            onClick={handleExport}
-            className="btn btn-outline"
-          >
-            <Download size={14} className="text-slate-500" />
-            <span>{t('common.export_csv', 'Export CSV')}</span>
-          </button>
+          <DownloadMenu label={t('common.export', 'Export')} title={t('common.export', 'Export')} onPick={handleExport} />
           <button
             onClick={openAdd}
             className="btn btn-primary"
@@ -787,7 +794,7 @@ export const ExpensesView: React.FC = () => {
             )}
             <div>
               <label className="form-label">{t('common.amount', 'Amount')} <span className="text-rose-500">*</span></label>
-              <input type="number" min="0" step="any" value={form.amount} onChange={set('amount')} className="form-input font-bold tabular-nums" placeholder="0" required />
+              <MoneyInput min="0" step="any" value={form.amount} onChange={set('amount')} className="form-input font-bold tabular-nums" placeholder="0" required />
             </div>
 
             <DatePicker

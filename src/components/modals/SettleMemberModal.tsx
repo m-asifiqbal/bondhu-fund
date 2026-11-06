@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
+import { MoneyInput } from '../common/MoneyInput';
 import { UserMinus, AlertTriangle } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import { previewMemberSettlement, settleMember } from '../../services/db';
@@ -115,7 +116,7 @@ export const SettleMemberModal: React.FC<Props> = ({ member, onClose, onDone }) 
           <div className={row}><span className="text-xs font-bold text-slate-800 dark:text-slate-100">{t('settle.principal', 'Member\'s own money')}</span><span className="font-black tabular-nums">{formatCurrency(preview?.principal ?? 0)}</span></div>
           <div className={row}>
             <span className={lbl}>{t('settle.share', 'Investment benefit share')}<span className="block text-[10px] text-slate-400">{t('settle.calc', 'Calculated')}: {formatCurrency(calc)}</span></span>
-            <input type="number" step="0.01" value={share} onChange={e => setShare(e.target.value === '' ? '' : Number(e.target.value))}
+            <MoneyInput step="0.01" value={share} onChange={e => setShare(e.target.value === '' ? '' : Number(e.target.value))}
               aria-label={t('settle.share', 'Investment benefit share')} className="form-input !w-36 text-right font-bold tabular-nums" />
           </div>
           <div className={row}><span className="text-xs font-bold text-emerald-800 dark:text-emerald-300">{t('settle.payout', 'Total payout')}</span><span className="font-black text-emerald-700 dark:text-emerald-300 tabular-nums">{formatCurrency(total)}</span></div>

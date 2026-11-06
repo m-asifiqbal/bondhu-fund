@@ -7,6 +7,8 @@ module.exports = {
   ],
   theme: {
     extend: {
+      // corner radii are 5px (0.3125rem) smaller than Tailwind's defaults for lg and up
+      borderRadius: { lg: '0.25rem', xl: '0.4375rem', '2xl': '0.6875rem', '3xl': '1.1875rem' },
       colors: {
         sidebar: {
           DEFAULT: '#082124',
