@@ -300,19 +300,23 @@ export const SettingsView: React.FC = () => {
 
             <div className="pt-4 border-t border-slate-200 dark:border-slate-800">
               {sectionTitle(<HardDriveDownload size={16} className="text-brand dark:text-emerald-400" />, t('admin.settings_auto_backup', 'Automatic backups'), t('admin.settings_auto_backup_desc', 'A snapshot is saved once a day in the local backups folder.'))}
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 items-start">
-                <label className="flex items-center justify-between gap-3 rounded-xl border border-slate-200 dark:border-slate-700 px-4 py-3 cursor-pointer">
-                  <span className="font-semibold text-slate-800 dark:text-slate-200">{t('admin.settings_auto_backup_enabled', 'Daily automatic snapshot')}</span>
+              {/* two equal cells, label on top, one 44px control each — side by side from tablet width up */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-5 gap-y-4 items-start">
+                <div>
+                  <span className="form-label">{t('admin.settings_auto_backup_enabled', 'Daily automatic snapshot')}</span>
                   <button
                     type="button"
                     role="switch"
                     aria-checked={form.auto_backup_enabled} aria-label={t('admin.settings_auto_backup', 'Automatic daily backup')}
                     onClick={() => set('auto_backup_enabled', !form.auto_backup_enabled)}
-                    className={`relative w-10 h-6 rounded-full transition-colors shrink-0 ${form.auto_backup_enabled ? 'bg-brand dark:bg-emerald-600' : 'bg-slate-300 dark:bg-slate-700'}`}
+                    className="w-full h-11 flex items-center justify-between gap-3 rounded-xl border-[1.5px] border-[#a9b7c3] dark:border-[#3a5463] bg-white dark:bg-[#101b21] px-3.5 text-left font-semibold text-slate-800 dark:text-slate-200 hover:border-[#7f93a3] transition-colors"
                   >
-                    <span className={`absolute top-0.5 left-0.5 w-5 h-5 rounded-full bg-white shadow transition-transform ${form.auto_backup_enabled ? 'translate-x-4' : ''}`} />
+                    <span>{form.auto_backup_enabled ? t('common.on', 'On') : t('common.off', 'Off')}</span>
+                    <span className={`relative w-10 h-6 rounded-full transition-colors shrink-0 ${form.auto_backup_enabled ? 'bg-brand dark:bg-emerald-600' : 'bg-slate-300 dark:bg-slate-700'}`}>
+                      <span className={`absolute top-0.5 left-0.5 w-5 h-5 rounded-full bg-white shadow transition-transform ${form.auto_backup_enabled ? 'translate-x-4' : ''}`} />
+                    </span>
                   </button>
-                </label>
+                </div>
                 <div>
                   <label className="form-label">{t('admin.settings_auto_backup_keep', 'Number of daily snapshots to keep')}</label>
                   <input type="number" min={1} max={365} step={1} value={form.auto_backup_keep} onChange={e => set('auto_backup_keep', e.target.value)} className={inputCls('auto_backup_keep', 'font-bold')} />

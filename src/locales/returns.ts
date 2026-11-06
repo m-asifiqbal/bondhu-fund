@@ -76,6 +76,7 @@ const dict: Record<string, { en: string; bn: string }> = {
   'members.entry_return_tip': { en: 'A benefit adds money to the fund and a loss reduces it. Both are shared with members when they are settled.', bn: 'লাভ ফান্ডে টাকা যোগ করে, ক্ষতি টাকা কমায়। দুটোই সদস্যের হিসাব নিষ্পত্তির সময় ভাগ হয়।' },
   'ret.err_date': { en: 'Please choose the date.', bn: 'তারিখ বাছুন।' },
   'common.no': { en: 'No.', bn: 'নং' },
+  'common.on': { en: 'On', bn: 'চালু' }, 'common.off': { en: 'Off', bn: 'বন্ধ' },
   'dl.pdf': { en: 'PDF document', bn: 'পিডিএফ ডকুমেন্ট' },
   'dl.xlsx': { en: 'Excel workbook', bn: 'এক্সেল ওয়ার্কবুক' },
   'members.list_title': { en: 'Member list', bn: 'সদস্য তালিকা' },
