@@ -1,6 +1,6 @@
 {
   "name": "bondhu-fund-desktop",
-  "version": "2.3.2",
+  "version": "2.3.3",
   "description": "Bondhu Fund - offline fund management for member savings groups",
   "main": "dist-electron/main.js",
   "scripts": {

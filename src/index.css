@@ -357,3 +357,10 @@ html[lang="bn"] body :where(p, span, label, td, th, li, button, h1, h2, h3, h4) 
 .accent-amber { border-left: 4px solid #f59e0b; }
 .accent-teal { border-left: 4px solid #14b8a6; }
 [dir="rtl"] .accent-purple, [dir="rtl"] .accent-green, [dir="rtl"] .accent-rose, [dir="rtl"] .accent-blue, [dir="rtl"] .accent-amber, [dir="rtl"] .accent-teal { border-left-width: 1px; }
+/* the dark theme sets a card border colour with higher specificity — keep the stripe colours in dark mode too */
+.dark .accent-purple { border-left-color: #8b5cf6; }
+.dark .accent-green { border-left-color: #10b981; }
+.dark .accent-rose { border-left-color: #f43f5e; }
+.dark .accent-blue { border-left-color: #3b82f6; }
+.dark .accent-amber { border-left-color: #f59e0b; }
+.dark .accent-teal { border-left-color: #14b8a6; }

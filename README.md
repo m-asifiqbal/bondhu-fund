@@ -133,46 +133,15 @@ Get the latest files from **[Releases](https://github.com/m-asifiqbal/bondhu-fun
 
 ## 📸 Screenshots
 
-> All screenshots are generated from the real app with demo data by `npm run screenshots` (see [Testing](#-testing)).
+> Generated from the real app with demo data by `npm run screenshots`.
 
-### Overview dashboard
-| Headline figures | Collections & fund charts |
+| Overview (light) | Collections |
 |---|---|
-| ![Overview](docs/screenshots/01-overview.png) | ![Charts](docs/screenshots/02-overview-charts.png) |
-| **Portfolio & spending** | **Members: payment calendar, arrears** |
-| ![Portfolio](docs/screenshots/03-overview-portfolio.png) | ![Members section](docs/screenshots/04-overview-members.png) |
+| ![Overview](docs/screenshots/01-overview.png) | ![Collections](docs/screenshots/02-collections.png) |
 
-### Day-to-day work
-| Collections ledger | Members |
-|---|---|
-| ![Collections](docs/screenshots/05-collections.png) | ![Members](docs/screenshots/06-members.png) |
-| **Add member dialog** | **Entry Center** |
-| ![Add member](docs/screenshots/07-add-member-modal.png) | ![Entry center](docs/screenshots/08-entry-center.png) |
-| **Operating expenses** | **Investments** |
-| ![Expenses](docs/screenshots/09-expenses.png) | ![Investments](docs/screenshots/10-investments.png) |
+**Dark mode**
 
-### Reports & controls
-| Reports & Export | Searchable dropdown | Date picker |
-|---|---|---|
-| ![Reports](docs/screenshots/11-reports.png) | ![Dropdown](docs/screenshots/12-searchable-dropdown.png) | ![Date picker](docs/screenshots/13-date-picker.png) |
-
-### Administration
-| Users & roles | User profile |
-|---|---|
-| ![Users](docs/screenshots/14-users.png) | ![Profile](docs/screenshots/15-user-profile.png) |
-| **Master data (EN + বাংলা names)** | **Backup & Restore** |
-| ![Master data](docs/screenshots/16-master-data.png) | ![Backup](docs/screenshots/17-backup-restore.png) |
-| **Settings & branding** | |
-| ![Settings](docs/screenshots/18-settings.png) | |
-
-### Dark mode & বাংলা
-| Dark overview | Dark reports |
-|---|---|
-| ![Dark overview](docs/screenshots/19-dark-overview.png) | ![Dark reports](docs/screenshots/20-dark-reports.png) |
-| **বাংলা overview** | **বাংলা collections** |
-| ![Bangla overview](docs/screenshots/21-bangla-overview.png) | ![Bangla collections](docs/screenshots/22-bangla-collections.png) |
-| **বাংলা members** | |
-| ![Bangla members](docs/screenshots/23-bangla-members.png) | |
+![Dark overview](docs/screenshots/03-dark-overview.png)
 
 ---
 
@@ -363,7 +332,7 @@ bondhu-fund/
 │  └─ utils/             # date.ts, i18n.ts, image.ts
 ├─ scripts/
 │  ├─ db-test.js              # database test suite (npm run test:db)
-│  └─ capture-screenshots.js  # regenerates docs/screenshots (npm run screenshots)
+│  └─ capture-screenshots.js  # regenerates the 3 docs/screenshots (npm run screenshots)
 ├─ build/                # icon.ico / icon.png (installer + app icon)
 ├─ docs/                 # ARCHITECTURE.md · UI_GUIDE.md · RELEASE.md · screenshots/
 └─ package.json          # scripts + electron-builder config ("build")
@@ -399,7 +368,7 @@ npm run electron:dev     # Vite dev server + Electron, with hot reload for the U
 | `npm run typecheck` | TypeScript check for the renderer and main process |
 | `npm run test:import` | Excel import suite: template, a messy realistic workbook (Bangla digits, P markers, duplicates, future months), preview, commit, re-import, export round trip |
 | `npm run test:db` | Database test suite (fresh DB, CRUD, rules, reconciliation, backup/restore). Add `-- path\to\old.db` to also test migrating a copy of an older database. |
-| `npm run screenshots` | Builds the app and regenerates `docs/screenshots/*.png` using demo data in a temporary profile |
+| `npm run screenshots` | Regenerates the 3 images in `docs/screenshots/` using demo data in a temporary profile (set `BONDHU_ADMIN_PASSWORD` to the admin password) |
 | `npm run build:all` | Production build of the renderer (`dist/`) and main process (`dist-electron/`) |
 | `npm start` | Run the production build locally |
 | `npm run dist` | Build `release/BondhuFund-Setup-x.y.z.exe` and `release/BondhuFund-Portable-x.y.z.exe` |
@@ -488,7 +457,7 @@ npm run electron:dev                     # try it in both English and বাং�
   - backup → reset → restore round trip, and rejecting an invalid file while leaving data intact.
 
   Pass an old `.db` to also test migration.
-- **`npm run screenshots`** is also a smoke test. It opens every screen in English (light and dark) and Bangla, and logs any console errors.
+- **`npm run screenshots`** is also a smoke test of the main screens: it signs in, loads demo data, and logs any console errors.
 - **Manual checklist before a release:** see [docs/RELEASE.md](docs/RELEASE.md).
 
 ---

@@ -298,20 +298,6 @@ export const CollectionsView: React.FC = () => {
         </div>
       </div>
 
-      {/* Entry Center banner */}
-      <div className="card-base p-4 flex flex-wrap items-center justify-between gap-3">
-        <span className="text-xs font-semibold text-slate-700 dark:text-slate-300">
-          {t('members.col_entryHint', 'Need to add money, expense, or investment details?')}
-        </span>
-        <button
-          onClick={() => setActiveTab('entry')}
-          className="btn btn-outline"
-        >
-          <span>{t('members.col_openEntry', 'Open entry center')}</span>
-          <ArrowRight size={14} />
-        </button>
-      </div>
-
       {/* KPI cards */}
       <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
         {statCard(
@@ -355,8 +341,8 @@ export const CollectionsView: React.FC = () => {
       </div>
 
       {/* Ledger + side panel */}
-      <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
-        <div className="xl:col-span-2 card-base p-5 lg:p-6 space-y-4 min-w-0">
+      <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_17.5rem] gap-5 items-start">
+        <div className="card-base p-5 lg:p-6 space-y-4 min-w-0">
           <div className="flex flex-wrap items-center justify-between gap-4">
             <div>
               <h3 className="text-base font-bold text-slate-900 dark:text-white">
@@ -437,7 +423,7 @@ export const CollectionsView: React.FC = () => {
           ) : (
             <>
               <div className="overflow-x-auto w-full">
-                <table className="w-full min-w-[820px] text-left text-xs text-slate-800 dark:text-slate-200">
+                <table className="w-full min-w-[640px] text-left text-xs text-slate-800 dark:text-slate-200">
                   <thead className="bg-slate-50 dark:bg-[#111e24] border-b border-slate-200 dark:border-slate-800 text-slate-600 dark:text-slate-400 font-bold uppercase tracking-wider text-[10px]">
                     <tr>
 <th className="py-3 px-3 w-12 text-center">{t('common.no', 'No.')}</th>
@@ -497,10 +483,11 @@ export const CollectionsView: React.FC = () => {
                                 <div className="flex items-center justify-end gap-1.5">
                                   <button
                                     onClick={() => setSelectedRecord(r)}
-                                    className="btn btn-outline btn-sm"
+                                    className="btn btn-outline btn-sm btn-icon"
+                                    title={t('common.view', 'View')}
+                                    aria-label={t('common.view', 'View')}
                                   >
-                                    <Eye size={13} />
-                                    <span>{t('common.view', 'View')}</span>
+                                    <Eye size={14} />
                                   </button>
                                   <button
                                     onClick={() => handleDownloadVoucher(r)}
@@ -523,10 +510,11 @@ export const CollectionsView: React.FC = () => {
                               ) : (
                                 <button
                                   onClick={() => handleRecordPayment(r)}
-                                  className="btn btn-primary btn-sm"
+                                  className="btn btn-primary btn-sm btn-icon"
+                                  title={t('members.col_recordPayment', 'Record payment')}
+                                  aria-label={t('members.col_recordPayment', 'Record payment')}
                                 >
-                                  <PlusCircle size={13} />
-                                  <span>{t('members.col_recordPayment', 'Record payment')}</span>
+                                  <PlusCircle size={14} />
                                 </button>
                               )}
                             </td>
@@ -572,22 +560,22 @@ export const CollectionsView: React.FC = () => {
         </div>
 
         {/* Side panel */}
-        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-1 gap-6 content-start">
-          <div className="card-base p-6">
-            <h3 className="text-sm font-bold text-slate-900 dark:text-white mb-2">
+        <div className="grid grid-cols-1 gap-4 content-start">
+          <div className="card-base p-4">
+            <h3 className="text-[13px] font-bold text-slate-900 dark:text-white">
               {t('members.col_progress', 'Collection progress')}
             </h3>
-            <div className="text-3xl font-black text-slate-900 dark:text-white mt-2">
+            <div className="text-2xl font-black text-slate-900 dark:text-white mt-1">
               {n(stats.percentage)}%{' '}
               <span className="text-xs font-normal text-slate-500 dark:text-slate-400">{t('members.col_ofExpected', 'of expected')}</span>
             </div>
-            <div className="w-full bg-slate-100 dark:bg-slate-800 h-3 rounded-full overflow-hidden mt-3 p-0.5">
+            <div className="w-full bg-slate-100 dark:bg-slate-800 h-2.5 rounded-full overflow-hidden mt-2.5 p-0.5">
               <div
                 className="bg-[#0f4a3c] dark:bg-emerald-500 h-full rounded-full transition-all duration-500"
                 style={{ width: `${pct}%` }}
               />
             </div>
-            <div className="space-y-3 mt-6 text-xs">
+            <div className="space-y-2 mt-4 text-[11px]">
               {[
                 { dot: 'bg-emerald-600', label: t('status.paid', 'Paid'), count: stats.paidCount, amount: stats.collectedAmount },
                 { dot: 'bg-amber-500', label: t('status.pending', 'Pending'), count: stats.pendingCount, amount: pendingAmount },
@@ -595,7 +583,7 @@ export const CollectionsView: React.FC = () => {
               ].map(row => (
                 <div key={row.label} className="flex items-center justify-between gap-2">
                   <div className="flex items-center gap-2">
-                    <span className={`w-3 h-3 rounded-full ${row.dot}`} />
+                    <span className={`w-2.5 h-2.5 rounded-full ${row.dot}`} />
                     <span className="text-slate-700 dark:text-slate-300 font-medium">{row.label}</span>
                   </div>
                   <span className="font-bold text-slate-900 dark:text-white">
@@ -606,8 +594,8 @@ export const CollectionsView: React.FC = () => {
             </div>
           </div>
 
-          <div className="bg-emerald-50/70 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-800/80 rounded-2xl p-5 text-xs shadow-sm">
-            <div className="flex items-center gap-2 text-[#0f4a3c] dark:text-emerald-300 font-bold mb-1.5">
+          <div className="bg-emerald-50/70 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-800/80 rounded-2xl p-4 text-xs shadow-sm">
+            <div className="flex items-center gap-2 text-[#0f4a3c] dark:text-emerald-300 font-bold mb-1.5 text-[12px]">
               <Info size={16} />
               <span>{t('members.col_lateRule', 'Late payment rule')}</span>
             </div>
@@ -626,6 +614,20 @@ export const CollectionsView: React.FC = () => {
             </button>
           </div>
         </div>
+      </div>
+
+      {/* Entry Center suggestion (kept below the ledger) */}
+      <div className="card-base p-4 flex flex-wrap items-center justify-between gap-3">
+        <span className="text-xs font-semibold text-slate-700 dark:text-slate-300">
+          {t('members.col_entryHint', 'Need to add money, expense, or investment details?')}
+        </span>
+        <button
+          onClick={() => setActiveTab('entry')}
+          className="btn btn-outline"
+        >
+          <span>{t('members.col_openEntry', 'Open entry center')}</span>
+          <ArrowRight size={14} />
+        </button>
       </div>
 
       {/* Voucher modal */}

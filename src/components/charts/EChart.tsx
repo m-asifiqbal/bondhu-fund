@@ -139,21 +139,23 @@ interface ChartCardProps {
   empty?: boolean;
   emptyText?: string;
   className?: string;
+  /** Larger title and more air between title and diagram (donut / pie cards). */
+  roomy?: boolean;
   children: React.ReactNode;
 }
 
-export const ChartCard: React.FC<ChartCardProps> = ({ title, subtitle, icon, actions, table, empty, emptyText, className = '', children }) => {
+export const ChartCard: React.FC<ChartCardProps> = ({ title, subtitle, icon, actions, table, empty, emptyText, className = '', roomy, children }) => {
   const { t } = useApp();
   const [showTable, setShowTable] = useState(false);
   const toggleLabel = showTable ? t('chart.show_chart', 'Show chart') : t('chart.show_table', 'Show table');
   return (
     <section className={`card-base p-5 flex flex-col min-w-0 ${className}`}>
-      <header className="flex items-start justify-between gap-3 mb-3">
+      <header className={`flex items-start justify-between gap-3 ${roomy ? 'mb-6' : 'mb-3'}`}>
         <div className="flex items-start gap-2.5 min-w-0">
           {icon && <div className="mt-0.5 w-8 h-8 shrink-0 rounded-xl bg-brand-light dark:bg-emerald-950/50 text-brand dark:text-emerald-400 flex items-center justify-center">{icon}</div>}
           <div className="min-w-0">
-            <h3 className="text-sm font-extrabold text-slate-900 dark:text-white truncate">{title}</h3>
-            {subtitle && <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5">{subtitle}</p>}
+            <h3 className={`${roomy ? 'text-[17px]' : 'text-sm'} font-extrabold text-slate-900 dark:text-white truncate`}>{title}</h3>
+            {subtitle && <p className={`${roomy ? 'text-xs mt-1' : 'text-[11px] mt-0.5'} text-slate-500 dark:text-slate-400`}>{subtitle}</p>}
           </div>
         </div>
         <div className="flex items-center gap-1.5 shrink-0">

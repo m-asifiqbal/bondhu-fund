@@ -1,10 +1,11 @@
 /**
- * Captures documentation screenshots of the real app into docs/screenshots/.
+ * Captures the three documentation screenshots of the real app into docs/screenshots/.
  *
- *   npm run screenshots
+ *   BONDHU_ADMIN_PASSWORD=<admin password> npm run screenshots
  *
- * Runs the compiled app (dist + dist-electron) in an isolated, throw-away profile, loads demo data,
- * sets a sample logo, then visits screens in English (light + dark) and Bangla. Your real data is never touched.
+ * Runs the compiled app (dist + dist-electron) in an isolated, throw-away profile, signs in as the admin,
+ * loads demo data and sets a sample logo. Your real data is never touched.
+ * Output: 01-overview.png (light), 02-collections.png (light), 03-dark-overview.png (dark).
  */
 const path = require('path');
 const fs = require('fs');
@@ -34,60 +35,34 @@ function done() {
 }
 
 async function run(win) {
+  const pw = process.env.BONDHU_ADMIN_PASSWORD;
+  if (!pw) throw new Error('Set BONDHU_ADMIN_PASSWORD to the admin password.');
   win.unmaximize();
   win.setContentSize(1440, 900);
   const js = code => win.webContents.executeJavaScript(code, true);
-  const shot = async (name, wait = 1300) => {
+  const shot = async (name, wait = 1500) => {
     await sleep(wait);
     const img = await win.webContents.capturePage();
     fs.writeFileSync(path.join(outDir, `${name}.png`), img.resize({ width: 1440 }).toPNG());
     console.log('  ✓', name);
   };
-  const nav = label => js(`(() => { const b=[...document.querySelectorAll('aside button')].find(b => ((b.getAttribute('title')||'') + ' ' + (b.textContent||'')).trim().toLowerCase().includes(${JSON.stringify(label.toLowerCase())})); if (b) b.click(); return !!b; })()`);
-  const scroll = y => js(`document.querySelector('main').scrollTop = ${y}`);
-  const esc = () => js(`document.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true})); document.dispatchEvent(new MouseEvent('mousedown',{bubbles:true}))`);
-  const prefs = (lang, dark) => js(`localStorage.setItem('bondhu_language','${lang}'); localStorage.setItem('bondhu_dark_mode','${dark}'); localStorage.setItem('bondhu_sidebar_collapsed','false'); location.reload()`);
+  const nav = label => js(`(() => { const b=[...document.querySelectorAll('aside nav button')].find(b => (b.textContent||'').trim().toLowerCase().includes(${JSON.stringify(label.toLowerCase())})); if (b) b.click(); return !!b; })()`);
+  const top = () => js(`document.querySelector('main').scrollTop = 0`);
+  const prefs = dark => js(`localStorage.setItem('bondhu_language','en'); localStorage.setItem('bondhu_dark_mode','${dark}'); localStorage.setItem('bondhu_sidebar_collapsed','false'); location.reload()`);
 
   await sleep(1500);
-  // Demo content + branding
+  await js(`window.electronAPI.call('login', ['admin', ${JSON.stringify(pw)}])`);
   const logo = 'data:image/png;base64,' + fs.readFileSync(path.join(root, 'build', 'icon.png')).toString('base64');
   await js(`window.electronAPI.call('loadDemoData', [])`);
   await js(`window.electronAPI.call('saveAppSettings', [{ organization_name: 'Bondhu Fund', organization_name_bn: 'বন্ধু ফান্ড', org_logo: ${JSON.stringify(logo)} }])`);
 
-  // ---------- English, light ----------
-  await prefs('en', false); await sleep(3000);
-  await shot('01-overview');
-  await scroll(820); await shot('02-overview-charts');
-  await scroll(1700); await shot('03-overview-portfolio');
-  await scroll(2600); await shot('04-overview-members');
-  await nav('collections'); await shot('05-collections');
-  await nav('members'); await shot('06-members');
-  await js(`(() => { const b=[...document.querySelectorAll('main button')].find(b => /Add member/.test(b.textContent||'')); b && b.click(); })()`);
-  await shot('07-add-member-modal'); await esc(); await sleep(400);
-  await nav('entry'); await shot('08-entry-center');
-  await nav('operating'); await shot('09-expenses');
-  await nav('investments'); await shot('10-investments');
-  await nav('reports'); await shot('11-reports');
-  await js(`document.querySelector('main button[aria-haspopup="listbox"]')?.click()`); await shot('12-searchable-dropdown'); await esc(); await sleep(300);
-  await js(`document.querySelector('main button[aria-haspopup="dialog"]')?.click()`); await shot('13-date-picker'); await esc(); await sleep(300);
-  await nav('users'); await shot('14-users');
-  await js(`(() => { const e=[...document.querySelectorAll('main *')].find(x => x.children.length===0 && /Nusrat|Administrator|System Admin/.test(x.textContent||'')); e && e.click(); })()`);
-  await shot('15-user-profile');
-  await nav('master'); await shot('16-master-data');
-  await nav('backup'); await shot('17-backup-restore');
-  await nav('settings'); await shot('18-settings');
+  await prefs(false); await sleep(3500);
+  await nav('overview'); await top(); await shot('01-overview');
+  await nav('collections'); await top(); await shot('02-collections', 2000);
 
-  // ---------- English, dark ----------
-  await prefs('en', true); await sleep(3000);
-  await shot('19-dark-overview');
-  await nav('reports'); await shot('20-dark-reports');
+  await prefs(true); await sleep(3500);
+  await nav('overview'); await top(); await shot('03-dark-overview');
 
-  // ---------- Bangla ----------
-  await prefs('bn', false); await sleep(3000);
-  await shot('21-bangla-overview');
-  await nav('মাসিক'); await shot('22-bangla-collections');
-  await nav('সদস্য'); await shot('23-bangla-members');
-
-  await prefs('en', false); await sleep(1500);
+  await prefs(false); await sleep(1500);
   done();
 }

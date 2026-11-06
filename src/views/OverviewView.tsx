@@ -107,6 +107,14 @@ export const OverviewView: React.FC = () => {
       return head + list.map((p: any) => `<div style="display:flex;justify-content:space-between;gap:16px"><span>${p.marker}${p.seriesName}</span><b>${money(Math.abs(p.value))}</b></div>`).join('');
     };
 
+    // Small value labels that are always visible; the tooltip (hover) shows the full figure, and the label grows on hover.
+    const valLbl = (position: string, color?: string) => ({
+      show: true, position, fontSize: 9, fontWeight: 600, color: color || th.textMuted,
+      formatter: (p: any) => (Number(p.value) ? compact(Math.abs(Number(p.value))) : ''),
+    });
+    const valEmph = { label: { fontSize: 12, fontWeight: 800, color: th.text } };
+    const noOverlap = { hideOverlap: true };
+
     const expectedVsCollected = {
       ...baseOption(th),
       color: [th.cat[0], th.cat[2]],
@@ -116,8 +124,8 @@ export const OverviewView: React.FC = () => {
       xAxis: categoryAxis(th, months),
       yAxis: valueAxis(th, compact),
       series: [
-        { name: tr('expected'), type: 'bar', barGap: '8%', barMaxWidth: 14, itemStyle: { borderRadius: [4, 4, 0, 0], opacity: 0.35 }, data: data.trend.map(p => p.expected) },
-        { name: tr('collectedShort'), type: 'bar', barMaxWidth: 14, itemStyle: { borderRadius: [4, 4, 0, 0] }, data: data.trend.map(p => p.collected) },
+        { name: tr('expected'), type: 'bar', barGap: '8%', barMaxWidth: 14, itemStyle: { borderRadius: [4, 4, 0, 0], opacity: 0.35 }, label: valLbl('top'), labelLayout: noOverlap, emphasis: valEmph, data: data.trend.map(p => p.expected) },
+        { name: tr('collectedShort'), type: 'bar', barMaxWidth: 14, itemStyle: { borderRadius: [4, 4, 0, 0] }, label: valLbl('top'), labelLayout: noOverlap, emphasis: valEmph, data: data.trend.map(p => p.collected) },
       ],
     };
 
@@ -126,11 +134,14 @@ export const OverviewView: React.FC = () => {
       ...baseOption(th),
       tooltip: { ...(baseOption(th) as any).tooltip, trigger: 'item', formatter: (p: any) => `${p.marker}${p.name}: <b>${digits(p.value)}</b> ${tr('members_n')} (${digits(p.percent)}%)` },
       legend: { ...(baseOption(th) as any).legend, top: 'bottom', right: 'center' },
+      title: { text: `${digits(k.collectionRate)}%`, subtext: tr('rate'), left: 'center', top: '31%', itemGap: 2,
+        textStyle: { fontSize: 19, fontWeight: 800, color: th.text }, subtextStyle: { fontSize: 11, color: th.textMuted } },
       series: [{
-        type: 'pie', radius: ['58%', '80%'], center: ['50%', '44%'], padAngle: 2, itemStyle: { borderRadius: 6, borderColor: th.surface, borderWidth: 2 },
-        label: { show: true, position: 'center', formatter: () => `{v|${digits(k.collectionRate)}%}\n{l|${tr('rate')}}`,
-          rich: { v: { fontSize: 22, fontWeight: 800, color: th.text }, l: { fontSize: 11, color: th.textMuted, padding: [4, 0, 0, 0] } } },
-        emphasis: { scale: true, scaleSize: 4, label: { show: true } },
+        type: 'pie', radius: ['40%', '56%'], center: ['50%', '40%'], padAngle: 2, itemStyle: { borderRadius: 6, borderColor: th.surface, borderWidth: 2 },
+        avoidLabelOverlap: true, minShowLabelAngle: 4,
+        label: { show: true, position: 'outside', formatter: (p: any) => `${digits(Math.round(p.percent * 10) / 10)}%`, fontSize: 12, fontWeight: 700, color: th.text },
+        labelLine: { show: true, length: 10, length2: 8 },
+        emphasis: { scale: true, scaleSize: 5, label: { show: true, fontSize: 15, fontWeight: 800 } },
         data: [
           { name: tr('paid'), value: k.paid, itemStyle: { color: th.status.good }, filter: 'Paid' },
           { name: tr('pending'), value: k.pending, itemStyle: { color: th.status.warning }, filter: 'Pending' },
@@ -164,9 +175,9 @@ export const OverviewView: React.FC = () => {
       xAxis: categoryAxis(th, months),
       yAxis: valueAxis(th, compact),
       series: [
-        { name: tr('inflow'), type: 'bar', stack: 'flow', barMaxWidth: 18, itemStyle: { borderRadius: [4, 4, 0, 0] }, data: data.trend.map(p => p.collected + p.lateFees) },
-        { name: tr('outExp'), type: 'bar', stack: 'flow', barMaxWidth: 18, itemStyle: { borderColor: th.surface, borderWidth: 1 }, data: data.trend.map(p => -p.expenses) },
-        { name: tr('outInv'), type: 'bar', stack: 'flow', barMaxWidth: 18, itemStyle: { borderRadius: [0, 0, 4, 4], borderColor: th.surface, borderWidth: 1 }, data: data.trend.map(p => -p.invested) },
+        { name: tr('inflow'), type: 'bar', stack: 'flow', barMaxWidth: 18, itemStyle: { borderRadius: [4, 4, 0, 0] }, label: valLbl('top'), labelLayout: noOverlap, emphasis: valEmph, data: data.trend.map(p => p.collected + p.lateFees) },
+        { name: tr('outExp'), type: 'bar', stack: 'flow', barMaxWidth: 18, itemStyle: { borderColor: th.surface, borderWidth: 1 }, label: valLbl('bottom'), labelLayout: noOverlap, emphasis: valEmph, data: data.trend.map(p => -p.expenses) },
+        { name: tr('outInv'), type: 'bar', stack: 'flow', barMaxWidth: 18, itemStyle: { borderRadius: [0, 0, 4, 4], borderColor: th.surface, borderWidth: 1 }, label: valLbl('bottom'), labelLayout: noOverlap, emphasis: valEmph, data: data.trend.map(p => -p.invested) },
       ],
     };
 
@@ -174,14 +185,14 @@ export const OverviewView: React.FC = () => {
     const portfolio = {
       ...baseOption(th),
       color: [th.cat[0], th.cat[2]],
-      grid: { left: 8, right: 16, top: 36, bottom: 4, containLabel: true },
+      grid: { left: 8, right: 48, top: 36, bottom: 4, containLabel: true },
       tooltip: { ...(baseOption(th) as any).tooltip, trigger: 'axis', axisPointer: { type: 'shadow' }, formatter: tipMoney },
       legend: { ...(baseOption(th) as any).legend, data: [tr('cost'), tr('value')] },
       xAxis: valueAxis(th, compact),
       yAxis: { ...categoryAxis(th, sectors), inverse: true },
       series: [
-        { name: tr('cost'), type: 'bar', barMaxWidth: 12, barGap: '20%', itemStyle: { borderRadius: [0, 4, 4, 0], opacity: 0.4 }, data: data.portfolio.map(p => p.invested) },
-        { name: tr('value'), type: 'bar', barMaxWidth: 12, itemStyle: { borderRadius: [0, 4, 4, 0] }, data: data.portfolio.map(p => p.value) },
+        { name: tr('cost'), type: 'bar', barMaxWidth: 12, barGap: '20%', itemStyle: { borderRadius: [0, 4, 4, 0], opacity: 0.4 }, label: valLbl('right'), emphasis: valEmph, data: data.portfolio.map(p => p.invested) },
+        { name: tr('value'), type: 'bar', barMaxWidth: 12, itemStyle: { borderRadius: [0, 4, 4, 0] }, label: valLbl('right'), emphasis: valEmph, data: data.portfolio.map(p => p.value) },
       ],
     };
 
@@ -195,9 +206,11 @@ export const OverviewView: React.FC = () => {
       tooltip: { ...(baseOption(th) as any).tooltip, trigger: 'item', formatter: (p: any) => `${p.marker}${p.name}<br/><b>${money(p.value)}</b> (${digits(p.percent)}%)` },
       legend: { ...(baseOption(th) as any).legend, type: 'scroll', orient: 'vertical', top: 'middle', right: 0, left: undefined },
       series: [{
-        type: 'pie', radius: ['50%', '78%'], center: ['32%', '50%'], padAngle: 2,
-        itemStyle: { borderRadius: 6, borderColor: th.surface, borderWidth: 2 }, label: { show: false },
-        emphasis: { label: { show: true, formatter: '{d}%', fontWeight: 800, color: th.text } }, data: cats,
+        type: 'pie', radius: ['36%', '54%'], center: ['34%', '50%'], padAngle: 2, avoidLabelOverlap: true, minShowLabelAngle: 6,
+        itemStyle: { borderRadius: 6, borderColor: th.surface, borderWidth: 2 },
+        label: { show: true, position: 'outside', formatter: (p: any) => `${digits(Math.round(p.percent))}%`, fontSize: 11, fontWeight: 700, color: th.text },
+        labelLine: { show: true, length: 8, length2: 6 },
+        emphasis: { scale: true, scaleSize: 5, label: { show: true, fontSize: 14, fontWeight: 800, color: th.text } }, data: cats,
       }],
     };
 
@@ -237,7 +250,7 @@ export const OverviewView: React.FC = () => {
       xAxis: { ...valueAxis(th, compact), show: false },
       yAxis: { ...categoryAxis(th, topC.map(c => bnName(c.name, c.name_bn))), axisLine: { show: false } },
       series: [{ type: 'bar', barMaxWidth: 12, itemStyle: { borderRadius: [0, 4, 4, 0] },
-        label: { show: true, position: 'right', color: th.textMuted, fontSize: 11, formatter: (p: any) => compact(p.value) },
+        label: valLbl('right'), emphasis: valEmph,
         data: topC.map(c => c.total) }],
     };
 
@@ -249,7 +262,7 @@ export const OverviewView: React.FC = () => {
       xAxis: { ...valueAxis(th, compact), show: false },
       yAxis: { ...categoryAxis(th, data.paymentMethods.map(m => tv(m.name))), inverse: true, axisLine: { show: false } },
       series: [{ type: 'bar', barMaxWidth: 12, colorBy: 'data', itemStyle: { borderRadius: [0, 4, 4, 0] },
-        label: { show: true, position: 'right', color: th.textMuted, fontSize: 11, formatter: (p: any) => compact(p.value) },
+        label: valLbl('right'), emphasis: valEmph,
         data: data.paymentMethods.map(m => m.value) }],
     };
 
@@ -403,7 +416,7 @@ export const OverviewView: React.FC = () => {
             table={{ headers: [tr('hMonth'), tr('expected'), tr('collectedShort'), tr('hRate')], rows: data.trend.map(p => [mLabel(p.month), money(p.expected), money(p.collected), `${digits(p.rate)}%`]) }}>
             <EChart option={opts.expectedVsCollected} height={280} ariaLabel={tr('expVsColl')} />
           </ChartCard>
-          <ChartCard title={tr('status')} subtitle={fmtMonth(data.month, language as any, false)} icon={<PieIcon size={15} />}
+          <ChartCard roomy title={tr('status')} subtitle={fmtMonth(data.month, language as any, false)} icon={<PieIcon size={15} />}
             empty={k.dueMembers === 0} emptyText={tr('noData')}
             table={{ headers: [tr('hStatus'), tr('members')], rows: [[tr('paid'), digits(k.paid)], [tr('pending'), digits(k.pending)], [tr('overdue'), digits(k.overdue)]] }}>
             <EChart option={opts.statusDonut} height={280} ariaLabel={tr('status')}
@@ -435,7 +448,7 @@ export const OverviewView: React.FC = () => {
             table={{ headers: [tr('hSector'), tr('cost'), tr('value'), tr('hGain')], rows: data.portfolio.map(p => [tv(p.name), money(p.invested), money(p.value), money(p.value - p.invested)]) }}>
             <EChart option={opts.portfolio} height={Math.max(200, 60 + data.portfolio.length * 46)} ariaLabel={tr('bySector')} />
           </ChartCard>
-          <ChartCard title={tr('byCategory')} subtitle={tr('last12')} icon={<Receipt size={15} />}
+          <ChartCard roomy title={tr('byCategory')} subtitle={tr('last12')} icon={<Receipt size={15} />}
             empty={data.expenseByCategory.length === 0} emptyText={tr('noData')}
             table={{ headers: [tr('hCategory'), tr('hAmount'), tr('hEntries')], rows: data.expenseByCategory.map(c => [tv(c.name), money(c.value), digits(c.count)]) }}>
             <EChart option={opts.expenseDonut} height={260} ariaLabel={tr('byCategory')} />

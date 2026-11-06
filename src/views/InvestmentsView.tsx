@@ -20,7 +20,7 @@ import {
   LineChart,
   CheckCircle2,
 } from 'lucide-react';
-import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from 'recharts';
+import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, LabelList } from 'recharts';
 import { useApp } from '../context/AppContext';
 import {
   getInvestments,
@@ -643,8 +643,12 @@ export const InvestmentsView: React.FC = () => {
                   <XAxis dataKey="label" axisLine={false} tickLine={false} tick={{ fontSize: 11, fill: '#64748b' }} />
                   <YAxis axisLine={false} tickLine={false} tick={{ fontSize: 11, fill: '#64748b' }} tickFormatter={axisTick} width={48} />
                   <Tooltip cursor={{ fill: 'rgba(148,163,184,0.12)' }} content={<ChartTooltip />} />
-                  <Bar dataKey="invested" name={investedLabel} fill="#0f4a3c" radius={[6, 6, 0, 0]} />
-                  <Bar dataKey="estimated" name={estimatedLabel} fill="#d97706" radius={[6, 6, 0, 0]} />
+                  <Bar dataKey="invested" name={investedLabel} fill="#0f4a3c" radius={[6, 6, 0, 0]}>
+                    <LabelList dataKey="invested" position="top" fontSize={9} fontWeight={600} fill="#64748b" formatter={(v: any) => (Number(v) ? axisTick(Number(v)) : '')} />
+                  </Bar>
+                  <Bar dataKey="estimated" name={estimatedLabel} fill="#d97706" radius={[6, 6, 0, 0]}>
+                    <LabelList dataKey="estimated" position="top" fontSize={9} fontWeight={600} fill="#64748b" formatter={(v: any) => (Number(v) ? axisTick(Number(v)) : '')} />
+                  </Bar>
                 </BarChart>
               </ResponsiveContainer>
             </div>
