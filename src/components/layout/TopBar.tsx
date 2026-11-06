@@ -62,6 +62,7 @@ export const TopBar: React.FC = () => {
     profileUserId,
     toBanglaDigits,
     formatDate,
+    bnName,
   } = useApp();
 
   const num = (n: number) => (language === 'bn' ? toBanglaDigits(n) : String(n));
@@ -328,7 +329,7 @@ export const TopBar: React.FC = () => {
           <button
             type="button"
             onClick={() => setShowProfileMenu(v => !v)}
-            title={currentUser ? `${currentUser.full_name} · ${tv(currentUser.role)}` : t('nav.profile', 'My profile')}
+            title={currentUser ? `${bnName(currentUser.full_name, currentUser.full_name_bn)} · ${tv(currentUser.role)}` : t('nav.profile', 'My profile')}
             aria-label={t('shell.profile_menu', 'Account menu')}
             aria-haspopup="menu"
             aria-expanded={showProfileMenu}

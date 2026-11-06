@@ -55,7 +55,7 @@ const ACTION_STYLE: Record<string, string> = {
   import: 'bg-violet-500', backup: 'bg-amber-500', reset: 'bg-rose-600', demo: 'bg-slate-400',
 };
 
-interface EditForm { full_name: string; email: string; phone: string; designation: string; address: string; bio: string }
+interface EditForm { full_name: string; full_name_bn: string; email: string; phone: string; designation: string; address: string; bio: string }
 
 export const UserProfileView: React.FC = () => {
   const {
@@ -75,7 +75,7 @@ export const UserProfileView: React.FC = () => {
   const [editOpen, setEditOpen] = useState(false);
   const [saving, setSaving] = useState(false);
   const [confirmRemove, setConfirmRemove] = useState(false);
-  const [form, setForm] = useState<EditForm>({ full_name: '', email: '', phone: '', designation: '', address: '', bio: '' });
+  const [form, setForm] = useState<EditForm>({ full_name: '', full_name_bn: '', email: '', phone: '', designation: '', address: '', bio: '' });
   const fileRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -151,7 +151,7 @@ export const UserProfileView: React.FC = () => {
   const openEdit = () => {
     if (!user) return;
     setForm({
-      full_name: user.full_name || '', email: user.email || '', phone: user.phone || '',
+      full_name: user.full_name || '', full_name_bn: user.full_name_bn || '', email: user.email || '', phone: user.phone || '',
       designation: user.designation || '', address: user.address || '', bio: user.bio || '',
     });
     setEditOpen(true);
@@ -163,7 +163,7 @@ export const UserProfileView: React.FC = () => {
     if (form.email.trim() && !/^\S+@\S+\.\S+$/.test(form.email.trim())) { showToast(t('admin.email_invalid', 'Enter a valid email address.'), 'error'); return; }
     setSaving(true);
     const ok = await save({
-      full_name: form.full_name.trim(), email: form.email.trim(), phone: form.phone.trim(),
+      full_name: form.full_name.trim(), full_name_bn: form.full_name_bn.trim(), email: form.email.trim(), phone: form.phone.trim(),
       designation: form.designation.trim(), address: form.address.trim(), bio: form.bio.trim(),
       avatar_initials: initialsOf(form.full_name),
     }, t('admin.profile_saved', 'Profile saved.'));
@@ -292,7 +292,7 @@ export const UserProfileView: React.FC = () => {
 
           <div className="mt-4 min-w-0">
             <div className="flex flex-wrap items-center gap-2">
-              <h1 className="text-2xl font-black text-slate-900 dark:text-white tracking-tight break-words">{user.full_name}</h1>
+              <h1 className="text-2xl font-black text-slate-900 dark:text-white tracking-tight break-words">{language === 'bn' && user.full_name_bn ? user.full_name_bn : user.full_name}</h1>
               <span className={`px-2.5 py-0.5 rounded-full text-[11px] font-bold border ${ROLE_BADGE[user.role] || ROLE_BADGE.Manager}`}>{tv(user.role)}</span>
               <span className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-bold ${user.status === 'Active'
                 ? 'bg-emerald-50 dark:bg-emerald-950/50 text-emerald-700 dark:text-emerald-300'
@@ -494,6 +494,10 @@ export const UserProfileView: React.FC = () => {
           <div>
             <label className="form-label">{t('admin.full_name', 'Full name')} *</label>
             <input className="form-input" value={form.full_name} onChange={e => setForm(f => ({ ...f, full_name: e.target.value }))} />
+          </div>
+          <div>
+            <label className="form-label">{t('admin.full_name_bn', 'Full name (Bangla)')}</label>
+            <input className="form-input" lang="bn" value={form.full_name_bn} onChange={e => setForm(f => ({ ...f, full_name_bn: e.target.value }))} placeholder="যেমন: মোঃ আসিফ ইকবাল" />
           </div>
           <div>
             <label className="form-label">{t('admin.designation', 'Designation')}</label>

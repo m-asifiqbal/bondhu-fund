@@ -1,7 +1,8 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { CalendarDays, Clock3, MoonStar, Wheat } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
-import { todayLines } from '../../utils/calendars';
+import { todayLines, dhakaParts, dhakaISO, shiftISO, hijriLocal, type HijriParts } from '../../utils/calendars';
+import { fetchHijriOnline } from '../../services/db';
 
 /** Re-renders on every wall-clock boundary (self-correcting, so it never drifts). */
 function useNow(stepMs: number) {
@@ -18,11 +19,12 @@ function useNow(stepMs: number) {
 
 const pad = (n: number) => String(n).padStart(2, '0');
 
-/** Plain digital clock: hh:mm:ss AM/PM, English digits, 12-hour, local time. */
+/** Plain digital clock: hh:mm:ss AM/PM, English digits, 12-hour, Dhaka time (GMT+6). */
 export const ClockCard: React.FC = () => {
   const now = useNow(1000);
-  const h = now.getHours();
-  const time = `${pad(h % 12 || 12)}:${pad(now.getMinutes())}:${pad(now.getSeconds())}`;
+  const dp = dhakaParts(now);
+  const h = dp.hh;
+  const time = `${pad(h % 12 || 12)}:${pad(dp.mm)}:${pad(dp.ss)}`;
   const meridiem = h < 12 ? 'AM' : 'PM';
   return (
     <div className="inline-flex items-center gap-2.5 text-slate-900 dark:text-white select-none" role="timer" aria-label={`${time} ${meridiem}`}>
@@ -33,12 +35,29 @@ export const ClockCard: React.FC = () => {
   );
 };
 
-/** Today's date in the English, Hijri (Arabic) and Bangla calendars, on one line. Refreshes when the day changes. */
+/** Today's date (Dhaka time) in the English, Hijri (Arabic) and Bangla calendars. The Hijri date is looked up online and cached per day; offline it is computed locally. */
 export const TodayDates: React.FC = () => {
-  const { language } = useApp();
+  const { language, settings } = useApp();
+  const adjust = Number.isFinite(Number((settings as any)?.hijri_adjust_days)) ? Number((settings as any).hijri_adjust_days) : 0;
   const now = useNow(30_000);
-  const day = `${now.getFullYear()}-${now.getMonth()}-${now.getDate()}`;
-  const lines = useMemo(() => todayLines(now, language as any), [day, language]); // eslint-disable-line react-hooks/exhaustive-deps
+  const iso = dhakaISO(now);
+  const [online, setOnline] = useState<HijriParts | null>(null);
+
+  useEffect(() => {
+    let alive = true;
+    const ask = shiftISO(iso, adjust);                       // Aladhan gives Umm al-Qura; the Bangladesh adjustment is applied to the date asked
+    const key = `bondhu_hijri_${ask}`;
+    setOnline(null);
+    try { const hit = localStorage.getItem(key); if (hit) { setOnline(JSON.parse(hit)); return; } } catch { /* no cache */ }
+    fetchHijriOnline(ask).then(h => {
+      if (!alive || !h) return;                              // offline: the local calendar stays on screen
+      setOnline(h);
+      try { localStorage.setItem(key, JSON.stringify(h)); } catch { /* ignore */ }
+    });
+    return () => { alive = false; };
+  }, [iso, adjust]);
+
+  const lines = useMemo(() => todayLines(now, language as any, online, adjust), [iso, language, online, adjust]); // eslint-disable-line react-hooks/exhaustive-deps
   const bn = language === 'bn';
   const rows = [
     { icon: <CalendarDays size={14} />, text: lines.english, title: bn ? 'ইংরেজি ক্যালেন্ডার' : 'English (Gregorian) calendar' },

@@ -91,6 +91,7 @@ function ensureV2Columns() {
     ['failed_logins', 'INTEGER NOT NULL DEFAULT 0'], ['last_login_at', 'TEXT'], ['updated_at', 'TEXT'],
   ]) addColumn('users', c, d);
   addColumn('members', 'name_bn', 'TEXT');
+  addColumn('users', 'full_name_bn', 'TEXT');
   addColumn('master_data', 'name_bn', 'TEXT');
   for (const [, n, , bn] of DEFAULT_MASTER) run('UPDATE master_data SET name_bn = ? WHERE name = ? AND name_bn IS NULL', [bn, n]);
   addColumn('audit_log', 'user_id', 'INTEGER');
@@ -249,6 +250,7 @@ const DEFAULT_SETTINGS: Record<string, string> = {
   default_monthly_due: '2000',
   monthly_due_day: '10',
   late_fee_amount: '300',
+  hijri_adjust_days: '0',
   fiscal_year_start_month: '7',
   last_backup_date: 'Never',
   active_user_id: '1',
@@ -472,6 +474,7 @@ function getAppSettings() {
     default_monthly_due: Number(s.default_monthly_due),
     monthly_due_day: Number(s.monthly_due_day),
     late_fee_amount: Number(s.late_fee_amount),
+    hijri_adjust_days: Number.isFinite(Number(s.hijri_adjust_days)) ? Number(s.hijri_adjust_days) : 0,
     fiscal_year_start_month: Number(s.fiscal_year_start_month),
     last_backup_date: s.last_backup_date,
     active_user_id: Number(s.active_user_id),
@@ -488,6 +491,7 @@ function saveAppSettings(patch: Record<string, any>) {
       if (!(k in DEFAULT_SETTINGS)) continue;
       const val = typeof v === 'boolean' ? (v ? '1' : '0') : String(v ?? '');
       if (['default_monthly_due', 'late_fee_amount'].includes(k) && (isNaN(+val) || +val < 0)) fail(`${k} must be a positive number`);
+      if (k === 'hijri_adjust_days' && !(Number.isInteger(+val) && +val >= -3 && +val <= 3)) fail('Hijri adjustment must be a whole number from -3 to 3');
       if (k === 'monthly_due_day' && (!(+val >= 1 && +val <= 28))) fail('Due day must be between 1 and 28');
       if (k === 'org_logo') checkImage(val, 'Logo');
       run('INSERT OR REPLACE INTO app_settings (key, value) VALUES (?,?)', [k, val]);
@@ -1425,7 +1429,7 @@ function deleteExpense(id: number) {
 // Users & master data
 // ---------------------------------------------------------------------------
 // Never send credential columns to the renderer.
-const USER_COLS = `id, username, full_name, email, role, avatar_initials, status, created_at, phone, designation, address, bio, avatar,
+const USER_COLS = `id, username, full_name, full_name_bn, email, role, avatar_initials, status, created_at, phone, designation, address, bio, avatar,
   last_login_at, updated_at, is_system, (password_hash IS NOT NULL) AS has_password`;
 /** The protected iqbal_labs super-user account is visible only to itself. */
 const seesSystem = () => !!getSession()?.canUpload;
@@ -1463,8 +1467,8 @@ function addUser(u: any) {
   if (get('SELECT 1 FROM users WHERE username = ?', [username])) fail(`Username "${username}" is already taken.`);
   const id = tx(() => {
     checkImage(u.avatar, 'Profile picture');
-    run('INSERT INTO users (username, full_name, email, role, avatar_initials, status, phone, designation, address, bio, avatar) VALUES (?,?,?,?,?,?,?,?,?,?,?)',
-      [username, u.full_name.trim(), u.email?.trim() || '', u.role || 'Manager', u.avatar_initials || initials(u.full_name), u.status || 'Active',
+    run('INSERT INTO users (username, full_name, full_name_bn, email, role, avatar_initials, status, phone, designation, address, bio, avatar) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)',
+      [username, u.full_name.trim(), String(u.full_name_bn || '').trim() || null, u.email?.trim() || '', u.role || 'Manager', u.avatar_initials || initials(u.full_name), u.status || 'Active',
         u.phone || '', u.designation || '', u.address || '', u.bio || '', u.avatar || null]);
     const nid = lastId();
     audit('create', 'user', nid, username);
@@ -1482,7 +1486,7 @@ function updateUser(id: number, u: any) {
   if (u.full_name !== undefined && !String(u.full_name).trim()) fail('Full name is required.');
   if (u.email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(u.email)) fail('Please enter a valid email address.');
   checkImage(u.avatar, 'Profile picture');
-  const f: Record<string, any> = { full_name: u.full_name?.trim(), email: u.email, role: u.role, status: u.status,
+  const f: Record<string, any> = { full_name: u.full_name?.trim(), full_name_bn: u.full_name_bn === undefined ? undefined : (String(u.full_name_bn).trim() || null), email: u.email, role: u.role, status: u.status,
     phone: u.phone, designation: u.designation, address: u.address, bio: u.bio,
     avatar: u.avatar === undefined ? undefined : (u.avatar || null),
     avatar_initials: u.full_name ? initials(u.full_name) : undefined };

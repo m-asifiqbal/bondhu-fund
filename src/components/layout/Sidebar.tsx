@@ -1,4 +1,5 @@
 import React, { useState, useRef, useEffect, useMemo, useLayoutEffect } from 'react';
+import { LogoMark } from '../common/LogoMark';
 import {
   LayoutDashboard,
   Receipt,
@@ -46,7 +47,7 @@ export const UserAvatar: React.FC<{
 
 /** Shared popover for the signed-in user: my profile, change password, sign out (used by Sidebar and TopBar). */
 export const ProfileMenu: React.FC<{ onClose: () => void; className?: string }> = ({ onClose, className = '' }) => {
-  const { currentUser, openProfile, t, tv } = useApp();
+  const { currentUser, openProfile, t, tv, bnName } = useApp();
   const item = 'w-full flex items-center gap-2.5 px-2.5 py-2 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 text-left font-semibold text-slate-800 dark:text-slate-200';
 
   return (
@@ -56,7 +57,7 @@ export const ProfileMenu: React.FC<{ onClose: () => void; className?: string }> 
           <UserAvatar user={currentUser} className="w-10 h-10 rounded-xl" textClass="text-sm" />
           <div className="min-w-0">
             <div className="flex items-center gap-1.5 min-w-0">
-              <span className="font-bold text-slate-900 dark:text-white truncate" title={currentUser.full_name}>{currentUser.full_name}</span>
+              <span className="font-bold text-slate-900 dark:text-white truncate" title={bnName(currentUser.full_name, currentUser.full_name_bn)}>{bnName(currentUser.full_name, currentUser.full_name_bn)}</span>
               {!!currentUser.is_system && (
                 <span className="shrink-0 inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-md bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-300 text-[9px] font-bold uppercase">
                   <Lock size={9} />{t('shell.system_badge', 'System')}
@@ -149,7 +150,7 @@ interface NavSection {
 }
 
 export const Sidebar: React.FC = () => {
-  const { activeTab, setActiveTab, currentUser, t, tv, settings, orgName, isAdmin } = useApp();
+  const { activeTab, setActiveTab, currentUser, t, tv, settings, orgName, isAdmin, bnName } = useApp();
   const [showUserMenu, setShowUserMenu] = useState(false);
   // Collapsible icon rail: below 1280px it auto-collapses; on wide screens the user's choice is remembered.
   const [isNarrow, setIsNarrow] = useState(() => !!window.matchMedia && window.matchMedia(NARROW_QUERY).matches);
@@ -267,12 +268,7 @@ export const Sidebar: React.FC = () => {
             className="flex items-center gap-3 min-w-0 text-left"
           >
             {logo ? (
-              <img
-                src={logo}
-                alt={orgName}
-                draggable={false}
-                className="w-10 h-10 rounded-xl object-contain bg-white dark:bg-slate-100/95 p-1 ring-1 ring-slate-200 dark:ring-slate-700 shrink-0"
-              />
+              <LogoMark src={logo} alt={orgName} className="w-10 h-10" />
             ) : (
               <div className="w-9 h-9 rounded-xl bg-slate-900 dark:bg-emerald-600 text-white flex items-center justify-center font-black text-xs tracking-wide shadow-sm shrink-0">
                 {orgInitials(settings?.organization_name)}
@@ -343,8 +339,8 @@ export const Sidebar: React.FC = () => {
           type="button"
           onClick={() => setShowUserMenu(v => !v)}
           title={isCollapsed ? undefined : t('shell.profile_menu', 'Profile & switch user')}
-          aria-label={currentUser?.full_name}
-          onMouseEnter={showTip(currentUser?.full_name)}
+          aria-label={bnName(currentUser?.full_name, currentUser?.full_name_bn)}
+          onMouseEnter={showTip(bnName(currentUser?.full_name, currentUser?.full_name_bn))}
           onMouseLeave={hideTip}
           aria-haspopup="menu"
           aria-expanded={showUserMenu}
@@ -358,7 +354,7 @@ export const Sidebar: React.FC = () => {
             <UserAvatar user={currentUser} className="w-8 h-8 rounded-lg" />
             {!isCollapsed && (
               <span className="flex flex-col text-left min-w-0">
-                <span className="text-xs font-bold text-slate-900 dark:text-white truncate">{currentUser?.full_name || '—'}</span>
+                <span className="text-xs font-bold text-slate-900 dark:text-white truncate">{bnName(currentUser?.full_name, currentUser?.full_name_bn) || '—'}</span>
                 <span className="text-[10px] text-slate-400 dark:text-slate-500 truncate">{tv(currentUser?.role)}</span>
               </span>
             )}

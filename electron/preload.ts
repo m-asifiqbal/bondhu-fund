@@ -4,6 +4,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   isElectron: true,
   call: (method: string, args: unknown[]) => ipcRenderer.invoke('db:call', method, args),
   appInfo: () => ipcRenderer.invoke('app:info'),
+  hijriOnline: (iso: string) => ipcRenderer.invoke('calendar:hijri', iso),
   backup: (pin: string) => ipcRenderer.invoke('db:backup', pin),
   restorePin: (pin: string) => ipcRenderer.invoke('db:restore-pin', pin),
   restoreCancel: () => ipcRenderer.invoke('db:restore-cancel'),

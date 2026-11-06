@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, dialog, shell, Menu } from 'electron';
+import { app, BrowserWindow, ipcMain, dialog, shell, Menu, net } from 'electron';
 import * as path from 'path';
 import * as fs from 'fs';
 import * as store from './database';
@@ -241,6 +241,19 @@ function registerIpc() {
   }));
 
   /** Manual backup: always encrypted with the PIN the user chose (.bfbak). */
+  /** Hijri date from the Aladhan service (Umm al-Qura) for an ISO date. Fails quietly when offline: the app then uses its local calendar. */
+  ipcMain.handle('calendar:hijri', (_e, iso: string) => wrap(async () => {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(String(iso))) throw new Error('Bad date.');
+    const [y, m, d] = String(iso).split('-');
+    const res = await net.fetch(`https://api.aladhan.com/v1/gToH/${d}-${m}-${y}?calendarMethod=UAQ`, { signal: AbortSignal.timeout(12000) });
+    if (!res.ok) throw new Error('Calendar service unavailable.');
+    const j: any = await res.json();
+    const h = j?.data?.hijri;
+    const day = Number(h?.day), month = Number(h?.month?.number), year = Number(h?.year);
+    if (!(day >= 1 && day <= 30 && month >= 1 && month <= 12 && year > 1300 && year < 1700)) throw new Error('Unexpected calendar reply.');
+    return { day, month: month - 1, year };
+  }));
+
   ipcMain.handle('db:backup', (_e, pin: string) => wrap(async () => {
     store.requireSession();
     validatePin(pin);                                             // refuse before opening any dialog
@@ -436,9 +449,10 @@ function registerIpc() {
   }));
 
   // ---- Shared export helpers: operator (signed-in user), save dialog -------------------------------
-  const operator = () => {
+  const operator = (lang?: string) => {
     const sess: any = store.api.getSession();
-    return { name: String(sess?.user?.full_name || sess?.user?.username || 'N/A'), role: String(sess?.user?.role || 'N/A') };
+    const bn = lang === 'bn' && sess?.user?.full_name_bn;
+    return { name: String(bn || sess?.user?.full_name || sess?.user?.username || 'N/A'), role: String(sess?.user?.role || 'N/A') };
   };
   const pickFile = async (title: string, defaultName: string, ext: 'pdf' | 'xlsx') => {
     const res = await dialog.showSaveDialog(mainWindow!, {
@@ -460,7 +474,7 @@ function registerIpc() {
     const name = one ? `Statement_${one.member_code}_${safeName(one.name) || 'member'}_${day}.${ext}` : `BondhuFund_All_Statements_${day}.${ext}`;
     const file = await pickFile(one ? 'Save member statement' : 'Save all member statements', name, ext);
     if (!file) return { canceled: true };
-    const op = operator();
+    const op = operator(lang);
     if (ext === 'xlsx') fs.writeFileSync(file, await buildStatementsXlsx(data, op, lang || 'en'));
     else fs.writeFileSync(file, await renderPdf(buildStatementsHtml(data, op, lang || 'en'), true));
     shell.openPath(file);
@@ -474,7 +488,7 @@ function registerIpc() {
     const ext = format === 'xlsx' ? 'xlsx' : 'pdf';
     const file = await pickFile('Save ' + (ext === 'pdf' ? 'PDF' : 'Excel file'), `${safeName(fileName || 'BondhuFund_Report') || 'BondhuFund_Report'}.${ext}`, ext);
     if (!file) return { canceled: true };
-    const op = operator();
+    const op = operator(doc.lang);
     if (ext === 'xlsx') fs.writeFileSync(file, await buildTableXlsx(doc, op));
     else fs.writeFileSync(file, await renderPdf(buildTableHtml(doc, op), !!doc.landscape));
     shell.openPath(file);
@@ -486,7 +500,7 @@ function registerIpc() {
     store.requireSession();
     const file = await pickFile('Save payment voucher', `Voucher_${safeName(v.member_code || 'member')}_${safeName(v.payment_month || '')}.pdf`, 'pdf');
     if (!file) return { canceled: true };
-    fs.writeFileSync(file, await renderPdf(buildVoucherHtml(v, operator()), false));
+    fs.writeFileSync(file, await renderPdf(buildVoucherHtml(v, operator(v.lang)), false));
     shell.openPath(file);
     return { canceled: false, filePath: file };
   }));

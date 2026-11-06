@@ -12,16 +12,16 @@ import { USER_ROLES, ROLE_BADGE, initialsOf, useAuditLabels, useStamp } from './
 
 const USERNAME_RE = /^[a-z0-9._-]{3,32}$/;
 
-interface AddForm { full_name: string; username: string; email: string; phone: string; designation: string; role: UserRole; password: string; avatar: string }
-interface EditForm { full_name: string; email: string; phone: string; designation: string; role: UserRole; status: UserStatus }
+interface AddForm { full_name: string; full_name_bn: string; username: string; email: string; phone: string; designation: string; role: UserRole; password: string; avatar: string }
+interface EditForm { full_name: string; full_name_bn: string; email: string; phone: string; designation: string; role: UserRole; status: UserStatus }
 
-const EMPTY_ADD: AddForm = { full_name: '', username: '', email: '', phone: '', designation: '', role: 'Treasurer', password: '', avatar: '' };
+const EMPTY_ADD: AddForm = { full_name: '', full_name_bn: '', username: '', email: '', phone: '', designation: '', role: 'Treasurer', password: '', avatar: '' };
 
 const btnSoft = 'btn btn-outline';
 const btnPrimary = 'btn btn-primary';
 
 export const UserManagementView: React.FC = () => {
-  const { currentUser, isAdmin, showToast, refreshKey, triggerRefresh, t, tv, openProfile, language, toBanglaDigits } = useApp();
+  const { currentUser, isAdmin, showToast, refreshKey, triggerRefresh, t, tv, openProfile, language, toBanglaDigits, bnName } = useApp();
   const labels = useAuditLabels();
   const stamp = useStamp();
   const num = (n: number) => (language === 'bn' ? toBanglaDigits(n) : String(n));
@@ -38,7 +38,7 @@ export const UserManagementView: React.FC = () => {
   const fileRef = useRef<HTMLInputElement>(null);
 
   const [editUser, setEditUser] = useState<AppUser | null>(null);
-  const [edit, setEdit] = useState<EditForm>({ full_name: '', email: '', phone: '', designation: '', role: 'Treasurer', status: 'Active' });
+  const [edit, setEdit] = useState<EditForm>({ full_name: '', full_name_bn: '', email: '', phone: '', designation: '', role: 'Treasurer', status: 'Active' });
   const [deleteTarget, setDeleteTarget] = useState<AppUser | null>(null);
 
   const roleOptions = useMemo(() => USER_ROLES.map(r => ({ value: r, label: tv(r) })), [tv]);
@@ -54,7 +54,7 @@ export const UserManagementView: React.FC = () => {
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
     if (!q) return users;
-    return users.filter(u => [u.full_name, u.username, u.email, u.phone, u.designation, u.role].some(v => (v || '').toLowerCase().includes(q)));
+    return users.filter(u => [u.full_name, u.full_name_bn, u.username, u.email, u.phone, u.designation, u.role].some(v => (v || '').toLowerCase().includes(q)));
   }, [users, query]);
 
   const done = (msg: string) => {
@@ -91,6 +91,7 @@ export const UserManagementView: React.FC = () => {
       const newId = await addUser({
         username: uname,
         full_name: add.full_name.trim(),
+        full_name_bn: add.full_name_bn.trim() || undefined,
         email: add.email.trim(),
         phone: add.phone.trim(),
         designation: add.designation.trim(),
@@ -112,7 +113,7 @@ export const UserManagementView: React.FC = () => {
 
   const startEdit = (u: AppUser) => {
     setEditUser(u);
-    setEdit({ full_name: u.full_name, email: u.email || '', phone: u.phone || '', designation: u.designation || '', role: u.role, status: u.status });
+    setEdit({ full_name: u.full_name, full_name_bn: u.full_name_bn || '', email: u.email || '', phone: u.phone || '', designation: u.designation || '', role: u.role, status: u.status });
   };
 
   const saveEdit = async (e?: React.FormEvent) => {
@@ -128,6 +129,7 @@ export const UserManagementView: React.FC = () => {
     try {
       await updateUser(u.id, {
         full_name: edit.full_name.trim(),
+        full_name_bn: edit.full_name_bn.trim(),
         email: edit.email.trim(),
         phone: edit.phone.trim(),
         designation: edit.designation.trim(),
@@ -231,7 +233,7 @@ export const UserManagementView: React.FC = () => {
                   <UserAvatar user={u} className={`w-11 h-11 rounded-xl ${u.status !== 'Active' ? 'opacity-50 grayscale' : ''}`} textClass="text-sm" />
                   <div className="min-w-0">
                     <div className="flex flex-wrap items-center gap-2">
-                      <span className="font-bold text-slate-900 dark:text-white text-sm truncate">{u.full_name}</span>
+                      <span className="font-bold text-slate-900 dark:text-white text-sm truncate">{bnName(u.full_name, u.full_name_bn)}</span>
                       <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold border ${ROLE_BADGE[u.role] || ROLE_BADGE.Manager}`}>{tv(u.role)}</span>
                       {u.status !== 'Active' && (
                         <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-slate-200 dark:bg-slate-700 text-slate-600 dark:text-slate-300">{tv(u.status)}</span>
@@ -374,6 +376,10 @@ export const UserManagementView: React.FC = () => {
               <input className="form-input" value={add.full_name} onChange={e => setAdd(a => ({ ...a, full_name: e.target.value }))} />
             </div>
             <div>
+              <label className="form-label">{t('admin.full_name_bn', 'Full name (Bangla)')}</label>
+              <input className="form-input" lang="bn" value={add.full_name_bn} onChange={e => setAdd(a => ({ ...a, full_name_bn: e.target.value }))} placeholder="যেমন: মোঃ আসিফ ইকবাল" />
+            </div>
+            <div>
               <label className="form-label">{t('admin.username', 'Username')} *</label>
               <input
                 className={`form-input font-mono ${usernameError ? 'border-rose-500' : ''}`}
@@ -431,6 +437,10 @@ export const UserManagementView: React.FC = () => {
           <div>
             <label className="form-label">{t('admin.full_name', 'Full name')} *</label>
             <input className="form-input" value={edit.full_name} onChange={e => setEdit(s => ({ ...s, full_name: e.target.value }))} />
+          </div>
+          <div>
+            <label className="form-label">{t('admin.full_name_bn', 'Full name (Bangla)')}</label>
+            <input className="form-input" lang="bn" value={edit.full_name_bn} onChange={e => setEdit(s => ({ ...s, full_name_bn: e.target.value }))} placeholder="যেমন: মোঃ আসিফ ইকবাল" />
           </div>
           <div>
             <label className="form-label">{t('admin.designation', 'Designation')}</label>

@@ -97,7 +97,7 @@ export const OverviewView: React.FC = () => {
   const [hour, setHour] = useState(() => new Date().getHours());
   useEffect(() => { const id = setInterval(() => setHour(new Date().getHours()), 60_000); return () => clearInterval(id); }, []);
   const hello = tr(greetingKey(hour));
-  const firstName = currentUser?.full_name?.split(' ')[0] || '';
+  const firstName = bnName(currentUser?.full_name, currentUser?.full_name_bn).split(' ')[0] || '';
 
   // ---------------------------------------------------------------------------
   // Chart options

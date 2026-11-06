@@ -107,6 +107,7 @@ export interface AppUser {
   id: number;
   username: string;
   full_name: string;
+  full_name_bn?: string | null;
   email: string;
   role: UserRole;
   avatar_initials: string;
@@ -150,6 +151,7 @@ export interface AppSettings {
   default_monthly_due: number;
   monthly_due_day: number;
   late_fee_amount: number;
+  hijri_adjust_days: number;
   last_backup_date: string;
   active_user_id: number;
   fiscal_year_start_month?: number;

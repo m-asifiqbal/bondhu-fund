@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
+import { LogoMark } from '../components/common/LogoMark';
 import { Eye, EyeOff, Globe, Loader2, LockKeyhole, LogIn, Moon, ShieldCheck, Sun, User } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 import { Modal } from '../components/common/Modal';
@@ -34,7 +35,7 @@ export const LoginScreen: React.FC = () => {
         <div className="absolute -left-16 bottom-10 w-72 h-72 rounded-full bg-emerald-400/10" />
         <div className="relative flex items-center gap-3">
           {settings?.org_logo
-            ? <img src={settings.org_logo} alt="" className="w-12 h-12 rounded-2xl object-contain bg-white p-1.5" />
+            ? <LogoMark src={settings.org_logo} className="w-12 h-12" surface="dark" />
             : <span className="w-12 h-12 rounded-2xl bg-[#fae2aa] text-[#082124] flex items-center justify-center font-black">BF</span>}
           <div>
             <div className="text-lg font-black leading-tight">{orgName}</div>
@@ -66,7 +67,7 @@ export const LoginScreen: React.FC = () => {
           <form onSubmit={submit} className="w-full max-w-sm" noValidate>
             <div className="lg:hidden flex items-center gap-3 mb-8">
               {settings?.org_logo
-                ? <img src={settings.org_logo} alt="" className="w-11 h-11 rounded-xl object-contain bg-white p-1 border border-slate-200" />
+                ? <LogoMark src={settings.org_logo} className="w-11 h-11" />
                 : <span className="w-11 h-11 rounded-xl bg-brand text-white flex items-center justify-center font-black">BF</span>}
               <span className="text-lg font-black text-slate-900 dark:text-white">{orgName}</span>
             </div>

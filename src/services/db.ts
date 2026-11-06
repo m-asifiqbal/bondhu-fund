@@ -18,6 +18,7 @@ interface ElectronAPI {
   isElectron: boolean;
   call: (method: string, args: unknown[]) => Promise<Result<any>>;
   appInfo: () => Promise<Result<AppInfo>>;
+  hijriOnline: (iso: string) => Promise<Result<{ day: number; month: number; year: number }>>;
   backup: (pin: string) => Promise<Result<{ canceled: boolean; filePath?: string; fileName?: string; fileSize?: number }>>;
   restore: () => Promise<Result<{ canceled: boolean; needsPin?: boolean; masterRecovery?: boolean; fileName?: string; safetySnapshot?: string }>>;
   restoreMaster: (password: string, masterPin: string) => Promise<Result<{ canceled: boolean; fileName?: string; safetySnapshot?: string }>>;
@@ -123,6 +124,11 @@ export const getTransactions = (startDate?: string, endDate?: string, type: 'All
   call<LedgerRow[]>('getTransactions', startDate, endDate, type);
 export const getAuditLog = (limit = 200) => call<AuditEntry[]>('getAuditLog', limit);
 export const getDynamicNotifications = () => call<AppNotification[]>('getDynamicNotifications');
+
+/** Hijri date for a (Dhaka) ISO date from the online calendar service, or null when offline. */
+export async function fetchHijriOnline(iso: string): Promise<{ day: number; month: number; year: number } | null> {
+  try { const r = await bridge().hijriOnline(iso); return r.ok ? r.data : null; } catch { return null; }
+}
 
 // Backup & restore ---------------------------------------------------------------
 export const getBackupLogs = () => call<BackupRecord[]>('getBackupLogs');

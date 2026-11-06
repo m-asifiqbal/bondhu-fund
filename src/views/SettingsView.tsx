@@ -30,6 +30,7 @@ interface FormState {
   default_monthly_due: string;
   monthly_due_day: string;
   late_fee_amount: string;
+  hijri_adjust_days: string;
   fiscal_year_start_month: number;
   auto_backup_enabled: boolean;
   auto_backup_keep: string;
@@ -43,6 +44,7 @@ const EMPTY: FormState = {
   default_monthly_due: '',
   monthly_due_day: '',
   late_fee_amount: '',
+  hijri_adjust_days: '0',
   fiscal_year_start_month: 7,
   auto_backup_enabled: true,
   auto_backup_keep: '14',
@@ -74,6 +76,7 @@ export const SettingsView: React.FC = () => {
           default_monthly_due: String(s.default_monthly_due ?? ''),
           monthly_due_day: String(s.monthly_due_day ?? ''),
           late_fee_amount: String(s.late_fee_amount ?? ''),
+          hijri_adjust_days: String(s.hijri_adjust_days ?? 0),
           fiscal_year_start_month: Number(s.fiscal_year_start_month) || 7,
           auto_backup_enabled: s.auto_backup_enabled !== false,
           auto_backup_keep: String(s.auto_backup_keep ?? 14),
@@ -112,6 +115,8 @@ export const SettingsView: React.FC = () => {
     if (!isNum(form.late_fee_amount) || Number(form.late_fee_amount) < 0) e.late_fee_amount = t('admin.settings_err_amount', 'Enter an amount of 0 or more');
     const day = Number(form.monthly_due_day);
     if (!isNum(form.monthly_due_day) || !Number.isInteger(day) || day < 1 || day > 28) e.monthly_due_day = t('admin.settings_err_day', 'Must be a whole number from 1 to 28');
+    const hj = Number(form.hijri_adjust_days);
+    if (!isNum(form.hijri_adjust_days) || !Number.isInteger(hj) || hj < -3 || hj > 3) e.hijri_adjust_days = t('admin.settings_err_hijri', 'Whole number from -3 to 3');
     const keep = Number(form.auto_backup_keep);
     if (!isNum(form.auto_backup_keep) || !Number.isInteger(keep) || keep < 1 || keep > 365) e.auto_backup_keep = t('admin.settings_err_keep', 'Must be a whole number from 1 to 365');
     setErrors(e);
@@ -134,6 +139,7 @@ export const SettingsView: React.FC = () => {
         default_monthly_due: Number(form.default_monthly_due),
         monthly_due_day: Number(form.monthly_due_day),
         late_fee_amount: Number(form.late_fee_amount),
+        hijri_adjust_days: Number(form.hijri_adjust_days),
         fiscal_year_start_month: form.fiscal_year_start_month,
         auto_backup_enabled: form.auto_backup_enabled,
         auto_backup_keep: Number(form.auto_backup_keep),
@@ -273,6 +279,12 @@ export const SettingsView: React.FC = () => {
                   <label className="form-label">{t('admin.settings_late_fee', 'Late fee amount')}</label>
                   <MoneyInput min={0} value={form.late_fee_amount} onChange={e => set('late_fee_amount', e.target.value)} className={inputCls('late_fee_amount', 'font-bold')} />
                   {fieldErr('late_fee_amount')}
+                </div>
+                <div>
+                  <label className="form-label">{t('admin.settings_hijri', 'Hijri date adjustment (days)')}</label>
+                  <input type="number" min={-3} max={3} step={1} value={form.hijri_adjust_days} onChange={e => set('hijri_adjust_days', e.target.value)} className={inputCls('hijri_adjust_days', 'font-bold')} />
+                  <p className="form-hint">{t('admin.settings_hijri_hint', '0 = Umm al-Qura (Saudi) date. If the Bangladesh moon-sighting date is one day behind, enter -1.')}</p>
+                  {fieldErr('hijri_adjust_days')}
                 </div>
                 <div>
                   <label className="form-label">{t('admin.settings_fy_start', 'Fiscal year starts in')}</label>

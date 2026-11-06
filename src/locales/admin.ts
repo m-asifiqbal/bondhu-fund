@@ -19,6 +19,7 @@ const dict: Record<string, { en: string; bn: string }> = {
   'admin.open_profile': { en: 'Open profile', bn: 'প্রোফাইল দেখুন' },
   'admin.no_users': { en: 'No users yet.', bn: 'এখনও কোনো ব্যবহারকারী নেই।' },
   'admin.full_name': { en: 'Full name', bn: 'পূর্ণ নাম' },
+  'admin.full_name_bn': { en: 'Full name (Bangla)', bn: 'পূর্ণ নাম (বাংলা)' },
   'admin.username': { en: 'Username', bn: 'ইউজারনেম' },
   'admin.username_rule': {
     en: '3–32 characters: lowercase letters, digits, dot, underscore or hyphen',
