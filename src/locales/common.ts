@@ -69,6 +69,8 @@ const dict: Record<string, { en: string; bn: string }> = {
   'auth.username': { en: 'Username', bn: 'ইউজারনেম' },
   'auth.username_ph': { en: 'e.g. admin', bn: 'যেমন: admin' },
   'auth.password': { en: 'Password', bn: 'পাসওয়ার্ড' },
+  'auth.show_password': { en: 'Show password', bn: 'পাসওয়ার্ড দেখান' },
+  'auth.hide_password': { en: 'Hide password', bn: 'পাসওয়ার্ড লুকান' },
   'auth.caps': { en: 'Caps Lock is on', bn: 'Caps Lock চালু আছে' },
   'auth.sign_in': { en: 'Sign in', bn: 'সাইন ইন করুন' },
   'auth.help': { en: 'Forgot your password? Ask an administrator to set a new one.', bn: 'পাসওয়ার্ড ভুলে গেছেন? অ্যাডমিনকে নতুন পাসওয়ার্ড সেট করতে বলুন।' },

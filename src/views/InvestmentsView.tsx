@@ -23,7 +23,6 @@ import {
   LineChart,
   CheckCircle2,
 } from 'lucide-react';
-import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, LabelList } from 'recharts';
 import { useApp } from '../context/AppContext';
 import {
   getInvestments,
@@ -39,6 +38,8 @@ import { SearchableSelect, SelectOption } from '../components/common/SearchableS
 import { DatePicker } from '../components/common/DatePicker';
 import { Modal } from '../components/common/Modal';
 import { todayISO, daysBetween } from '../utils/date';
+
+const SectorChart = React.lazy(() => import('./InvestmentsSectorChart'));
 
 const SECTOR_COLORS = ['#0f4a3c', '#d97706', '#2563eb', '#9333ea', '#db2777', '#0891b2', '#64748b'];
 
@@ -538,7 +539,7 @@ export const InvestmentsView: React.FC = () => {
       )}
 
       {/* KPIs */}
-      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
+      <div className="kpi-zoom grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
         {kpi(
           'border-l-purple-500',
           t('finance.inv_total_invested', 'Invested (active)'),
@@ -636,20 +637,9 @@ export const InvestmentsView: React.FC = () => {
               </div>
             </div>
             <div className="h-56 w-full" role="img" aria-label={t('finance.inv_chart_aria', 'Invested vs estimated value by sector')}>
-              <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={bySector} barGap={6}>
-                  <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#94a3b8" strokeOpacity={0.2} />
-                  <XAxis dataKey="label" axisLine={false} tickLine={false} tick={{ fontSize: 11, fill: '#64748b' }} />
-                  <YAxis axisLine={false} tickLine={false} tick={{ fontSize: 11, fill: '#64748b' }} tickFormatter={axisTick} width={48} />
-                  <Tooltip cursor={{ fill: 'rgba(148,163,184,0.12)' }} content={<ChartTooltip />} />
-                  <Bar dataKey="invested" name={investedLabel} fill="#0f4a3c" radius={[6, 6, 0, 0]}>
-                    <LabelList dataKey="invested" position="top" fontSize={9} fontWeight={600} fill="#64748b" formatter={(v: any) => (Number(v) ? axisTick(Number(v)) : '')} />
-                  </Bar>
-                  <Bar dataKey="estimated" name={estimatedLabel} fill="#d97706" radius={[6, 6, 0, 0]}>
-                    <LabelList dataKey="estimated" position="top" fontSize={9} fontWeight={600} fill="#64748b" formatter={(v: any) => (Number(v) ? axisTick(Number(v)) : '')} />
-                  </Bar>
-                </BarChart>
-              </ResponsiveContainer>
+              <React.Suspense fallback={null}>
+                <SectorChart data={bySector} axisTick={axisTick} tooltip={<ChartTooltip />} investedLabel={investedLabel} estimatedLabel={estimatedLabel} />
+              </React.Suspense>
             </div>
             <p className="text-[10px] text-slate-400 dark:text-slate-500 text-center mt-2">
               {t('finance.inv_chart_note', 'Active investments by sector (sold investments excluded).')}

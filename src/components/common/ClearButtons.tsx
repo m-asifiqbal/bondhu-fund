@@ -5,7 +5,7 @@ import { useApp } from '../../context/AppContext';
 
 type Field = HTMLInputElement | HTMLTextAreaElement;
 interface Spot { id: number; el: Field; host: HTMLElement; left: number; top: number }
-const TEXT_TYPES = new Set(['text', 'search', 'email', 'tel', 'url', 'number', 'password', '']);
+const TEXT_TYPES = new Set(['text', 'search', 'email', 'tel', 'url', 'number', '']);   // password fields have their own eye button (PasswordInput)
 const ids = new WeakMap<Field, number>();
 let nextId = 1;
 

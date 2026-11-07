@@ -3,6 +3,7 @@ import { ShieldCheck, KeyRound } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 import { getMasterStatus, setupMasterRecovery } from '../services/db';
 import { Modal } from './common/Modal';
+import { PasswordInput } from './common/PasswordInput';
 
 /** Super User only: create the recovery key that lets the Super User open backups whose owner forgot the PIN. */
 export const MasterRecoveryCard: React.FC = () => {
@@ -53,11 +54,11 @@ export const MasterRecoveryCard: React.FC = () => {
         <form id="master-form" onSubmit={submit} noValidate className="space-y-3.5">
           <p className="text-xs leading-relaxed text-slate-600 dark:text-slate-300">{t('master.info', 'Choose the master PIN.')}</p>
           <div><label className="form-label">{t('pin.account_password', 'Your account password')} <span className="text-rose-500">*</span></label>
-            <input type="password" value={password} onChange={e => setPassword(e.target.value)} autoFocus autoComplete="off" className="form-input" /></div>
+            <PasswordInput value={password} onChange={e => setPassword(e.target.value)} autoFocus autoComplete="off" /></div>
           <div><label className="form-label">{t('pin.master_pin', 'Master PIN')} <span className="text-rose-500">*</span></label>
-            <input type="password" value={pin} onChange={e => setPin(e.target.value)} autoComplete="off" className="form-input font-mono tracking-widest" /></div>
+            <PasswordInput value={pin} onChange={e => setPin(e.target.value)} autoComplete="off" className="form-input font-mono tracking-widest" /></div>
           <div><label className="form-label">{t('pin.confirm', 'Confirm PIN')} <span className="text-rose-500">*</span></label>
-            <input type="password" value={again} onChange={e => setAgain(e.target.value)} autoComplete="off" className="form-input font-mono tracking-widest" />
+            <PasswordInput value={again} onChange={e => setAgain(e.target.value)} autoComplete="off" className="form-input font-mono tracking-widest" />
             {again.length > 0 && pin !== again && <p className="text-[11px] text-rose-600 mt-1">{t('master.mismatch', 'The two master PINs do not match.')}</p>}</div>
           {error && <p role="alert" className="text-xs font-semibold text-rose-600 dark:text-rose-400">{error}</p>}
         </form>

@@ -493,7 +493,7 @@ export const ReportsView: React.FC = () => {
         ) : data ? (
           <>
             {/* Summary */}
-            <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-5 gap-3 report-summary">
+            <div className="kpi-zoom grid grid-cols-2 md:grid-cols-3 xl:grid-cols-5 gap-3 report-summary">
               {data.summary.map((s, i) => (
                 <div key={i} className={`rounded-xl border border-slate-200 dark:border-[#22353f] bg-slate-50/60 dark:bg-[#101b21] px-3.5 py-2.5 min-w-0 accent-${["purple","green","rose","blue","amber","teal"][i % 6]}`}>
                   <div className="text-[10px] font-bold uppercase tracking-wide text-slate-500 dark:text-slate-400">{bn ? s.bn : s.label}</div>

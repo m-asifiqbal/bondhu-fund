@@ -397,7 +397,7 @@ export const OverviewView: React.FC = () => {
       </section>
 
       {/* KPI tiles */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 min-[1800px]:grid-cols-6 min-[2200px]:grid-cols-8 gap-4">
+      <div className="kpi-zoom grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 min-[1800px]:grid-cols-6 min-[2200px]:grid-cols-8 gap-4">
         <Kpi accent="purple" icon={<Wallet size={16} />} label={tr('netWorth')} value={money(k.netWorth)} delta={pct(k.fundBalance, k.prevFundBalance)} deltaLabel={tr('vsLast')} digits={digits} />
         <Kpi accent="blue" icon={<Landmark size={16} />} label={tr('cash')} value={money(k.cashInHand)} delta={pct(k.cashInHand, k.prevCashInHand)} deltaLabel={tr('vsLast')} digits={digits} />
         <Kpi accent="green" icon={<HandCoins size={16} />} label={tr('collected')} value={money(k.monthCollected)}

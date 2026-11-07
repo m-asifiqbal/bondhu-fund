@@ -9,6 +9,7 @@ import { SearchableSelect } from '../components/common/SearchableSelect';
 import { UserAvatar } from '../components/layout/Sidebar';
 import { imageFileToDataUrl } from '../utils/image';
 import { USER_ROLES, ROLE_BADGE, initialsOf, useAuditLabels, useStamp } from './UserProfileView';
+import { PasswordInput } from '../components/common/PasswordInput';
 
 const USERNAME_RE = /^[a-z0-9._-]{3,32}$/;
 
@@ -391,7 +392,7 @@ export const UserManagementView: React.FC = () => {
             </div>
             <div>
               <label className="form-label">{t('admin.initial_password', 'Password')} *</label>
-              <input type="password" autoComplete="new-password" className="form-input" value={add.password} onChange={e => setAdd(a => ({ ...a, password: e.target.value }))} />
+              <PasswordInput autoComplete="new-password" value={add.password} onChange={e => setAdd(a => ({ ...a, password: e.target.value }))} />
               <p className="text-[11px] mt-1 text-slate-400 dark:text-slate-500">{t('admin.pw_hint', 'At least 6 characters. The user can change it later from their profile.')}</p>
             </div>
             <div>
@@ -504,9 +505,9 @@ export const UserManagementView: React.FC = () => {
           <button type="button" onClick={savePassword} disabled={pwBusy || !pw1} className="btn btn-primary">{pwBusy && <Loader2 size={14} className="animate-spin" />}{t('admin.set_password', 'Set password')}</button>
         </>}>
         <div className="space-y-3.5">
-          <div><label className="form-label">{t('auth.new', 'New password')}</label><input type="password" autoComplete="new-password" className="form-input" value={pw1} onChange={e => setPw1(e.target.value)} />
+          <div><label className="form-label">{t('auth.new', 'New password')}</label><PasswordInput autoComplete="new-password" value={pw1} onChange={e => setPw1(e.target.value)} />
             <span className="form-hint">{t('auth.rules', 'At least 6 characters, different from the username.')}</span></div>
-          <div><label className="form-label">{t('auth.repeat', 'Repeat new password')}</label><input type="password" autoComplete="new-password" className="form-input" value={pw2} onChange={e => setPw2(e.target.value)}
+          <div><label className="form-label">{t('auth.repeat', 'Repeat new password')}</label><PasswordInput autoComplete="new-password" value={pw2} onChange={e => setPw2(e.target.value)}
             onKeyDown={e => { if (e.key === 'Enter') savePassword(); }} /></div>
         </div>
       </Modal>    </div>

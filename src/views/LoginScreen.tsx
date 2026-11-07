@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { LogoMark } from '../components/common/LogoMark';
-import { Eye, EyeOff, Globe, Loader2, LockKeyhole, LogIn, Moon, ShieldCheck, Sun, User } from 'lucide-react';
+import { Globe, Loader2, LockKeyhole, LogIn, Moon, ShieldCheck, Sun, User } from 'lucide-react';
+import { PasswordInput } from '../components/common/PasswordInput';
 import { useApp } from '../context/AppContext';
 import { Modal } from '../components/common/Modal';
 import { changeOwnPassword } from '../services/db';
@@ -10,7 +11,6 @@ export const LoginScreen: React.FC = () => {
   const { t, signIn, settings, orgName, language, toggleLanguage, isDarkMode, toggleDarkMode } = useApp();
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
-  const [show, setShow] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [caps, setCaps] = useState(false);
@@ -64,7 +64,7 @@ export const LoginScreen: React.FC = () => {
           </button>
         </div>
         <div className="flex-1 flex items-center justify-center px-6 pb-16">
-          <form onSubmit={submit} className="w-full max-w-sm" noValidate>
+          <form onSubmit={submit} className="login-zoom w-full max-w-sm" noValidate>
             <div className="lg:hidden flex items-center gap-3 mb-8">
               {settings?.org_logo
                 ? <LogoMark src={settings.org_logo} className="w-11 h-11" />
@@ -82,16 +82,10 @@ export const LoginScreen: React.FC = () => {
             </div>
 
             <label className="form-label mt-4" htmlFor="login-pass">{t('auth.password', 'Password')}</label>
-            <div className="relative">
-              <LockKeyhole size={15} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" />
-              <input id="login-pass" type={show ? 'text' : 'password'} value={password} onChange={e => setPassword(e.target.value)}
-                onKeyUp={e => setCaps(e.getModifierState('CapsLock'))} autoComplete="current-password"
-                className="form-input !pl-10 !pr-11 !py-3 !text-sm" placeholder="••••••••" />
-              <button type="button" onClick={() => setShow(s => !s)} aria-label={show ? 'Hide password' : 'Show password'}
-                className="absolute right-2 top-1/2 -translate-y-1/2 p-1.5 rounded-lg text-slate-400 hover:text-slate-700 dark:hover:text-slate-200">
-                {show ? <EyeOff size={16} /> : <Eye size={16} />}
-              </button>
-            </div>
+            <PasswordInput id="login-pass" value={password} onChange={e => setPassword(e.target.value)}
+              onKeyUp={e => setCaps(e.getModifierState('CapsLock'))} autoComplete="current-password"
+              icon={<LockKeyhole size={15} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" />}
+              className="form-input !pl-10 !py-3 !text-sm" placeholder="••••••••" />
             {caps && <p className="mt-1.5 text-[11px] font-semibold text-amber-600">{t('auth.caps', 'Caps Lock is on')}</p>}
 
             {error && <div role="alert" className="mt-4 rounded-xl border border-rose-200 dark:border-rose-900/60 bg-rose-50 dark:bg-rose-950/40 px-3.5 py-2.5 text-xs font-semibold text-rose-700 dark:text-rose-300">{error}</div>}
@@ -135,10 +129,10 @@ export const ChangePasswordPrompt: React.FC<{ open: boolean; onDone: () => void;
         <button type="button" onClick={save} disabled={busy || !cur || !next} className="btn btn-primary">{busy && <Loader2 size={14} className="animate-spin" />}{t('auth.change_btn', 'Change password')}</button>
       </>}>
       <div className="space-y-3.5">
-        <div><label className="form-label">{t('auth.current', 'Current password')}</label><input type="password" className="form-input" value={cur} onChange={e => setCur(e.target.value)} autoComplete="current-password" /></div>
-        <div><label className="form-label">{t('auth.new', 'New password')}</label><input type="password" className="form-input" value={next} onChange={e => setNext(e.target.value)} autoComplete="new-password" />
+        <div><label className="form-label">{t('auth.current', 'Current password')}</label><PasswordInput value={cur} onChange={e => setCur(e.target.value)} autoComplete="current-password" /></div>
+        <div><label className="form-label">{t('auth.new', 'New password')}</label><PasswordInput value={next} onChange={e => setNext(e.target.value)} autoComplete="new-password" />
           <span className="form-hint">{t('auth.rules', 'At least 6 characters, different from the username.')}</span></div>
-        <div><label className="form-label">{t('auth.repeat', 'Repeat new password')}</label><input type="password" className="form-input" value={again} onChange={e => setAgain(e.target.value)} autoComplete="new-password"
+        <div><label className="form-label">{t('auth.repeat', 'Repeat new password')}</label><PasswordInput value={again} onChange={e => setAgain(e.target.value)} autoComplete="new-password"
           onKeyDown={e => { if (e.key === 'Enter') save(); }} /></div>
         {err && <div role="alert" className="rounded-xl bg-rose-50 dark:bg-rose-950/40 px-3 py-2 text-xs font-semibold text-rose-700 dark:text-rose-300">{err}</div>}
       </div>

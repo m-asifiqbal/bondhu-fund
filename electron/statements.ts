@@ -156,7 +156,7 @@ export function buildStatementsHtml(d: StatementsData, op: Operator, lang: Lang 
     return `<div class="page ${idx < d.statements.length - 1 ? 'brk' : ''}">
       <div class="band"><div><div class="org">${esc(d.orgName)}</div><div class="doc">${lang === 'bn' ? 'সদস্য স্টেটমেন্ট' : 'Member statement'}</div></div>
         <div class="gen">${esc(L(lang, 'generated'))}: ${esc(fmtDate(d.generatedOn))}<br/>${esc(L(lang, 'by'))}: ${esc(op.name || NA)}</div></div>
-      <div style="margin:12px 0 4px"><div style="font-size:17px;font-weight:800">${esc(m.name)}${m.name_bn ? ` <span style="font-weight:600;color:#334155">${esc(m.name_bn)}</span>` : ''}</div>
+      <div style="margin:14px 0 4px"><div class="mname">${esc(m.name)}${m.name_bn ? ` <span>${esc(m.name_bn)}</span>` : ''}</div>
         <div class="meta"><span>${esc(m.member_code)}</span><span>NID <b class="${isBlank(m.nid) ? 'na' : ''}">${esc(text(m.nid))}</b></span><span>${esc(m.status)}</span><span>Joined <b>${esc(fmtDate(m.join_date))}</b></span><span>Monthly due <b>${cur} ${num(m.monthly_due)}</b></span><span>Phone <b class="${isBlank(m.phone) ? 'na' : ''}">${esc(text(m.phone))}</b></span></div></div>
       <div class="cards">
         <div><span>Opening balance</span><b>${cur} ${num(t.opening)}</b></div><div><span>Contributions paid</span><b>${cur} ${num(t.contributions)}</b></div>

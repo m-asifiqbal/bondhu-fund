@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
-import { Lock, KeyRound, Eye, EyeOff, ShieldCheck } from 'lucide-react';
+import { Lock, KeyRound, ShieldCheck } from 'lucide-react';
+import { PasswordInput } from '../common/PasswordInput';
 import { useApp } from '../../context/AppContext';
 import { Modal } from '../common/Modal';
 
@@ -44,7 +45,6 @@ export const PinDialog: React.FC<Props> = ({ open, mode, fileName, onSubmit, onM
     } finally { setBusy(false); }
   };
 
-  const type = show ? 'text' : 'password';
   return (
     <Modal
       open={open}
@@ -73,26 +73,20 @@ export const PinDialog: React.FC<Props> = ({ open, mode, fileName, onSubmit, onM
             <p className="text-xs leading-relaxed text-slate-600 dark:text-slate-300">{t('pin.master_info', 'You are signed in as the Super User. Confirm your account password and enter the master PIN to open this backup without its owner\'s PIN.')}</p>
             <div>
               <label className="form-label">{t('pin.account_password', 'Your account password')} <span className="text-rose-500">*</span></label>
-              <input type={show ? 'text' : 'password'} value={pw} onChange={e => setPw(e.target.value)} autoFocus autoComplete="off" spellCheck={false} className="form-input" />
+              <PasswordInput show={show} onShowChange={setShow} value={pw} onChange={e => setPw(e.target.value)} autoFocus autoComplete="off" />
             </div>
           </>
         )}
         <div>
           <label className="form-label">{master ? t('pin.master_pin', 'Master PIN') : mode === 'set' ? t('pin.new', 'New PIN') : t('pin.pin', 'PIN')} <span className="text-rose-500">*</span></label>
-          <div className="relative">
-            <input type={type} value={pin} onChange={e => setPin(e.target.value)} autoFocus={!master} autoComplete="off" spellCheck={false}
-              data-clear-offset="34" className="form-input font-mono tracking-widest pr-20" placeholder={mode === 'set' ? t('pin.placeholder', 'At least 6 digits or characters') : ''} />
-            <button type="button" onClick={() => setShow(s => !s)} aria-label={show ? t('pin.hide', 'Hide PIN') : t('pin.show', 'Show PIN')}
-              className="absolute right-2 top-1/2 -translate-y-1/2 p-1.5 rounded-md text-slate-400 hover:text-slate-700 dark:hover:text-white">
-              {show ? <EyeOff size={16} /> : <Eye size={16} />}
-            </button>
-          </div>
+          <PasswordInput show={show} onShowChange={setShow} value={pin} onChange={e => setPin(e.target.value)} autoFocus={!master} autoComplete="off"
+            className="form-input font-mono tracking-widest" placeholder={mode === 'set' ? t('pin.placeholder', 'At least 6 digits or characters') : ''} />
           {tooShort && mode === 'set' && !master && <p className="text-[11px] text-rose-600 mt-1">{t('pin.too_short', 'Use at least 6 characters.')}</p>}
         </div>
         {mode === 'set' && !master && (
           <div>
             <label className="form-label">{t('pin.confirm', 'Confirm PIN')} <span className="text-rose-500">*</span></label>
-            <input type={type} value={again} onChange={e => setAgain(e.target.value)} autoComplete="off" spellCheck={false} className="form-input font-mono tracking-widest" />
+            <PasswordInput show={show} onShowChange={setShow} value={again} onChange={e => setAgain(e.target.value)} autoComplete="off" className="form-input font-mono tracking-widest" />
             {mismatch && <p className="text-[11px] text-rose-600 mt-1">{t('pin.mismatch', 'The two PINs do not match.')}</p>}
           </div>
         )}

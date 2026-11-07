@@ -1,7 +1,9 @@
 {
   "name": "bondhu-fund-desktop",
-  "version": "2.4.1",
+  "version": "2.5.0",
   "description": "Bondhu Fund - offline fund management for member savings groups",
+  "author": "Bondhu Fund",
+  "homepage": "https://www.iqballabs.com",
   "main": "dist-electron/main.js",
   "scripts": {
     "dev": "vite",
@@ -25,7 +27,7 @@
   "build": {
     "appId": "org.bondhufund.desktop",
     "productName": "Bondhu Fund",
-    "copyright": "Copyright (c) 2026 Bondhu Fund",
+    "copyright": "Copyright (c) 2026 Iqbal Labs",
     "directories": {
       "output": "release",
       "buildResources": "build"
@@ -70,7 +72,16 @@
         }
       ],
       "signAndEditExecutable": true,
-      "artifactName": "BondhuFund-Windows-${version}.${ext}"
+      "artifactName": "BondhuFund-Windows-${version}.${ext}",
+      "signtoolOptions": {
+        "publisherName": [
+          "Iqbal Labs"
+        ],
+        "signingHashAlgorithms": [
+          "sha256"
+        ],
+        "rfc3161TimeStampServer": "http://timestamp.digicert.com"
+      }
     },
     "nsis": {
       "oneClick": false,
@@ -121,6 +132,5 @@
     "typescript": "^5.5.4",
     "vite": "^5.4.2",
     "wait-on": "^7.2.0"
-  },
-  "author": "Bondhu Fund"
+  }
 }

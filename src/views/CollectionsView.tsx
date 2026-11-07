@@ -301,7 +301,7 @@ export const CollectionsView: React.FC = () => {
       </div>
 
       {/* KPI cards */}
-      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
+      <div className="kpi-zoom grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
         {statCard(
           'border-l-purple-500',
           fill(t('members.col_expected', 'Expected in {month}'), { month: monthLabel }),

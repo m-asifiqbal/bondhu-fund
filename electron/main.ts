@@ -18,7 +18,7 @@ let backupsDir = '';
 const isDev = !app.isPackaged && process.env.NODE_ENV === 'development';
 
 // Software rendering: this is a forms-and-tables app, and a faulty graphics driver must never leave it without a window.
-app.disableHardwareAcceleration();
+if (process.env.BF_ALLOW_GPU !== '1') app.disableHardwareAcceleration();   // BF_ALLOW_GPU=1 re-enables the GPU (diagnostics / benchmarks only)
 
 /** Tiny startup log (%APPDATA%/Bondhu Fund/startup.log) so a PC that cannot open the app can be diagnosed. */
 function startupLog(msg: string) {
@@ -156,7 +156,8 @@ async function start() {
   setTimeout(dailyAutoBackup, 5000);
 }
 
-const UI_SCALE = 0.93;
+// Interface scale. 0.93 → 0.9765 (+5%): all text, tables and controls are 5% larger. Summary cards (.kpi-zoom) and the sign-in form compensate in CSS.
+const UI_SCALE = 0.9765;
 
 function createWindow() {
   mainWindow = new BrowserWindow({

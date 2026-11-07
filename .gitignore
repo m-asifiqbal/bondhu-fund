@@ -3,3 +3,9 @@ dist/
 dist-electron/
 release/
 *.log
+
+# code-signing secrets must never be committed
+*.pfx
+*.p12
+*.key
+.bondhu-signing/

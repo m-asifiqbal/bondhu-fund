@@ -203,16 +203,16 @@ button, a, input, select, textarea {
 .modal-backdrop[data-closing] { animation: bf-fade-out .16s ease-in both; }
 .modal-backdrop[data-closing] .modal-panel { animation: bf-pop-out .16s ease-in both; }
 
-/* Close button: red outline + red cross */
+/* Close button: red outline + red cross. Deliberately static: no transitions, rotation or press-scale, so it looks and behaves
+   the same on every PC (the animation did not play on some machines). Hover only changes the colours, instantly. */
 .modal-close {
   display: grid; place-items: center; width: 2.25rem; height: 2.25rem; flex-shrink: 0;
   border-radius: .4375rem; border: 1.5px solid #fb7185; color: #e11d48; background: transparent;
-  transition: background-color .16s ease, border-color .16s ease, box-shadow .2s ease, transform .14s var(--bf-ease);
+  transition: none; animation: none;
 }
-.modal-close svg { transition: transform .28s var(--bf-ease); }
-.modal-close:hover { background: #fff1f2; border-color: #e11d48; box-shadow: 0 4px 12px -4px rgba(225, 29, 72, .35); }
-.modal-close:hover svg { transform: rotate(90deg); }
-.modal-close:active { transform: scale(.92); }
+.modal-close svg { transition: none; transform: none; }
+.modal-close:hover { background: #fff1f2; border-color: #e11d48; }
+.modal-close:hover svg, .modal-close:active, .modal-close:active svg { transform: none; }
 .modal-close:focus-visible { outline: none; box-shadow: 0 0 0 3px rgba(225, 29, 72, .3); }
 .dark .modal-close { color: #fb7185; border-color: #9f3347; }
 .dark .modal-close:hover { background: rgba(225, 29, 72, .14); border-color: #fb7185; }
@@ -404,3 +404,11 @@ input[type=number] { -moz-appearance: textfield; appearance: textfield; }
 /* room for the × so typed text never runs under it */
 input.form-input:not([readonly]):not(:disabled):not([type=checkbox]):not([type=radio]), textarea.form-input:not([readonly]):not(:disabled) { padding-right: 3rem; }
 [data-clear-offset] { padding-right: 5.8rem !important; }
+
+/* ---- Interface sizing ------------------------------------------------------
+   The window is zoomed to 0.9765 (electron/main.ts) → all text, tables and controls are 5% larger than before.
+   Summary cards grow only 3% (1.03 / 1.05) and the sign-in form 6% (1.06 / 1.05). */
+@media screen {
+  .kpi-zoom { zoom: 0.981; }
+  .login-zoom { zoom: 1.0095; }
+}

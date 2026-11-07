@@ -115,7 +115,7 @@ export const InvestmentReturnsView: React.FC = () => {
         </button>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
+      <div className="kpi-zoom grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
         {kpi('border-l-emerald-500', t('ret.kpi_profit', 'Total benefit received'), <TrendingUp size={16} />, 'bg-emerald-50 dark:bg-emerald-950/60 text-emerald-600 dark:text-emerald-400',
           formatCurrency(sum.profit), 'text-emerald-700 dark:text-emerald-400', `${investments.length} ${t('ret.investments', 'investments')}`)}
         {kpi('border-l-rose-500', t('ret.kpi_loss', 'Total loss booked'), <TrendingDown size={16} />, 'bg-rose-50 dark:bg-rose-950/60 text-rose-600 dark:text-rose-400',
