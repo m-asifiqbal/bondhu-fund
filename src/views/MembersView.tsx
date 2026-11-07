@@ -422,7 +422,7 @@ export const MembersView: React.FC = () => {
       </div>
 
       {/* Filters */}
-      <div className="card-base p-4">
+      <div className="card-base tbl-filter p-4">
         <div className="flex flex-wrap items-center gap-3">
           <div className="relative flex-1 min-w-[240px]">
             <Search size={15} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400 dark:text-slate-500" />
@@ -506,10 +506,10 @@ export const MembersView: React.FC = () => {
                       <tr
                         key={m.id}
                         onClick={() => setStatementId(m.id)}
-                        className={`group cursor-pointer transition-colors ${statementId === m.id ? 'bg-emerald-50 dark:bg-[#12302a]' : 'hover:bg-slate-50 dark:hover:bg-[#1a2b34]'}`}
+                        className={`group cursor-pointer transition-colors ${statementId === m.id ? 'bg-emerald-50 dark:bg-[#12302a]' : 'hover:bg-[#f0f7f3] dark:hover:bg-[#1a2b34]'}`}
                       >
-                        <td className={`py-3 px-4 text-center text-slate-400 dark:text-slate-500 font-semibold tabular-nums sticky left-0 z-10 ${statementId === m.id ? 'bg-emerald-50 dark:bg-[#12302a]' : 'bg-white dark:bg-[#142026] group-hover:bg-slate-50 dark:group-hover:bg-[#1a2b34]'}`} style={{ width: '3.25rem', minWidth: '3.25rem', maxWidth: '3.25rem' }}>{serial((page - 1) * PAGE_SIZE + __i + 1)}</td>
-                        <td className={`py-3 px-4 sticky z-10 sticky-col-edge ${statementId === m.id ? 'bg-emerald-50 dark:bg-[#12302a]' : 'bg-white dark:bg-[#142026] group-hover:bg-slate-50 dark:group-hover:bg-[#1a2b34]'}`} style={{ left: '3.25rem', minWidth: '13rem' }}>
+                        <td className={`py-3 px-4 text-center text-slate-400 dark:text-slate-500 font-semibold tabular-nums sticky left-0 z-10 ${statementId === m.id ? 'bg-emerald-50 dark:bg-[#12302a]' : 'bg-white dark:bg-[#142026] group-hover:bg-[#f0f7f3] dark:group-hover:bg-[#1a2b34]'}`} style={{ width: '3.25rem', minWidth: '3.25rem', maxWidth: '3.25rem' }}>{serial((page - 1) * PAGE_SIZE + __i + 1)}</td>
+                        <td className={`py-3 px-4 sticky z-10 sticky-col-edge ${statementId === m.id ? 'bg-emerald-50 dark:bg-[#12302a]' : 'bg-white dark:bg-[#142026] group-hover:bg-[#f0f7f3] dark:group-hover:bg-[#1a2b34]'}`} style={{ left: '3.25rem', minWidth: '13rem' }}>
                           <div className="flex items-center gap-3">
                             <div className="w-8 h-8 rounded-full bg-[#e2ede7] dark:bg-emerald-950/60 text-[#0f4a3c] dark:text-emerald-400 font-bold text-xs flex items-center justify-center shrink-0 border border-[#c3ded0] dark:border-emerald-800">
                               {m.avatar_initials}

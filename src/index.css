@@ -412,3 +412,36 @@ input.form-input:not([readonly]):not(:disabled):not([type=checkbox]):not([type=r
   .kpi-zoom { zoom: 0.981; }
   .login-zoom { zoom: 1.0095; }
 }
+
+/* ---- Table headers & filter bars: a clearly visible mint tint in day mode ---------- */
+html:not(.dark) main table thead th,
+html:not(.dark) main table thead tr { background-color: #d9eadf; color: #1f4a3a; }
+html:not(.dark) main table thead { border-bottom: 1.5px solid #a8cbb8; }
+html:not(.dark) main .tbl-filter { background-color: #ecf5f0; border-color: #bcd7c8; }
+
+/* ---- Sidebar open/collapse tab: a small round button sitting on the sidebar's edge ---- */
+.sidebar-edge-toggle {
+  position: absolute; right: -0.75rem; top: 1.25rem; z-index: 60;
+  width: 1.5rem; height: 1.5rem; border-radius: 9999px; padding: 0;
+  display: flex; align-items: center; justify-content: center;
+  color: #0f4a3c; background: #fff; border: 1.5px solid #b9cfc4; cursor: pointer;
+  box-shadow: 0 2px 6px rgba(15, 23, 42, .18);
+  transition: background-color .15s ease, color .15s ease, border-color .15s ease;
+}
+.sidebar-edge-toggle:hover { background: #0f4a3c; color: #fff; border-color: #0f4a3c; }
+.sidebar-edge-toggle:focus-visible { outline: 2px solid #2f9e78; outline-offset: 2px; }
+.dark .sidebar-edge-toggle { color: #6ee7b7; background: #16252d; border-color: #2f4a58; box-shadow: 0 2px 8px rgba(0, 0, 0, .55); }
+.dark .sidebar-edge-toggle:hover { background: #10b981; color: #052e22; border-color: #10b981; }
+@media print { .sidebar-edge-toggle { display: none !important; } }
+
+/* ---- Tables: text and headers 3% larger (on top of the interface scale) ---------- */
+@media screen {
+  main table { zoom: 1.03; }
+  /* the smallest table text is nudged up one step: headers 11px, captions 12px, tags 10px */
+  main table thead th { font-size: 11px; }
+  main table .text-\[11px\] { font-size: 12px; }
+  main table .text-\[10px\] { font-size: 11px; }
+  main table .text-\[9px\] { font-size: 10px; }
+  /* Bangla has no capitals: headers are set a step larger and bolder so they stay as clear as the English ones */
+  html[lang="bn"] main table thead th { font-size: 12.5px; font-weight: 800; }
+}

@@ -230,6 +230,7 @@ const dict: Record<string, { en: string; bn: string }> = {
   'members.col_showing': { en: 'Showing {from}–{to} of {total}', bn: 'মোট {total}টির মধ্যে {from}–{to} দেখানো হচ্ছে' },
   'members.col_viewMembers': { en: 'View all members', bn: 'সব সদস্য দেখুন' },
   'members.col_progress': { en: 'Collection progress', bn: 'আদায়ের অগ্রগতি' },
+  'members.col_everyMonth': { en: 'each month', bn: 'প্রতি মাসে' },
   'members.col_lateRule': { en: 'Late payment rule', bn: 'বিলম্বে পরিশোধের নিয়ম' },
   'members.col_lateRuleBody': { en: 'Dues are due by day {day} of each month. Payments after that are marked Overdue and a late fee of {fee} is suggested.', bn: 'প্রতি মাসের {day} তারিখের মধ্যে চাঁদা পরিশোধ করতে হয়। এরপর পরিশোধ করলে তা মেয়াদোত্তীর্ণ হিসেবে চিহ্নিত হয় এবং {fee} বিলম্ব ফি প্রস্তাব করা হয়।' },
   'members.col_lateRuleNoFee': { en: 'Dues are due by day {day} of each month. No late fee is configured.', bn: 'প্রতি মাসের {day} তারিখের মধ্যে চাঁদা পরিশোধ করতে হয়। কোনো বিলম্ব ফি নির্ধারণ করা নেই।' },

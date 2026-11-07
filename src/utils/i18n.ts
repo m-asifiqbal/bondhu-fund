@@ -50,7 +50,7 @@ export const translations: Record<string, { en: string; bn: string }> = {
   'nav.settings': { en: 'Settings', bn: 'সেটিংস' },
 
   // TopBar & Actions
-  'topbar.search_placeholder': { en: 'Search members or payment...', bn: 'সদস্য বা পেমেন্ট অনুসন্ধান করুন...' },
+  'topbar.search_placeholder': { en: 'Search members, payments…', bn: 'সদস্য বা পেমেন্ট অনুসন্ধান করুন...' },
   'topbar.refresh': { en: 'Refresh', bn: 'রিফ্রেশ' },
   'topbar.backup': { en: 'Backup', bn: 'ব্যাকআপ' },
   'topbar.record_payment': { en: 'Record payment', bn: 'পেমেন্ট গ্রহণ' },

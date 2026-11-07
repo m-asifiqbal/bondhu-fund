@@ -139,11 +139,11 @@ export const TopBar: React.FC = () => {
           <Search size={14} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400 dark:text-slate-500" />
           <input
             type="text"
-            placeholder={t('topbar.search_placeholder', 'Search members or payment...')}
-            aria-label={t('topbar.search_placeholder', 'Search members or payment...')}
+            placeholder={t('topbar.search_placeholder', 'Search members, payments…')}
+            aria-label={t('topbar.search_placeholder', 'Search members, payments…')}
             value={searchTerm}
             onChange={e => setSearchTerm(e.target.value)}
-            className="w-52 2xl:w-64 h-9 pl-9 pr-4 bg-slate-50 dark:bg-[#16252d] rounded-xl border-[1.5px] border-[#a9b7c3] dark:border-[#3a5463] hover:border-[#7f93a3] text-xs text-slate-900 dark:text-slate-100 placeholder-slate-400 dark:placeholder-slate-500 font-medium focus:outline-none focus:ring-2 focus:ring-[#0f4a3c]/20 focus:border-[#0f4a3c] dark:focus:border-emerald-500 shadow-sm"
+            className="w-60 2xl:w-72 h-9 pl-9 pr-4 bg-slate-50 dark:bg-[#16252d] rounded-xl border-[1.5px] border-[#a9b7c3] dark:border-[#3a5463] hover:border-[#7f93a3] text-xs text-slate-900 dark:text-slate-100 placeholder-slate-400 dark:placeholder-slate-500 font-medium focus:outline-none focus:ring-2 focus:ring-[#0f4a3c]/20 focus:border-[#0f4a3c] dark:focus:border-emerald-500 shadow-sm"
           />
         </form>
 

@@ -31,7 +31,7 @@ const dict: Record<string, { en: string; bn: string }> = {
   'shell.user_profile': { en: 'User profile', bn: 'ব্যবহারকারীর প্রোফাইল' },
 
   // Top bar
-  'topbar.search_placeholder': { en: 'Search members or payment...', bn: 'সদস্য বা পেমেন্ট খুঁজুন...' },
+  'topbar.search_placeholder': { en: 'Search members, payments…', bn: 'সদস্য বা পেমেন্ট খুঁজুন...' },
   'topbar.refresh': { en: 'Refresh', bn: 'রিফ্রেশ' },
   'topbar.backup': { en: 'Backup', bn: 'ব্যাকআপ' },
   'topbar.record_payment': { en: 'Record payment', bn: 'পেমেন্ট গ্রহণ' },

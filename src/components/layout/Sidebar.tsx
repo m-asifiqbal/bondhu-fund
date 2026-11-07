@@ -14,8 +14,8 @@ import {
   Settings,
   ChevronsUpDown,
   Check,
-  PanelLeftClose,
-  PanelLeftOpen,
+  ChevronLeft,
+  ChevronRight,
   UserCircle2,
   UsersRound,
   Lock,
@@ -256,11 +256,11 @@ export const Sidebar: React.FC = () => {
   return (
     <aside
       className={`${isCollapsed ? 'w-20' : 'w-64'
-        } no-print bg-white dark:bg-[#101b21] text-slate-700 dark:text-slate-300 flex flex-col justify-between shrink-0 h-screen select-none border-r border-slate-200/90 dark:border-[#22353f] transition-all duration-200`}
+        } no-print relative z-50 bg-white dark:bg-[#101b21] text-slate-700 dark:text-slate-300 flex flex-col justify-between shrink-0 h-screen select-none border-r border-slate-200/90 dark:border-[#22353f] transition-all duration-200`}
     >
       {/* Top Branding & Collapse */}
       <div className="min-h-0 flex flex-col">
-        <div className={`p-4 flex items-center ${isCollapsed ? 'flex-col gap-2' : 'justify-between gap-2'} border-b border-slate-100 dark:border-slate-800/80`}>
+        <div className={`p-4 flex items-center ${isCollapsed ? 'justify-center' : 'justify-between gap-2'} border-b border-slate-100 dark:border-slate-800/80`}>
           <button
             type="button"
             onClick={() => setActiveTab('overview')}
@@ -284,16 +284,6 @@ export const Sidebar: React.FC = () => {
                 </span>
               </div>
             )}
-          </button>
-          <button
-            onClick={toggleCollapsed}
-            className="text-slate-400 hover:text-slate-700 dark:hover:text-white p-1 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors shrink-0"
-            onMouseEnter={showTip(isCollapsed ? t('shell.expand', 'Expand sidebar') : undefined)}
-            onMouseLeave={hideTip}
-            title={isCollapsed ? undefined : t('shell.collapse', 'Collapse sidebar')}
-            aria-label={isCollapsed ? t('shell.expand', 'Expand sidebar') : t('shell.collapse', 'Collapse sidebar')}
-          >
-            {isCollapsed ? <PanelLeftOpen size={16} /> : <PanelLeftClose size={16} />}
           </button>
         </div>
 
@@ -369,6 +359,18 @@ export const Sidebar: React.FC = () => {
           />
         )}
       </div>
+      <button
+        type="button"
+        onClick={toggleCollapsed}
+        className="sidebar-edge-toggle"
+        onMouseEnter={showTip(isCollapsed ? t('shell.expand', 'Expand sidebar') : undefined)}
+        onMouseLeave={hideTip}
+        title={isCollapsed ? undefined : t('shell.collapse', 'Collapse sidebar')}
+        aria-label={isCollapsed ? t('shell.expand', 'Expand sidebar') : t('shell.collapse', 'Collapse sidebar')}
+        aria-expanded={!isCollapsed}
+      >
+        {isCollapsed ? <ChevronRight size={14} strokeWidth={2.6} /> : <ChevronLeft size={14} strokeWidth={2.6} />}
+      </button>
       {isCollapsed && tip && (
         <div role="tooltip" className="nav-tip" style={{ left: tip.x + 14, top: tip.y }}>{tip.label}</div>
       )}

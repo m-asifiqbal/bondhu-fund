@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { serial } from '../utils/i18n';
 import {
+  TrendingUp,
   ArrowRight,
   Clock,
   Coins,
@@ -147,6 +148,16 @@ export const CollectionsView: React.FC = () => {
   const latePaymentsCount = useMemo(() => allRecords.filter(r => (r.late_fee || 0) > 0).length, [allRecords]);
 
   const pct = Math.max(0, Math.min(100, parseFloat(stats.percentage) || 0));
+  // Paid / Pending / Overdue shares of the expected amount, drawn as one stacked bar
+  const segments = useMemo(() => {
+    const parts = [
+      { key: 'paid', bar: 'bg-emerald-600 dark:bg-emerald-500', label: t('status.paid', 'Paid'), count: stats.paidCount, amount: stats.collectedAmount },
+      { key: 'pending', bar: 'bg-amber-500', label: t('status.pending', 'Pending'), count: stats.pendingCount, amount: pendingAmount },
+      { key: 'overdue', bar: 'bg-rose-500', label: t('status.overdue', 'Overdue'), count: stats.overdueCount, amount: overdueAmount },
+    ];
+    const sum = parts.reduce((a, p) => a + p.amount, 0);
+    return parts.map(p => ({ ...p, w: sum > 0 ? (p.amount / sum) * 100 : 0 }));
+  }, [t, stats, pendingAmount, overdueAmount]);
   const hasFilters = !!(searchInput || startDate || endDate || sortBy !== 'newest');
 
   const totalPages = Math.ceil(records.length / limit) || 1;
@@ -259,14 +270,12 @@ export const CollectionsView: React.FC = () => {
     sub: string,
     subCls = 'text-slate-500 dark:text-slate-400 font-medium'
   ) => (
-    <div className={`card-base p-5 border-l-4 ${accent} flex flex-col justify-between min-w-0`}>
-      <div className="flex items-center justify-between gap-2">
-        <span className="text-xs font-bold text-slate-500 dark:text-slate-400">{label}</span>
-        <div className={`w-8 h-8 rounded-xl flex items-center justify-center shrink-0 ${iconCls}`}>{icon}</div>
-      </div>
-      <div className="mt-4 min-w-0">
-        <div className={`text-2xl font-black tracking-tight truncate ${valueCls}`}>{value}</div>
-        <div className={`text-[11px] mt-1 ${subCls}`}>{sub}</div>
+    <div className={`card-base px-4 py-3.5 border-l-4 ${accent} flex items-center gap-3.5 min-w-0`}>
+      <div className={`w-11 h-11 rounded-xl flex items-center justify-center shrink-0 ${iconCls}`}>{icon}</div>
+      <div className="min-w-0">
+        <div className="text-[11px] font-bold text-slate-500 dark:text-slate-400 truncate">{label}</div>
+        <div className={`text-xl font-black tracking-tight truncate ${valueCls}`}>{value}</div>
+        <div className={`text-[11px] truncate ${subCls}`}>{sub}</div>
       </div>
     </div>
   );
@@ -287,21 +296,11 @@ export const CollectionsView: React.FC = () => {
         </div>
         <div className="flex flex-wrap items-center gap-3">
           <MonthPicker value={selectedMonth} onChange={setSelectedMonth} align="right" />
-          <button
-            onClick={() => {
-              setSelectedMemberIdForPayment(null);
-              setOpenRecordModal(true);
-            }}
-            className="btn btn-primary"
-          >
-            <PlusCircle size={14} />
-            <span>{t('members.col_recordPayment', 'Record payment')}</span>
-          </button>
         </div>
       </div>
 
       {/* KPI cards */}
-      <div className="kpi-zoom grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
+      <div className="kpi-zoom grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3">
         {statCard(
           'border-l-purple-500',
           fill(t('members.col_expected', 'Expected in {month}'), { month: monthLabel }),
@@ -342,9 +341,8 @@ export const CollectionsView: React.FC = () => {
         )}
       </div>
 
-      {/* Ledger + side panel */}
-      <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_17.5rem] gap-5 items-start">
-        <div className="card-base p-5 lg:p-6 space-y-4 min-w-0">
+      {/* Ledger */}
+      <div className="card-base p-5 lg:p-6 space-y-4 min-w-0">
           <div className="flex flex-wrap items-center justify-between gap-4">
             <div>
               <h3 className="text-base font-bold text-slate-900 dark:text-white">
@@ -359,7 +357,7 @@ export const CollectionsView: React.FC = () => {
           </div>
 
           {/* Filters */}
-          <div className="p-3 bg-slate-50 dark:bg-[#121f26] rounded-xl border border-slate-200 dark:border-slate-800 flex flex-wrap items-center gap-3 text-xs">
+          <div className="tbl-filter p-3 bg-slate-50 dark:bg-[#121f26] rounded-xl border border-slate-200 dark:border-slate-800 flex flex-wrap items-center gap-3 text-xs">
             <div className="relative flex-1 min-w-[220px]">
               <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 dark:text-slate-500" />
               <input
@@ -425,11 +423,11 @@ export const CollectionsView: React.FC = () => {
           ) : (
             <>
               <div className="overflow-x-auto w-full">
-                <table className="w-full min-w-[640px] text-left text-xs text-slate-800 dark:text-slate-200">
+                <table className="w-full min-w-[900px] text-left text-xs text-slate-800 dark:text-slate-200">
                   <thead className="bg-slate-50 dark:bg-[#111e24] border-b border-slate-200 dark:border-slate-800 text-slate-600 dark:text-slate-400 font-bold uppercase tracking-wider text-[10px]">
                     <tr>
-<th className="py-3 px-3 w-12 text-center">{t('common.no', 'No.')}</th>
-                      <th className="py-3 px-3">{t('common.member', 'Member')}</th>
+<th className="py-3 px-3 text-center sticky left-0 z-20 bg-slate-50 dark:bg-[#111e24]" style={{ width: '3.25rem', minWidth: '3.25rem', maxWidth: '3.25rem' }}>{t('common.no', 'No.')}</th>
+                      <th className="py-3 px-3 sticky z-20 bg-slate-50 dark:bg-[#111e24] sticky-col-edge" style={{ left: '3.25rem', minWidth: '13rem' }}>{t('common.member', 'Member')}</th>
                       <th className="py-3 px-3">{t('members.col_dueDate', 'Due date')}</th>
                       <th className="py-3 px-3">{t('members.col_paidOn', 'Paid on')}</th>
                       <th className="py-3 px-3 text-right">{t('members.col_contribution', 'Contribution')}</th>
@@ -455,12 +453,12 @@ export const CollectionsView: React.FC = () => {
                       displayedRecords.map((r, __i) => {
                         const paid = isPaid(r);
                         return (
-                          <tr key={r.id} className="hover:bg-slate-50/80 dark:hover:bg-[#1a2b34] transition-colors">
-<td className="py-3 px-3 text-center text-slate-400 dark:text-slate-500 font-semibold tabular-nums">{serial((safePage - 1) * limit + __i + 1)}</td>
-                            <td className="py-3 px-3 font-bold text-slate-900 dark:text-white">
-                              <span title={bnName(r.member_name) !== memberName(r) ? r.member_name : undefined}>{memberName(r)}</span>
+                          <tr key={r.id} className="group hover:bg-[#f0f7f3] dark:hover:bg-[#1a2b34] transition-colors">
+<td className="py-3 px-3 text-center text-slate-400 dark:text-slate-500 font-semibold tabular-nums sticky left-0 z-10 bg-white dark:bg-[#142026] group-hover:bg-[#f0f7f3] dark:group-hover:bg-[#1a2b34]" style={{ width: '3.25rem', minWidth: '3.25rem', maxWidth: '3.25rem' }}>{serial((safePage - 1) * limit + __i + 1)}</td>
+                            <td className="py-3 px-3 font-bold text-slate-900 dark:text-white sticky z-10 sticky-col-edge bg-white dark:bg-[#142026] group-hover:bg-[#f0f7f3] dark:group-hover:bg-[#1a2b34]" style={{ left: '3.25rem', minWidth: '13rem' }}>
+                              <span className="block" title={bnName(r.member_name) !== memberName(r) ? r.member_name : undefined}>{memberName(r)}</span>
                               {r.member_code && (
-                                <span className="text-[11px] text-slate-500 dark:text-slate-400 font-normal ml-1">({r.member_code})</span>
+                                <span className="block text-[11px] text-slate-500 dark:text-slate-400 font-normal">{r.member_code}</span>
                               )}
                             </td>
                             <td className="py-3 px-3 text-slate-600 dark:text-slate-400 whitespace-nowrap">{formatDate(r.due_date)}</td>
@@ -471,7 +469,7 @@ export const CollectionsView: React.FC = () => {
                               {paid ? (
                                 formatCurrency(r.contribution_amount)
                               ) : (
-                                <span className="text-slate-400 font-semibold">
+                                <span className="text-amber-700 dark:text-amber-400 font-bold">
                                   {formatCurrency(dueOf(r))} {t('members.col_due', 'due')}
                                 </span>
                               )}
@@ -559,63 +557,78 @@ export const CollectionsView: React.FC = () => {
               </div>
             </>
           )}
-        </div>
+      </div>
 
-        {/* Side panel */}
-        <div className="grid grid-cols-1 gap-4 content-start">
-          <div className="card-base p-4">
-            <h3 className="text-[13px] font-bold text-slate-900 dark:text-white">
-              {t('members.col_progress', 'Collection progress')}
-            </h3>
-            <div className="text-2xl font-black text-slate-900 dark:text-white mt-1">
-              {n(stats.percentage)}%{' '}
-              <span className="text-xs font-normal text-slate-500 dark:text-slate-400">{t('members.col_ofExpected', 'of expected')}</span>
+      {/* Progress + late-payment rule, side by side below the ledger */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-5 items-stretch">
+        <section className="card-base p-5 lg:p-6 min-w-0" aria-label={t('members.col_progress', 'Collection progress')}>
+          <div className="flex items-start justify-between gap-4">
+            <div>
+              <h3 className="text-sm font-bold text-slate-900 dark:text-white">{t('members.col_progress', 'Collection progress')}</h3>
+              <div className="flex items-baseline gap-2 mt-1.5">
+                <span className="text-4xl font-black tracking-tight text-[#0f4a3c] dark:text-emerald-400 tabular-nums">{n(stats.percentage)}%</span>
+                <span className="text-xs font-semibold text-slate-500 dark:text-slate-400">{t('members.col_ofExpected', 'of expected')}</span>
+              </div>
             </div>
-            <div className="w-full bg-slate-100 dark:bg-slate-800 h-2.5 rounded-full overflow-hidden mt-2.5 p-0.5">
-              <div
-                className="bg-[#0f4a3c] dark:bg-emerald-500 h-full rounded-full transition-all duration-500"
-                style={{ width: `${pct}%` }}
-              />
-            </div>
-            <div className="space-y-2 mt-4 text-[11px]">
-              {[
-                { dot: 'bg-emerald-600', label: t('status.paid', 'Paid'), count: stats.paidCount, amount: stats.collectedAmount },
-                { dot: 'bg-amber-500', label: t('status.pending', 'Pending'), count: stats.pendingCount, amount: pendingAmount },
-                { dot: 'bg-rose-500', label: t('status.overdue', 'Overdue'), count: stats.overdueCount, amount: overdueAmount },
-              ].map(row => (
-                <div key={row.label} className="flex items-center justify-between gap-2">
-                  <div className="flex items-center gap-2">
-                    <span className={`w-2.5 h-2.5 rounded-full ${row.dot}`} />
-                    <span className="text-slate-700 dark:text-slate-300 font-medium">{row.label}</span>
-                  </div>
-                  <span className="font-bold text-slate-900 dark:text-white">
-                    {n(row.count)} / {formatCurrency(row.amount)}
-                  </span>
-                </div>
-              ))}
+            <div className="w-11 h-11 rounded-2xl bg-emerald-50 dark:bg-emerald-950/60 text-emerald-600 dark:text-emerald-400 flex items-center justify-center shrink-0">
+              <TrendingUp size={20} />
             </div>
           </div>
+          <div className="flex w-full h-3 rounded-full overflow-hidden bg-slate-200 dark:bg-slate-800 mt-4 gap-0.5" role="img"
+            aria-label={`${n(stats.percentage)}% ${t('members.col_ofExpected', 'of expected')}`}>
+            {segments.map(s => s.w > 0 && <div key={s.key} className={`${s.bar} h-full`} style={{ width: `${s.w}%` }} />)}
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mt-5">
+            {segments.map(s => (
+              <div key={s.key} className="rounded-xl border border-slate-200 dark:border-slate-700/70 bg-slate-50/70 dark:bg-[#121f26] px-3.5 py-3 min-w-0">
+                <div className="flex items-center gap-2 text-[11px] font-bold text-slate-600 dark:text-slate-300">
+                  <span className={`w-2.5 h-2.5 rounded-full shrink-0 ${s.bar}`} />
+                  <span className="truncate">{s.label}</span>
+                </div>
+                <div className="mt-1.5 text-base font-black text-slate-900 dark:text-white tabular-nums truncate">{formatCurrency(s.amount)}</div>
+                <div className="text-[11px] text-slate-500 dark:text-slate-400 font-medium">{n(s.count)} {t('members.col_memberDues', 'member dues')}</div>
+              </div>
+            ))}
+          </div>
+        </section>
 
-          <div className="bg-emerald-50/70 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-800/80 rounded-2xl p-4 text-xs shadow-sm">
-            <div className="flex items-center gap-2 text-[#0f4a3c] dark:text-emerald-300 font-bold mb-1.5 text-[12px]">
-              <Info size={16} />
-              <span>{t('members.col_lateRule', 'Late payment rule')}</span>
+        <section className="card-base p-5 lg:p-6 min-w-0 flex flex-col bg-gradient-to-br from-emerald-50 to-white dark:from-emerald-950/40 dark:to-[#142026] border-emerald-200/80 dark:border-emerald-800/60" aria-label={t('members.col_lateRule', 'Late payment rule')}>
+          <div className="flex items-start gap-3">
+            <div className="w-11 h-11 rounded-2xl bg-[#0f4a3c] text-white flex items-center justify-center shrink-0 shadow-sm">
+              <Info size={20} />
             </div>
-            <p className="text-slate-600 dark:text-slate-300 text-[11px] leading-relaxed">
-              {settings
-                ? settings.late_fee_amount > 0
-                  ? fill(t('members.col_lateRuleBody',
-                      'Dues are due by day {day} of each month. Payments after that are marked Overdue and a late fee of {fee} is suggested.'),
-                      { day: n(settings.monthly_due_day), fee: formatCurrency(settings.late_fee_amount) })
-                  : fill(t('members.col_lateRuleNoFee', 'Dues are due by day {day} of each month. No late fee is configured.'),
-                      { day: n(settings.monthly_due_day) })
-                : t('common.loading', 'Loading...')}
-            </p>
-            <button onClick={() => setActiveTab('settings')} className="btn btn-outline btn-sm mt-2">
+            <div className="min-w-0">
+              <h3 className="text-sm font-bold text-slate-900 dark:text-white">{t('members.col_lateRule', 'Late payment rule')}</h3>
+              <p className="text-xs text-slate-600 dark:text-slate-300 leading-relaxed mt-1">
+                {settings
+                  ? settings.late_fee_amount > 0
+                    ? fill(t('members.col_lateRuleBody',
+                        'Dues are due by day {day} of each month. Payments after that are marked Overdue and a late fee of {fee} is suggested.'),
+                        { day: n(settings.monthly_due_day), fee: formatCurrency(settings.late_fee_amount) })
+                    : fill(t('members.col_lateRuleNoFee', 'Dues are due by day {day} of each month. No late fee is configured.'),
+                        { day: n(settings.monthly_due_day) })
+                  : t('common.loading', 'Loading...')}
+              </p>
+            </div>
+          </div>
+          {settings && (
+            <div className="grid grid-cols-2 gap-3 mt-5">
+              <div className="rounded-xl bg-white/80 dark:bg-[#121f26] border border-emerald-200/80 dark:border-emerald-800/50 px-3.5 py-3">
+                <div className="text-[11px] font-bold text-slate-500 dark:text-slate-400">{t('members.col_dueDate', 'Due date')}</div>
+                <div className="mt-1 text-base font-black text-slate-900 dark:text-white tabular-nums">{n(settings.monthly_due_day)} <span className="text-[11px] font-semibold text-slate-500 dark:text-slate-400">{t('members.col_everyMonth', 'each month')}</span></div>
+              </div>
+              <div className="rounded-xl bg-white/80 dark:bg-[#121f26] border border-emerald-200/80 dark:border-emerald-800/50 px-3.5 py-3">
+                <div className="text-[11px] font-bold text-slate-500 dark:text-slate-400">{t('members.late_fee', 'Late fee')}</div>
+                <div className="mt-1 text-base font-black text-slate-900 dark:text-white tabular-nums">{settings.late_fee_amount > 0 ? formatCurrency(settings.late_fee_amount) : '—'}</div>
+              </div>
+            </div>
+          )}
+          <div className="mt-auto pt-4">
+            <button onClick={() => setActiveTab('settings')} className="btn btn-outline btn-sm">
               {t('members.col_changeRule', 'Change in settings')}
             </button>
           </div>
-        </div>
+        </section>
       </div>
 
       {/* Entry Center suggestion (kept below the ledger) */}
