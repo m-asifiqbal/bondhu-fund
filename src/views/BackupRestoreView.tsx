@@ -17,6 +17,7 @@ import { Modal } from '../components/common/Modal';
 import { HealthCheckCard } from '../components/HealthCheckCard';
 import { PinDialog } from '../components/modals/PinDialog';
 import { MasterRecoveryCard } from '../components/MasterRecoveryCard';
+import { ExcelDataCard } from '../components/ExcelDataCard';
 import { useApp } from '../context/AppContext';
 import {
   performBackup,
@@ -343,6 +344,8 @@ export const BackupRestoreView: React.FC = () => {
           {t('finance.backup_subtitle', 'Your data is stored only on this computer. Back up regularly to a USB drive or cloud folder.')}
         </p>
       </div>
+
+      <ExcelDataCard />
 
       {canUpload && <MasterRecoveryCard />}
       {canUpload && <HealthCheckCard />}

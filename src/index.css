@@ -340,7 +340,7 @@ html[lang="bn"] body :where(p, span, label, td, th, li, button, h1, h2, h3, h4) 
 .nav-item-collapsed:not(.nav-item-active):hover { transform: scale(1.06); }
 .nav-tip {
   position: fixed; z-index: 70; transform: translateY(-50%); pointer-events: none; white-space: nowrap;
-  padding: .55rem .95rem; border-radius: .4375rem; font-size: .96rem; font-weight: 700; letter-spacing: .01em;
+  padding: .55rem .95rem; border-radius: .4375rem; font-size: .931rem; font-weight: 700; letter-spacing: .01em;
   background: #0f1f27; color: #fff; box-shadow: 0 10px 26px -8px rgba(0, 0, 0, .5); animation: nav-tip-in .16s var(--bf-ease);
 }
 .nav-tip::before { content: ''; position: absolute; left: -5px; top: 50%; width: 10px; height: 10px; margin-top: -5px; background: inherit; transform: rotate(45deg); border-radius: 2px; }
@@ -445,8 +445,8 @@ html:not(.dark) main .tbl-filter { background-color: #ecf5f0; border-color: #bcd
 }
 
 /* ---- Table rows: alternate shading, clear hover and a prominent selected row -------- */
-:root { --row-alt: #ebf4ef; --row-hover: #dcece3; --row-sel: #bfe3d0; --row-sel-bar: #0f4a3c; }
-.dark { --row-alt: #1b2c35; --row-hover: #243d48; --row-sel: #1f5a47; --row-sel-bar: #34d399; }
+:root { --row-alt: #f4f9f6; --row-hover: #dcece3; --row-sel: #bfe3d0; --row-sel-bar: #0f4a3c; }
+.dark { --row-alt: #182830; --row-hover: #243d48; --row-sel: #1f5a47; --row-sel-bar: #34d399; }
 @media screen {
   main table tbody tr:nth-child(even):not(:has(> td[colspan])) > td { background-color: var(--row-alt); }
   main table tbody tr:not(:has(> td[colspan])):hover > td { background-color: var(--row-hover) !important; }
@@ -473,3 +473,7 @@ html:not(.dark) main .tbl-filter { background-color: #ecf5f0; border-color: #bcd
 /* ---- Filter bars: every search box and every drop-down has the same width on every screen ---- */
 .filter-search { flex: 0 1 26rem; width: 26rem; min-width: 14rem; max-width: 100%; }
 .filter-select { flex: 0 0 13rem; width: 13rem; min-width: 0; max-width: 100%; }
+
+/* The sidebar list scrolls with the wheel but shows no scrollbar: a 9px bar squeezed the highlight off-centre in the narrow rail. */
+.nav-scroll { scrollbar-width: none; }
+.nav-scroll::-webkit-scrollbar { display: none; width: 0; height: 0; }
