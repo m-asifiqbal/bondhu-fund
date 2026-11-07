@@ -358,7 +358,7 @@ export const CollectionsView: React.FC = () => {
 
           {/* Filters */}
           <div className="tbl-filter p-3 bg-slate-50 dark:bg-[#121f26] rounded-xl border border-slate-200 dark:border-slate-800 flex flex-wrap items-center gap-3 text-xs">
-            <div className="relative flex-1 min-w-[220px]">
+            <div className="relative filter-search">
               <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 dark:text-slate-500" />
               <input
                 type="text"
@@ -371,7 +371,7 @@ export const CollectionsView: React.FC = () => {
             </div>
             <SearchableSelect
               size="sm"
-              className="min-w-[200px]"
+              className="filter-select"
               options={sortOptions}
               value={sortBy}
               onChange={v => setSortBy(String(v || 'newest'))}

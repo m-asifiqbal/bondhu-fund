@@ -32,6 +32,7 @@ export interface RawPayment {
   row: number;
   cell: string;
   code: string;
+  nid: string;
   name: string;
   month: string;
   /** null = "paid in full" marker (P/✓/Paid) → monthly due */
@@ -62,7 +63,8 @@ function cellValue(v: ExcelJS.CellValue): unknown {
   if (v instanceof Date) return v;
   if (typeof v === 'object') {
     const o = v as any;
-    if ('result' in o) return cellValue(o.result);            // formula
+    if ('formula' in o || 'sharedFormula' in o) return 'result' in o ? cellValue(o.result) : null;   // formula (empty if never calculated)
+    if ('result' in o) return cellValue(o.result);
     if ('richText' in o) return o.richText.map((r: any) => r.text).join('');
     if ('text' in o) return o.text;                           // hyperlink
     if ('error' in o) return null;
@@ -76,6 +78,19 @@ function text(v: ExcelJS.CellValue): string {
   if (x === null) return '';
   if (x instanceof Date) return isoOf(utcToLocalDate(x));
   return String(x).trim();
+}
+
+/** A National ID cell. Excel keeps only 15 significant digits of a number, so a 16/17-digit NID typed into a General cell is already damaged. */
+function nidCell(v: ExcelJS.CellValue, problems: string[]): string {
+  const x = cellValue(v);
+  if (typeof x === 'number') {
+    if (!Number.isSafeInteger(x) || Math.abs(x) >= 1e15) {
+      problems.push('NID was stored as a number, so Excel changed its last digits. Format the NID cells as Text (or type an apostrophe first) and enter it again.');
+      return '';
+    }
+    return String(x);
+  }
+  return ascii(text(v));
 }
 
 /** ExcelJS returns dates as UTC midnight; convert to the calendar date the user typed. */
@@ -201,6 +216,7 @@ export async function parseWorkbook(buffer: Buffer): Promise<ParsedWorkbook> {
     if (!name && !code && !text(get('phone'))) continue;          // blank row
     if (/^EX-/i.test(code)) { out.examplesSkipped++; continue; }
     const problems: string[] = [];
+    const nid = nidCell(get('nid') as ExcelJS.CellValue, problems);
     const due = num(get('monthly_due'));
     const ob = num(get('opening_balance'));
     const jd = parseDate(get('join_date'));
@@ -208,7 +224,7 @@ export async function parseWorkbook(buffer: Buffer): Promise<ParsedWorkbook> {
     if (Number.isNaN(ob)) problems.push('Opening balance is not a number');
     if (jd === 'invalid') problems.push('Join date is not a valid date (use DD/MM/YYYY)');
     out.members.push({
-      row: r, code, name, name_bn: text(get('name_bn')), nid: ascii(text(get('nid'))), phone: ascii(text(get('phone'))), email: text(get('email')),
+      row: r, code, name, name_bn: text(get('name_bn')), nid, phone: ascii(text(get('phone'))), email: text(get('email')),
       designation: text(get('designation')), status: text(get('status')),
       monthly_due: Number.isNaN(due) ? null : due, join_date: jd === 'invalid' ? null : jd,
       opening_balance: Number.isNaN(ob) ? null : ob, notes: text(get('notes')), problems,
@@ -218,7 +234,7 @@ export async function parseWorkbook(buffer: Buffer): Promise<ParsedWorkbook> {
   // ---- Payment history (optional) --------------------------------------------------
   const ps = findSheet(wb, /payment|history|ledger|collection|পেমেন্ট|আদায়/i);
   if (ps) {
-    const PAY_FIELDS: Array<[string, RegExp]> = [['code', /member\s*(code|id)|^code$|সদস্য\s*(কোড|আইডি)/i], ['name', /name|নাম/i]];
+    const PAY_FIELDS: Array<[string, RegExp]> = [['code', /member\s*(code|id)|^code$|সদস্য\s*(কোড|আইডি)/i], ['nid', /\bnid\b|national\s*id|জাতীয়\s*পরিচয়|এনআইডি/i], ['name', /^\s*(full\s*)?name|^নাম|সদস্যের নাম/i]];
     const pr = findHeaderRow(ps, PAY_FIELDS, ['code', 'name'], true);
     if (!pr) {
       out.sheetWarnings.push(`"${ps.name}" sheet: no "Member Code" or "Name" header found — payment history was not read.`);
@@ -227,7 +243,8 @@ export async function parseWorkbook(buffer: Buffer): Promise<ParsedWorkbook> {
       const pm = headerMap(header, PAY_FIELDS);
       const monthCols: Array<{ col: number; month: string }> = [];
       header.eachCell({ includeEmpty: false }, (cell, col) => {
-        if (col === pm.code || col === pm.name) return;
+        if (col === pm.code || col === pm.name || col === pm.nid) return;
+        if (HELPER_HEADER.test(text(cell.value))) return;           // calculated helper columns (Total paid, Ready?)
         const mk = parseMonth(cell.value);
         if (mk) monthCols.push({ col, month: mk });
         else if (text(cell.value)) out.sheetWarnings.push(`"${ps.name}" column ${colLetter(col)} header "${text(cell.value)}" is not a month (use YYYY-MM) — ignored.`);
@@ -237,7 +254,12 @@ export async function parseWorkbook(buffer: Buffer): Promise<ParsedWorkbook> {
         const row = ps.getRow(r);
         const code = pm.code ? text(row.getCell(pm.code).value) : '';
         const name = pm.name ? text(row.getCell(pm.name).value) : '';
-        if (!code && !name) continue;
+        const pnid = pm.nid ? ascii(text(row.getCell(pm.nid).value)) : '';
+        if (!code && !name && !pnid) {
+          // amounts typed on a row that says who they belong to nobody → say so instead of dropping them silently
+          if (monthCols.some(({ col }) => text(row.getCell(col).value))) out.sheetWarnings.push(`"${ps.name}" row ${r} has amounts but no member name — it was not imported.`);
+          continue;
+        }
         if (/^EX-/i.test(code)) { out.examplesSkipped++; continue; }
         for (const { col, month } of monthCols) {
           const raw = row.getCell(col).value;
@@ -254,7 +276,7 @@ export async function parseWorkbook(buffer: Buffer): Promise<ParsedWorkbook> {
             else if (n < 0) { problems.push('Negative amount'); amount = n; }
             else amount = n;
           }
-          out.payments.push({ row: r, cell: `${colLetter(col)}${r}`, code, name, month, amount, problems });
+          out.payments.push({ row: r, cell: `${colLetter(col)}${r}`, code, nid: pnid, name, month, amount, problems });
         }
       }
     }
@@ -262,14 +284,19 @@ export async function parseWorkbook(buffer: Buffer): Promise<ParsedWorkbook> {
   return out;
 }
 
+/** The header row is the one (within the first 15) that matches the most known columns — banners and hints above it can't win. */
 function findHeaderRow(ws: ExcelJS.Worksheet, fields: Array<[string, RegExp]>, required: string[], anyOf = false): number | null {
+  let best: number | null = null, bestScore = 0;
   for (let r = 1; r <= Math.min(ws.rowCount, 15); r++) {
     const m = headerMap(ws.getRow(r), fields);
     const ok = anyOf ? required.some(k => m[k]) : required.every(k => m[k]);
-    if (ok) return r;
+    const score = Object.keys(m).length;
+    if (ok && score > bestScore) { best = r; bestScore = score; }
   }
-  return null;
+  return best;
 }
+
+const HELPER_HEADER = /^\s*(total|মোট|ready|প্রস্তুত|check|যাচাই)/i;
 
 function colLetter(c: number) {
   let s = '';
@@ -278,183 +305,452 @@ function colLetter(c: number) {
 }
 
 // ---------------------------------------------------------------------------
-// Template
+// Workbook layout (template and export share it, so a file exported from the app can be corrected and imported back)
+//
+//   Start Here       – a one-page guide (English + Bangla)
+//   Members          – banner, hint, legend, header on row 4, data from row 5
+//   Payment History  – Name (pick from a list) · Code · NID · Total · one column per month
 // ---------------------------------------------------------------------------
-const BRAND = 'FF0F4A3C', BRAND_LIGHT = 'FFE6F3EE', AMBER = 'FFFFF4D6', GREY = 'FF64748B';
+const BRAND = 'FF0F4A3C', BRAND_MID = 'FF1B7F5F', BRAND_LIGHT = 'FFE6F3EE', MINT = 'FFF1F8F4', AMBER = 'FFFFF1C2', AMBER_DEEP = 'FF8A5A00',
+  GREY = 'FF64748B', GREY_LIGHT = 'FFEEF2F6', RED_LIGHT = 'FFFDE2E2', RED = 'FFB42318', WHITE = 'FFFFFFFF', INK = 'FF1F2937';
+const FIRST_ROW = 5;            // first data row on Members and Payment History
+const ROWS = 500;               // data rows prepared with formatting and checks
+/** Last prepared row: 500 for the template, more when an export holds more members. */
+const lastRowFor = (count: number) => Math.max(FIRST_ROW + ROWS - 1, FIRST_ROW + count + 99);
+const MONTHS_SHOWN = 24;
+
+const solid = (argb: string): ExcelJS.Fill => ({ type: 'pattern', pattern: 'solid', fgColor: { argb } });
+const thin = (argb: string): Partial<ExcelJS.Border> => ({ style: 'thin', color: { argb } });
+const bnFont = { name: 'Nirmala UI' };
+
+/** Conditional formats need a unique priority each; they are numbered in the order they are added (first added wins a clash). */
+const cfPriority = new WeakMap<ExcelJS.Worksheet, number>();
+function addCF(ws: ExcelJS.Worksheet, def: { ref: string; rules: any[] }) {
+  let p = cfPriority.get(ws) ?? 1;
+  ws.addConditionalFormatting({ ref: def.ref, rules: def.rules.map(r => ({ ...r, priority: p++ })) });
+  cfPriority.set(ws, p);
+}
+
+/** 10, 13 or 17 digits (Bangla digits, spaces and dashes are accepted by the importer too). */
+function nidLooksValid(s: unknown): boolean {
+  const v = ascii(String(s ?? '')).replace(/[\s-]/g, '');
+  return /^\d+$/.test(v) && [10, 13, 17].includes(v.length);
+}
+
+function banner(ws: ExcelJS.Worksheet, lastCol: string, title: string, hint: string) {
+  ws.mergeCells(`A1:${lastCol}1`);
+  const t = ws.getCell('A1');
+  t.value = title;
+  t.font = { size: 18, bold: true, color: { argb: WHITE } };
+  t.fill = solid(BRAND);
+  t.alignment = { vertical: 'middle', indent: 1 };
+  ws.getRow(1).height = 36;
+  ws.mergeCells(`A2:${lastCol}2`);
+  const h = ws.getCell('A2');
+  h.value = hint;
+  h.font = { size: 10.5, color: { argb: INK } };
+  h.fill = solid(BRAND_LIGHT);
+  h.alignment = { vertical: 'middle', wrapText: true, indent: 1 };
+  ws.getRow(2).height = 34;
+}
+
+function legend(ws: ExcelJS.Worksheet, cells: Array<[string, string, string, string]>) {
+  ws.getRow(3).height = 22;
+  for (const [addr, label, fill, font] of cells) {
+    const c = ws.getCell(addr);
+    c.value = label;
+    c.fill = solid(fill);
+    c.font = { size: 10, bold: true, color: { argb: font } };
+    c.alignment = { vertical: 'middle', horizontal: 'center' };
+    c.border = { top: thin('FFD0DAD5'), bottom: thin('FFD0DAD5'), left: thin('FFD0DAD5'), right: thin('FFD0DAD5') };
+  }
+}
+
+function headerCell(c: ExcelJS.Cell, kind: 'required' | 'optional' | 'auto') {
+  c.font = { bold: true, size: 11, color: { argb: kind === 'required' ? BRAND : kind === 'auto' ? GREY : WHITE } };
+  c.fill = solid(kind === 'required' ? AMBER : kind === 'auto' ? GREY_LIGHT : BRAND_MID);
+  c.alignment = { wrapText: true, vertical: 'middle', horizontal: 'center' };
+  c.border = { top: thin(BRAND), bottom: { style: 'medium', color: { argb: BRAND } }, left: thin('FFFFFFFF'), right: thin('FFFFFFFF') };
+}
+
+const MEMBER_COLS: Array<{ key: string; header: string; width: number; kind: 'required' | 'optional' | 'auto' }> = [
+  { key: 'code', header: 'Member Code\nসদস্য কোড', width: 15, kind: 'optional' },
+  { key: 'name', header: 'Name *\nনাম', width: 28, kind: 'required' },
+  { key: 'name_bn', header: 'Name (Bangla)\nবাংলায় নাম', width: 24, kind: 'optional' },
+  { key: 'nid', header: 'National ID (NID) *\nজাতীয় পরিচয়পত্র নম্বর', width: 26, kind: 'required' },
+  { key: 'phone', header: 'Phone\nমোবাইল', width: 16, kind: 'optional' },
+  { key: 'email', header: 'Email\nইমেইল', width: 26, kind: 'optional' },
+  { key: 'designation', header: 'Designation\nপদবি', width: 18, kind: 'optional' },
+  { key: 'status', header: 'Status\nঅবস্থা', width: 12, kind: 'optional' },
+  { key: 'monthly_due', header: 'Monthly Due\nমাসিক চাঁদা', width: 14, kind: 'optional' },
+  { key: 'join_date', header: 'Join Date *\nযোগদানের তারিখ', width: 17, kind: 'required' },
+  { key: 'opening_balance', header: 'Opening Balance\nআগের মোট পরিশোধ', width: 18, kind: 'optional' },
+  { key: 'notes', header: 'Notes\nমন্তব্য', width: 30, kind: 'optional' },
+  { key: 'ready', header: 'Ready?\nপ্রস্তুত?', width: 12, kind: 'auto' },
+];
+const LAST_COL = 'M';
+
+type MemberRow = { code?: string; name: string; name_bn?: string; nid?: string; phone?: string; email?: string; designation?: string; status?: string;
+  monthly_due?: number | null; join_date?: string | Date | null; opening_balance?: number | null; notes?: string };
+
+function utcDate(iso: string | Date | null | undefined): Date | null {
+  if (!iso) return null;
+  if (iso instanceof Date) return iso;
+  const [y, m, d] = String(iso).split('-').map(Number);
+  return y ? new Date(Date.UTC(y, m - 1, d || 1)) : null;
+}
+
+function buildMembersSheet(wb: ExcelJS.Workbook, rows: MemberRow[], opts: { example: boolean; defaultDue: number }) {
+  const LAST_ROW = lastRowFor(rows.length);
+  const ws = wb.addWorksheet('Members', {
+    properties: { tabColor: { argb: 'FF2A78D6' }, defaultRowHeight: 22 },
+    views: [{ state: 'frozen', xSplit: 2, ySplit: 4, showGridLines: false }],
+    pageSetup: { orientation: 'landscape', fitToPage: true, fitToWidth: 1, fitToHeight: 0, paperSize: 9 },
+  });
+  ws.columns = MEMBER_COLS.map(c => ({ key: c.key, width: c.width }));
+  banner(ws, LAST_COL, 'Members   ·   সদস্য তালিকা',
+    'Type one member per row, starting on row 5. Yellow headers must be filled; the grey "Ready?" column checks each row for you. Rows starting with EX- are examples and are ignored.   ·   প্রতি সারিতে একজন করে লিখুন (৫ নম্বর সারি থেকে)। হলুদ শিরোনামের ঘর আবশ্যক।');
+  legend(ws, [
+    ['A3', 'Optional', BRAND_MID, WHITE], ['B3', 'Required *', AMBER, BRAND], ['C3', 'Automatic', GREY_LIGHT, GREY], ['D3', 'Wrong / duplicate', RED_LIGHT, RED],
+  ]);
+  const hr = ws.getRow(4);
+  hr.height = 44;
+  MEMBER_COLS.forEach((c, i) => { const cell = hr.getCell(i + 1); cell.value = c.header; headerCell(cell, c.kind); });
+
+  // data rows: text formats, row height, borders
+  const idx = (k: string) => MEMBER_COLS.findIndex(c => c.key === k) + 1;
+  for (let r = FIRST_ROW; r <= LAST_ROW; r++) {
+    const row = ws.getRow(r);
+    row.height = 22;
+    for (const k of ['code', 'nid', 'phone']) row.getCell(idx(k)).numFmt = '@';
+    row.getCell(idx('monthly_due')).numFmt = '#,##0';
+    row.getCell(idx('opening_balance')).numFmt = '#,##0';
+    row.getCell(idx('join_date')).numFmt = 'dd/mm/yyyy';
+    for (let c = 1; c <= MEMBER_COLS.length; c++) {
+      const cell = row.getCell(c);
+      cell.border = { bottom: thin('FFE2E8F0'), right: thin('FFE2E8F0') };
+      cell.alignment = { vertical: 'middle', horizontal: [idx('monthly_due'), idx('opening_balance')].includes(c) ? 'right' : [idx('join_date'), idx('status'), idx('ready'), idx('nid'), idx('code')].includes(c) ? 'center' : 'left' };
+    }
+    const ready = row.getCell(idx('ready'));
+    const f = `IF(COUNTA(A${r}:L${r})=0,"",IF(AND(B${r}<>"",J${r}<>"",ISNUMBER(--D${r}),OR(LEN(D${r})=10,LEN(D${r})=13,LEN(D${r})=17),SUMPRODUCT(--($D$${FIRST_ROW}:$D$${LAST_ROW}=D${r}))=1),"✓ Ready","⚠ Check"))`;
+    ready.value = { formula: f, result: '' } as ExcelJS.CellFormulaValue;
+    ready.font = { bold: true, color: { argb: GREY } };
+  }
+
+  // sample / real rows
+  rows.forEach((m, i) => {
+    const row = ws.getRow(FIRST_ROW + i);
+    const set = (k: string, v: any) => { if (v !== undefined && v !== null && v !== '') row.getCell(idx(k)).value = v; };
+    set('code', m.code); set('name', m.name); set('name_bn', m.name_bn); set('nid', m.nid ? String(m.nid) : ''); set('phone', m.phone); set('email', m.email);
+    set('designation', m.designation); set('status', m.status); set('monthly_due', m.monthly_due); set('join_date', utcDate(m.join_date));
+    set('opening_balance', m.opening_balance); set('notes', m.notes);
+    const ok = !!m.name && !!m.join_date && nidLooksValid(m.nid);
+    row.getCell(idx('ready')).value = { formula: (row.getCell(idx('ready')).value as ExcelJS.CellFormulaValue).formula, result: ok ? '✓ Ready' : '⚠ Check' } as ExcelJS.CellFormulaValue;
+    if (opts.example) for (let c = 1; c < idx('ready'); c++) row.getCell(c).font = { italic: true, color: { argb: GREY } };
+  });
+  ws.getRow(4).getCell(idx('nid')).note = 'Type the National ID as plain digits: 10, 13 or 17 digits, one per person. The column is already formatted as Text so Excel keeps every digit.';
+
+  // ---- checks while typing
+  const rng = (col: string) => `${col}${FIRST_ROW}:${col}${LAST_ROW}`;
+  const dv = (ws as any).dataValidations;
+  dv.add(rng('D'), { type: 'custom', allowBlank: true, formulae: [`AND(ISNUMBER(--D${FIRST_ROW}),OR(LEN(D${FIRST_ROW})=10,LEN(D${FIRST_ROW})=13,LEN(D${FIRST_ROW})=17),SUMPRODUCT(--($D$${FIRST_ROW}:$D$${LAST_ROW}=D${FIRST_ROW}))=1)`],
+    showInputMessage: true, promptTitle: 'National ID (NID)', prompt: 'Digits only: 10, 13 or 17 digits. Each person has a different NID.',
+    showErrorMessage: true, errorStyle: 'warning', errorTitle: 'Check this NID', error: 'An NID has 10, 13 or 17 digits and cannot be used twice. Keep it anyway?' });
+  dv.add(rng('A'), { type: 'custom', allowBlank: true, formulae: [`SUMPRODUCT(--($A$${FIRST_ROW}:$A$${LAST_ROW}=A${FIRST_ROW}))=1`],
+    showErrorMessage: true, errorStyle: 'warning', errorTitle: 'Member code', error: 'This member code is already used on another row.' });
+  dv.add(rng('F'), { type: 'custom', allowBlank: true, formulae: [`ISNUMBER(FIND("@",F${FIRST_ROW}))`], showErrorMessage: true, errorStyle: 'warning', errorTitle: 'Email', error: 'This does not look like an email address. Keep it anyway?' });
+  dv.add(rng('G'), { type: 'list', allowBlank: true, formulae: ['"Member,President,Vice President,General Secretary,Treasurer,Executive Member,Advisor"'],
+    showErrorMessage: true, errorStyle: 'information', errorTitle: 'Designation', error: 'Not in the list — fine, it will be imported as typed.' });
+  dv.add(rng('H'), { type: 'list', allowBlank: true, formulae: ['"Active,Inactive"'], showErrorMessage: true, errorTitle: 'Status', error: 'Choose Active or Inactive.' });
+  dv.add(rng('I'), { type: 'decimal', operator: 'greaterThanOrEqual', allowBlank: true, formulae: [0], showErrorMessage: true, errorTitle: 'Monthly due', error: 'Enter an amount, 0 or more. Leave empty to use the default.' });
+  dv.add(rng('J'), { type: 'date', operator: 'greaterThanOrEqual', allowBlank: true, formulae: [new Date(Date.UTC(1990, 0, 1))],
+    showInputMessage: true, promptTitle: 'Join date', prompt: 'Day/Month/Year, e.g. 15/01/2024. Dues are counted from this month.',
+    showErrorMessage: true, errorTitle: 'Join date', error: 'Enter a real date like 15/01/2024.' });
+  dv.add(rng('K'), { type: 'decimal', operator: 'greaterThanOrEqual', allowBlank: true, formulae: [0], showErrorMessage: true, errorTitle: 'Opening balance', error: 'Enter an amount, 0 or more.' });
+
+  // ---- look: banded rows, wrong NIDs, missing required cells, ready flag
+  const cf = (ref: string, formula: string, style: Partial<ExcelJS.Style>) =>
+    addCF(ws, { ref, rules: [{ type: 'expression', formulae: [formula], style }] });
+  const fillOf = (argb: string) => ({ type: 'pattern' as const, pattern: 'solid' as const, bgColor: { argb } });
+  cf(`D${FIRST_ROW}:D${LAST_ROW}`, `AND($D${FIRST_ROW}<>"",OR(NOT(ISNUMBER(--$D${FIRST_ROW})),AND(LEN($D${FIRST_ROW})<>10,LEN($D${FIRST_ROW})<>13,LEN($D${FIRST_ROW})<>17),SUMPRODUCT(--($D$${FIRST_ROW}:$D$${LAST_ROW}=$D${FIRST_ROW}))>1))`,
+    { fill: fillOf(RED_LIGHT), font: { color: { argb: RED }, bold: true } });
+  cf(`A${FIRST_ROW}:A${LAST_ROW}`, `AND($A${FIRST_ROW}<>"",SUMPRODUCT(--($A$${FIRST_ROW}:$A$${LAST_ROW}=$A${FIRST_ROW}))>1)`, { fill: fillOf(RED_LIGHT), font: { color: { argb: RED }, bold: true } });
+  for (const col of ['B', 'D', 'J']) cf(`${col}${FIRST_ROW}:${col}${LAST_ROW}`, `AND(COUNTA($A${FIRST_ROW}:$L${FIRST_ROW})>0,${col}${FIRST_ROW}="")`, { fill: fillOf(AMBER) });
+  cf(`M${FIRST_ROW}:M${LAST_ROW}`, `LEFT($M${FIRST_ROW},1)="✓"`, { fill: fillOf('FFD9F2E6'), font: { color: { argb: BRAND_MID }, bold: true } });
+  cf(`M${FIRST_ROW}:M${LAST_ROW}`, `LEFT($M${FIRST_ROW},1)="⚠"`, { fill: fillOf(AMBER), font: { color: { argb: AMBER_DEEP }, bold: true } });
+  cf(`A${FIRST_ROW}:L${LAST_ROW}`, 'MOD(ROW(),2)=0', { fill: fillOf(MINT) });
+  ws.autoFilter = { from: { row: 4, column: 1 }, to: { row: LAST_ROW, column: MEMBER_COLS.length } };
+  return ws;
+}
+
+function buildHistorySheet(wb: ExcelJS.Workbook, months: string[], people: Array<{ name: string; code: string; nid: string; paid: Record<string, number | 'P'> }>, opts: { example: boolean; staticIds: boolean }) {
+  const LAST_ROW = lastRowFor(people.length);
+  const ws = wb.addWorksheet('Payment History', {
+    properties: { tabColor: { argb: 'FF1BAF7A' }, defaultRowHeight: 22 },
+    views: [{ state: 'frozen', xSplit: 1, ySplit: 4, showGridLines: false }],
+    pageSetup: { orientation: 'landscape', fitToPage: true, fitToWidth: 1, fitToHeight: 0, paperSize: 9 },
+  });
+  const MC = 5;                                           // first month column (E)
+  const lastMonthCol = MC + months.length - 1;
+  const lastLetter = colLetter(lastMonthCol);
+  ws.columns = [{ key: 'name', width: 28 }, { key: 'code', width: 15 }, { key: 'nid', width: 24 }, { key: 'total', width: 14 }, ...months.map(m => ({ key: m, width: 11 }))];
+  banner(ws, lastLetter, 'Payment History   ·   আজ পর্যন্ত আদায়',
+    'Pick each member from the drop-down in the first column (or type the name exactly as on the Members sheet). The code and NID fill in by themselves. Then type the amount paid in each month, or P for "paid in full". Leave a month empty (or 0) if nothing was paid.   ·   প্রথম ঘরে তালিকা থেকে সদস্য বেছে নিন, তারপর প্রতি মাসে পরিশোধিত টাকা (বা P) লিখুন।');
+  legend(ws, [['A3', 'Pick from list', AMBER, BRAND], ['B3', 'Automatic', GREY_LIGHT, GREY], ['C3', 'Automatic', GREY_LIGHT, GREY], ['D3', 'Automatic', GREY_LIGHT, GREY], ['E3', 'Amount or P', BRAND_MID, WHITE]]);
+  // year band over the months
+  let start = 0;
+  for (let i = 1; i <= months.length; i++) {
+    if (i === months.length || months[i].slice(0, 4) !== months[start].slice(0, 4)) {
+      const a = colLetter(MC + start), b = colLetter(MC + i - 1);
+      if (i - 1 > start) ws.mergeCells(`${a}3:${b}3`);
+      const c = ws.getCell(`${a}3`);
+      c.value = months[start].slice(0, 4);
+      c.font = { bold: true, color: { argb: WHITE } };
+      c.fill = solid(start % 2 === 0 ? BRAND_MID : BRAND);
+      c.alignment = { horizontal: 'center', vertical: 'middle' };
+      start = i;
+    }
+  }
+  const hr = ws.getRow(4);
+  hr.height = 44;
+  const heads: Array<[string, 'required' | 'optional' | 'auto']> = [['Name *\nনাম', 'required'], ['Member Code\nসদস্য কোড', 'auto'], ['National ID (NID)\nজাতীয় পরিচয়পত্র নম্বর', 'auto'], ['Total paid\nমোট পরিশোধ', 'auto']];
+  heads.forEach(([h, k], i) => { const c = hr.getCell(i + 1); c.value = h; headerCell(c, k); });
+  months.forEach((m, i) => { const c = hr.getCell(MC + i); c.value = m; c.numFmt = '@'; headerCell(c, 'optional'); });
+
+  const L = (c: number) => colLetter(c);
+  for (let r = FIRST_ROW; r <= LAST_ROW; r++) {
+    const row = ws.getRow(r);
+    row.height = 22;
+    const p = people[r - FIRST_ROW];
+    row.getCell(1).numFmt = '@'; row.getCell(2).numFmt = '@'; row.getCell(3).numFmt = '@';
+    if (opts.staticIds && p) { row.getCell(2).value = p.code; row.getCell(3).value = p.nid; }
+    else {
+      row.getCell(2).value = { formula: `IF($A${r}="","",IFERROR(INDEX(Members!$A$${FIRST_ROW}:$A$${LAST_ROW},MATCH($A${r},Members!$B$${FIRST_ROW}:$B$${LAST_ROW},0))&"",""))`, result: p?.code ?? '' } as ExcelJS.CellFormulaValue;
+      row.getCell(3).value = { formula: `IF($A${r}="","",IFERROR(INDEX(Members!$D$${FIRST_ROW}:$D$${LAST_ROW},MATCH($A${r},Members!$B$${FIRST_ROW}:$B$${LAST_ROW},0))&"",""))`, result: p?.nid ?? '' } as ExcelJS.CellFormulaValue;
+    }
+    if (p) row.getCell(1).value = p.name;
+    const total = p ? Object.values(p.paid).reduce<number>((a, v) => a + (typeof v === 'number' ? v : 0), 0) : '';
+    row.getCell(4).value = { formula: `IF($A${r}="","",SUM(${L(MC)}${r}:BZ${r}))`, result: total } as ExcelJS.CellFormulaValue;
+    row.getCell(4).numFmt = '#,##0';
+    row.getCell(4).font = { bold: true, color: { argb: BRAND } };
+    for (const c of [2, 3]) row.getCell(c).font = { color: { argb: GREY } };
+    months.forEach((m, i) => {
+      const cell = row.getCell(MC + i);
+      cell.numFmt = '#,##0';
+      if (p && p.paid[m] !== undefined) cell.value = p.paid[m] as any;
+    });
+    for (let c = 1; c <= lastMonthCol; c++) {
+      const cell = row.getCell(c);
+      cell.border = { bottom: thin('FFE2E8F0'), right: thin('FFE2E8F0') };
+      cell.alignment = { vertical: 'middle', horizontal: c === 1 ? 'left' : c === 4 || c >= MC ? 'right' : 'center' };
+    }
+    if (opts.example && p) { for (let c = 1; c <= lastMonthCol; c++) if (c !== 4) row.getCell(c).font = { italic: true, color: { argb: GREY } }; }
+  }
+  // drop-down of the members already typed on the Members sheet (blank rows skipped)
+  (ws as any).dataValidations.add(`A${FIRST_ROW}:A${LAST_ROW}`, { type: 'list', allowBlank: true,
+    formulae: [`OFFSET(Members!$B$${FIRST_ROW},0,0,MAX(1,COUNTA(Members!$B$${FIRST_ROW}:$B$${LAST_ROW})),1)`],
+    showInputMessage: true, promptTitle: 'Member', prompt: 'Pick the member from the list, or type the name exactly as on the Members sheet.',
+    showErrorMessage: true, errorStyle: 'warning', errorTitle: 'Member not found', error: 'This name is not on the Members sheet. Keep it anyway?' });
+  (ws as any).dataValidations.add(`${L(MC)}${FIRST_ROW}:${lastLetter}${LAST_ROW}`, { type: 'custom', allowBlank: true,
+    formulae: [`OR(ISNUMBER(${L(MC)}${FIRST_ROW}),UPPER(${L(MC)}${FIRST_ROW})="P")`], showErrorMessage: true, errorTitle: 'Amount', error: 'Type the amount paid (a number), or P for paid in full.' });
+  const fillOf = (argb: string) => ({ type: 'pattern' as const, pattern: 'solid' as const, bgColor: { argb } });
+  const monthRef = `${L(MC)}${FIRST_ROW}:${lastLetter}${LAST_ROW}`;
+  addCF(ws, { ref: monthRef, rules: [
+    { type: 'expression', formulae: [`AND(ISNUMBER(${L(MC)}${FIRST_ROW}),${L(MC)}${FIRST_ROW}>0)`], style: { fill: fillOf('FFD9F2E6'), font: { color: { argb: BRAND }, bold: true } } },
+    { type: 'expression', formulae: [`UPPER(${L(MC)}${FIRST_ROW})="P"`], style: { fill: fillOf('FFC6EBD8'), font: { color: { argb: BRAND_MID }, bold: true } } },
+  ] });
+  addCF(ws, { ref: `A${FIRST_ROW}:A${LAST_ROW}`, rules: [{ type: 'expression',
+    formulae: [`AND($A${FIRST_ROW}<>"",COUNTIF($A$${FIRST_ROW}:$A$${LAST_ROW},$A${FIRST_ROW})>1)`], style: { fill: fillOf(RED_LIGHT), font: { color: { argb: RED }, bold: true } }, }] });
+  addCF(ws, { ref: `A${FIRST_ROW}:${lastLetter}${LAST_ROW}`, rules: [{ type: 'expression', formulae: ['MOD(ROW(),2)=0'], style: { fill: fillOf(MINT) } }] });
+  ws.autoFilter = { from: { row: 4, column: 1 }, to: { row: LAST_ROW, column: lastMonthCol } };
+  return ws;
+}
+
+function monthsEndingAt(currentMonth: string, count: number): string[] {
+  const [cy, cm] = currentMonth.split('-').map(Number);
+  const out: string[] = [];
+  for (let i = count - 1; i >= 0; i--) { const d = new Date(cy, cm - 1 - i, 1); out.push(`${d.getFullYear()}-${pad(d.getMonth() + 1)}`); }
+  return out;
+}
 
 export async function buildTemplate(opts: { orgName: string; defaultDue: number; dueDay: number; currentMonth: string }): Promise<Buffer> {
   const wb = new ExcelJS.Workbook();
   wb.creator = 'Bondhu Fund';
   wb.created = new Date();
   const { defaultDue, dueDay, currentMonth } = opts;
-  const months: string[] = [];
-  const [cy, cm] = currentMonth.split('-').map(Number);
-  for (let i = 11; i >= 0; i--) { const d = new Date(cy, cm - 1 - i, 1); months.push(`${d.getFullYear()}-${pad(d.getMonth() + 1)}`); }
-  // ExcelJS writes Date as UTC: build UTC midnight so the sheet shows the intended calendar day in any timezone.
-  const exJoin = (offset: number) => { const d = new Date(cy, cm - 1 - offset, 1); return new Date(Date.UTC(d.getFullYear(), d.getMonth(), 1)); };
+  const months = monthsEndingAt(currentMonth, MONTHS_SHOWN);
+  const back = (n: number) => months[months.length - 1 - n];
+  const join = (monthsAgo: number) => `${back(monthsAgo)}-01`;
 
-  // ---- Instructions --------------------------------------------------------------
-  const ins = wb.addWorksheet('Instructions', { properties: { tabColor: { argb: BRAND } }, views: [{ showGridLines: false }] });
-  ins.columns = [{ width: 4 }, { width: 30 }, { width: 62 }, { width: 62 }];
-  const title = ins.getCell('B2');
-  title.value = `${opts.orgName || 'Bondhu Fund'} — Member import template`;
-  title.font = { size: 18, bold: true, color: { argb: BRAND } };
-  ins.getCell('B3').value = 'সদস্য ইমপোর্ট টেমপ্লেট — Fill the "Members" sheet (required) and, if you have it, the "Payment History" sheet.';
-  ins.getCell('B3').font = { color: { argb: GREY } };
+  buildGuideSheet(wb, opts);
+  buildMembersSheet(wb, [
+    { code: 'EX-0001', name: 'Example: Rahim Uddin', name_bn: 'রহিম উদ্দিন', nid: '1990123456789', phone: '01711-000001', designation: 'Member', status: 'Active', monthly_due: defaultDue, join_date: join(11), opening_balance: 0, notes: 'Example (history typed month by month on Payment History) — delete me' },
+    { code: 'EX-0002', name: 'Example: Karima Begum', name_bn: 'করিমা বেগম', nid: '19901234567890123', phone: '01811-000002', designation: 'Treasurer', status: 'Active', monthly_due: defaultDue, join_date: join(2), opening_balance: defaultDue * 24, notes: 'Example (only a total: opening balance) — delete me' },
+    { code: 'EX-0003', name: 'Example: Jamal Hossain', nid: '1234567890', designation: 'Member', status: 'Active', monthly_due: defaultDue, join_date: join(8), opening_balance: 0, notes: 'Example — delete me' },
+  ], { example: true, defaultDue });
+  const paid1: Record<string, number | 'P'> = {};
+  months.forEach((m, i) => { if (i >= 12 && i !== 16) paid1[m] = i % 3 === 0 ? 'P' : defaultDue; });
+  const paid2: Record<string, number | 'P'> = {};
+  months.slice(-2).forEach(m => { paid2[m] = defaultDue; });
+  buildHistorySheet(wb, months, [
+    { name: 'Example: Rahim Uddin', code: 'EX-0001', nid: '1990123456789', paid: paid1 },
+    { name: 'Example: Karima Begum', code: 'EX-0002', nid: '19901234567890123', paid: paid2 },
+  ], { example: true, staticIds: false });
+  wb.views = [{ x: 0, y: 0, width: 24000, height: 14000, firstSheet: 0, activeTab: 0, visibility: 'visible' }];
+  return Buffer.from((await wb.xlsx.writeBuffer()) as ArrayBuffer);
+}
 
-  const steps: Array<[string, string, string]> = [
-    ['1', 'Fill the Members sheet: one row per member. Columns marked * are required.', 'Members শিটে প্রতি সারিতে একজন সদস্য লিখুন। * চিহ্নিত কলাম আবশ্যক।'],
-    ['2', 'Delete or overwrite the example rows (Member Code starting with EX-). Example rows are ignored anyway.', 'উদাহরণ সারিগুলো (EX- দিয়ে শুরু কোড) মুছে ফেলুন বা ওপরে লিখুন — এগুলো এমনিতেও বাদ যায়।'],
-    ['3', 'Till-date collections — choose ONE way per member:', 'আজ পর্যন্ত আদায় — প্রতি সদস্যের জন্য যেকোনো একটি পদ্ধতি বেছে নিন:'],
-    ['', 'A) Month by month (best): in "Payment History" put the amount paid under each month (or P = paid in full). Arrears, statements and reports will then be exact.', 'ক) মাসভিত্তিক (সবচেয়ে ভালো): "Payment History" শিটে প্রতি মাসের ঘরে পরিশোধিত টাকা লিখুন (বা P = পূর্ণ পরিশোধ)।'],
-    ['', 'B) Only a total: put the total paid so far in "Opening Balance" and set "Join Date" to the first month you will track in the app. Months before that will not be counted as dues.', 'খ) শুধু মোট: "Opening Balance" কলামে আজ পর্যন্ত মোট পরিশোধ লিখুন এবং "Join Date" দিন অ্যাপে হিসাব শুরুর মাস।'],
-    ['', 'Do not use both for the same months, or the money will be counted twice.', 'একই মাসের জন্য দুটো পদ্ধতি একসাথে ব্যবহার করবেন না — টাকা দুবার গণনা হবে।'],
-    ['4', 'Dates: DD/MM/YYYY (e.g. 15/01/2024). Months in Payment History headers: YYYY-MM (e.g. 2024-01). Add more month columns if you need to.', 'তারিখ: দিন/মাস/বছর। Payment History-র মাসের শিরোনাম: YYYY-MM (যেমন 2024-01)। প্রয়োজনে আরও মাসের কলাম যোগ করুন।'],
-    ['5', 'Unpaid months: leave the cell empty or 0. They will show as Overdue (after the due day) in the app.', 'অপরিশোধিত মাস: ঘর ফাঁকা বা 0 রাখুন — অ্যাপে মেয়াদোত্তীর্ণ দেখাবে।'],
-    ['6', 'In the app: Members → Import from Excel → choose this file → check the preview → Import.', 'অ্যাপে: সদস্য → Excel থেকে ইমপোর্ট → ফাইল নির্বাচন → প্রিভিউ যাচাই → ইমপোর্ট।'],
-  ];
+function buildGuideSheet(wb: ExcelJS.Workbook, opts: { orgName: string; defaultDue: number; dueDay: number }) {
+  const ws = wb.addWorksheet('Start Here', { properties: { tabColor: { argb: BRAND } }, views: [{ showGridLines: false }],
+    pageSetup: { orientation: 'portrait', fitToPage: true, fitToWidth: 1, fitToHeight: 0, paperSize: 9 } });
+  ws.columns = [{ width: 3 }, { width: 22 }, { width: 14 }, { width: 58 }, { width: 58 }];
+  ws.mergeCells('B2:E2');
+  const t = ws.getCell('B2');
+  t.value = `${opts.orgName || 'Bondhu Fund'} — member data entry`;
+  t.font = { size: 22, bold: true, color: { argb: WHITE } };
+  t.fill = solid(BRAND);
+  t.alignment = { vertical: 'middle', indent: 1 };
+  ws.getRow(2).height = 46;
+  ws.mergeCells('B3:E3');
+  const sub = ws.getCell('B3');
+  sub.value = 'সদস্য তথ্য এন্ট্রি ফাইল  ·  Fill this workbook in Excel, then bring it into the app in one click.';
+  sub.font = { size: 11, color: { argb: INK } };
+  sub.fill = solid(BRAND_LIGHT);
+  sub.alignment = { vertical: 'middle', indent: 1 };
+  ws.getRow(3).height = 26;
+
   let r = 5;
+  const section = (en: string, bn: string) => {
+    ws.mergeCells(`B${r}:E${r}`);
+    const c = ws.getCell(`B${r}`);
+    c.value = `${en}   ·   ${bn}`;
+    c.font = { size: 13, bold: true, color: { argb: BRAND } };
+    c.border = { bottom: { style: 'medium', color: { argb: BRAND_MID } } };
+    ws.getRow(r).height = 26;
+    r++;
+  };
+  const wrap = (c: ExcelJS.Cell) => { c.alignment = { wrapText: true, vertical: 'top' }; };
+
+  section('How to fill it in 4 steps', '৪টি ধাপে পূরণ করুন');
+  const steps: Array<[string, string, string]> = [
+    ['1', 'Open the “Members” sheet and type one member per row, from row 5. The yellow headers (Name, National ID, Join Date) are required. The grey “Ready?” column tells you if a row is complete.', '“Members” শিটে ৫ নম্বর সারি থেকে প্রতি সারিতে একজন সদস্য লিখুন। হলুদ শিরোনামগুলো (নাম, জাতীয় পরিচয়পত্র, যোগদানের তারিখ) আবশ্যক।'],
+    ['2', 'Open “Payment History” and pick each member from the drop-down. Their code and NID appear by themselves. Type the amount paid in each month, or P for “paid in full”. Leave empty if nothing was paid.', '“Payment History” শিটে তালিকা থেকে সদস্য বেছে নিন; কোড ও এনআইডি নিজে থেকেই আসবে। প্রতি মাসে পরিশোধিত টাকা (বা P) লিখুন।'],
+    ['3', 'Delete the grey example rows (they start with EX-). If you leave them, the app ignores them anyway. Save the file.', 'ধূসর উদাহরণ সারিগুলো (EX- দিয়ে শুরু) মুছে ফেলুন — রেখে দিলেও অ্যাপ এগুলো বাদ দেবে। ফাইলটি সেভ করুন।'],
+    ['4', 'In the app: Members → Import from Excel → choose this file → check the preview → Import. Nothing is saved until you press Import.', 'অ্যাপে: সদস্য → Excel থেকে ইমপোর্ট → ফাইল বেছে নিন → প্রিভিউ দেখুন → ইমপোর্ট। ইমপোর্ট চাপার আগে কিছুই সংরক্ষিত হয় না।'],
+  ];
   for (const [n, en, bn] of steps) {
-    ins.getCell(`B${r}`).value = n ? `Step ${n}` : '';
-    ins.getCell(`B${r}`).font = { bold: true, color: { argb: BRAND } };
-    ins.getCell(`C${r}`).value = en;
-    ins.getCell(`D${r}`).value = bn;
-    for (const c of ['C', 'D']) ins.getCell(`${c}${r}`).alignment = { wrapText: true, vertical: 'top' };
-    ins.getRow(r).height = Math.max(20, Math.ceil(Math.max(en.length, bn.length * 1.2) / 62) * 16);
+    const num = ws.getCell(`B${r}`);
+    num.value = Number(n);
+    num.font = { size: 16, bold: true, color: { argb: WHITE } };
+    num.fill = solid(BRAND_MID);
+    num.alignment = { horizontal: 'center', vertical: 'middle' };
+    ws.mergeCells(`C${r}:D${r}`);
+    ws.getCell(`C${r}`).value = en;
+    ws.getCell(`E${r}`).value = bn;
+    wrap(ws.getCell(`C${r}`)); wrap(ws.getCell(`E${r}`));
+    ws.getCell(`E${r}`).font = bnFont;
+    ws.getRow(r).height = Math.max(46, Math.ceil(en.length / 78) * 17 + 6);
     r++;
   }
-
-  r += 1;
-  const fieldsHeader = ins.getRow(r);
-  fieldsHeader.values = ['', 'Column', 'What to enter', 'বাংলা নির্দেশনা'];
-  fieldsHeader.eachCell(c => { c.font = { bold: true, color: { argb: 'FFFFFFFF' } }; c.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: BRAND } }; });
   r++;
-  const dict: Array<[string, string, string]> = [
-    ['Member Code', 'Optional. e.g. BF-0012. Leave empty to auto-generate. If the code already exists in the app, that member is updated (or skipped — you choose when importing).', 'ঐচ্ছিক। ফাঁকা রাখলে স্বয়ংক্রিয়ভাবে তৈরি হবে।'],
-    ['Name *', 'Full name in English.', 'পূর্ণ নাম (ইংরেজিতে)। আবশ্যক।'],
-    ['Name (Bangla)', 'Optional. Shown when the app is in Bangla.', 'ঐচ্ছিক — বাংলায় নাম।'],
-    ['Phone', 'Mobile number, e.g. 01711-234567.', 'মোবাইল নম্বর।'],
-    ['Email', 'Optional.', 'ঐচ্ছিক।'],
-    ['Designation', 'e.g. Member, President, Treasurer.', 'যেমন: সদস্য, সভাপতি, কোষাধ্যক্ষ।'],
-    ['Status', 'Active or Inactive (default Active). Inactive members owe no new dues.', 'Active বা Inactive (ডিফল্ট Active)।'],
-    ['Monthly Due', `Amount owed each month. Empty = app default (${defaultDue}).`, `প্রতি মাসের চাঁদা। ফাঁকা = ডিফল্ট (${defaultDue})।`],
-    ['Join Date *', `DD/MM/YYYY. Dues are counted from this month. Due day is the ${dueDay}th of each month.`, `দিন/মাস/বছর। এই মাস থেকে চাঁদা গণনা শুরু।`],
-    ['Opening Balance', 'Total paid BEFORE the months listed in Payment History (method B). Leave 0 if you use method A for all months.', 'Payment History-র আগের মোট পরিশোধ (পদ্ধতি খ)।'],
-    ['Notes', 'Anything else.', 'মন্তব্য।'],
+
+  section('National ID (NID) rules', 'জাতীয় পরিচয়পত্র (এনআইডি) নিয়ম');
+  const nidRules: Array<[string, string]> = [
+    ['Every member needs an NID — 10, 13 or 17 digits, digits only (Bangla digits are fine). No two members can share one.', 'প্রতিটি সদস্যের এনআইডি আবশ্যক — ১০, ১৩ বা ১৭ অঙ্ক, শুধু অঙ্ক। দুজনের এনআইডি এক হতে পারবে না।'],
+    ['The NID column is already formatted as Text, so Excel keeps every digit. If you paste from another file, use Paste → Values, or the last digits of a 17-digit NID can be turned into zeros.', 'এনআইডি কলাম আগে থেকেই টেক্সট ফরম্যাটে আছে। অন্য ফাইল থেকে পেস্ট করলে Paste → Values ব্যবহার করুন, নইলে ১৭ অঙ্কের শেষ অঙ্কগুলো শূন্য হয়ে যেতে পারে।'],
+    ['A red NID cell means it is the wrong length, has letters, or is used twice. The app also checks again when you import.', 'লাল এনআইডি ঘর মানে দৈর্ঘ্য ভুল, অক্ষর আছে অথবা দুইবার ব্যবহৃত। ইমপোর্টের সময় অ্যাপও আবার যাচাই করে।'],
   ];
-  for (const [c, en, bn] of dict) {
-    const row = ins.getRow(r);
-    row.values = ['', c, en, bn];
-    row.getCell(2).font = { bold: true };
-    [3, 4].forEach(i => (row.getCell(i).alignment = { wrapText: true, vertical: 'top' }));
-    row.height = Math.max(18, Math.ceil(en.length / 62) * 16);
+  for (const [en, bn] of nidRules) {
+    ws.getCell(`B${r}`).value = '●'; ws.getCell(`B${r}`).alignment = { horizontal: 'center', vertical: 'top' }; ws.getCell(`B${r}`).font = { color: { argb: BRAND_MID } };
+    ws.mergeCells(`C${r}:D${r}`);
+    ws.getCell(`C${r}`).value = en; ws.getCell(`E${r}`).value = bn; ws.getCell(`E${r}`).font = bnFont;
+    wrap(ws.getCell(`C${r}`)); wrap(ws.getCell(`E${r}`));
+    ws.getRow(r).height = Math.max(34, Math.ceil(en.length / 78) * 17 + 4);
     r++;
   }
+  r++;
 
-  // ---- Members --------------------------------------------------------------------
-  const ms = wb.addWorksheet('Members', { properties: { tabColor: { argb: 'FF2A78D6' } }, views: [{ state: 'frozen', ySplit: 1, xSplit: 2 }] });
-  ms.columns = [
-    { header: 'Member Code\nসদস্য কোড', key: 'code', width: 16 },
-    { header: 'Name *\nনাম', key: 'name', width: 26 },
-    { header: 'Name (Bangla)\nবাংলায় নাম', key: 'name_bn', width: 24 },
-    { header: 'National ID (NID) *\nজাতীয় পরিচয়পত্র নম্বর', key: 'nid', width: 24 },
-    { header: 'Phone\nমোবাইল', key: 'phone', width: 16 },
-    { header: 'Email\nইমেইল', key: 'email', width: 26 },
-    { header: 'Designation\nপদবি', key: 'designation', width: 16 },
-    { header: 'Status\nঅবস্থা', key: 'status', width: 12 },
-    { header: 'Monthly Due\nমাসিক চাঁদা', key: 'monthly_due', width: 14 },
-    { header: 'Join Date *\nযোগদানের তারিখ', key: 'join_date', width: 16 },
-    { header: 'Opening Balance\nআগের মোট পরিশোধ', key: 'opening_balance', width: 18 },
-    { header: 'Notes\nমন্তব্য', key: 'notes', width: 30 },
+  section('Money paid so far — two ways', 'আজ পর্যন্ত পরিশোধ — দুটি পদ্ধতি');
+  const ways: Array<[string, string, string]> = [
+    ['A', 'Month by month (best): type the amount for each month on “Payment History”. Statements and reports are then exact.', 'ক) মাসভিত্তিক (সবচেয়ে ভালো): “Payment History” শিটে প্রতি মাসের টাকা লিখুন।'],
+    ['B', 'Only a total: put the total paid so far in “Opening Balance” and set “Join Date” to the first month you will track in the app.', 'খ) শুধু মোট: “Opening Balance”-এ আজ পর্যন্ত মোট পরিশোধ লিখুন এবং “Join Date” দিন অ্যাপে হিসাব শুরুর মাস।'],
+    ['!', 'Do not use both for the same months — the money would be counted twice.', 'একই মাসের জন্য দুটো পদ্ধতি একসাথে ব্যবহার করবেন না — টাকা দুবার গণনা হবে।'],
   ];
-  styleHeader(ms.getRow(1));
-  const examples = [
-    { code: 'EX-0001', name: 'Example: Rahim Uddin', name_bn: 'রহিম উদ্দিন', phone: '01711-000001', email: '', designation: 'Member', status: 'Active', monthly_due: defaultDue, join_date: exJoin(11), opening_balance: 0, notes: 'Example row (method A: history in Payment History) — delete me' },
-    { code: 'EX-0002', name: 'Example: Karima Begum', name_bn: 'করিমা বেগম', phone: '01811-000002', email: '', designation: 'Treasurer', status: 'Active', monthly_due: defaultDue, join_date: exJoin(2), opening_balance: defaultDue * 24, notes: 'Example row (method B: total paid before = opening balance) — delete me' },
-    { code: 'EX-0003', name: 'Example: Jamal Hossain', name_bn: '', phone: '', email: '', designation: 'Member', status: 'Inactive', monthly_due: defaultDue, join_date: exJoin(8), opening_balance: 0, notes: 'Example row — delete me' },
-  ];
-  for (const e of examples) {
-    const row = ms.addRow({ ...e, join_date: e.join_date });
-    row.font = { italic: true, color: { argb: GREY } };
+  for (const [k, en, bn] of ways) {
+    const c = ws.getCell(`B${r}`);
+    c.value = k; c.font = { bold: true, size: 13, color: { argb: k === '!' ? RED : BRAND_MID } }; c.alignment = { horizontal: 'center', vertical: 'top' };
+    ws.mergeCells(`C${r}:D${r}`);
+    ws.getCell(`C${r}`).value = en; ws.getCell(`E${r}`).value = bn; ws.getCell(`E${r}`).font = bnFont;
+    wrap(ws.getCell(`C${r}`)); wrap(ws.getCell(`E${r}`));
+    ws.getRow(r).height = Math.max(34, Math.ceil(en.length / 78) * 17 + 4);
+    r++;
   }
-  ms.getColumn('join_date').numFmt = 'dd/mm/yyyy';
-  ms.getColumn('monthly_due').numFmt = '#,##0';
-  ms.getColumn('opening_balance').numFmt = '#,##0';
-  ms.getColumn('phone').numFmt = '@';
-  ms.getColumn('nid').numFmt = '@';
-  for (let i = 2; i <= 1000; i++) {
-    ms.getCell(`G${i}`).dataValidation = { type: 'list', allowBlank: true, formulae: ['"Active,Inactive"'], showErrorMessage: true, errorTitle: 'Status', error: 'Choose Active or Inactive' };
-    ms.getCell(`I${i}`).dataValidation = { type: 'date', operator: 'greaterThan', allowBlank: true, formulae: [new Date(1990, 0, 1)], showErrorMessage: true, errorTitle: 'Join date', error: 'Enter a date like 15/01/2024' };
-    ms.getCell(`H${i}`).dataValidation = { type: 'decimal', operator: 'greaterThanOrEqual', allowBlank: true, formulae: [0], showErrorMessage: true, error: 'Enter a positive amount' };
-    ms.getCell(`J${i}`).dataValidation = { type: 'decimal', operator: 'greaterThanOrEqual', allowBlank: true, formulae: [0], showErrorMessage: true, error: 'Enter a positive amount' };
-  }
-  ms.autoFilter = { from: 'A1', to: 'K1' };
+  r++;
 
-  // ---- Payment history -------------------------------------------------------------------
-  const ps = wb.addWorksheet('Payment History', { properties: { tabColor: { argb: 'FF1BAF7A' } }, views: [{ state: 'frozen', ySplit: 1, xSplit: 2 }] });
-  ps.columns = [
-    { header: 'Member Code\nসদস্য কোড', key: 'code', width: 16 },
-    { header: 'Name\nনাম', key: 'name', width: 26 },
-    ...months.map(m => ({ header: m, key: m, width: 11 })),
-  ];
-  styleHeader(ps.getRow(1));
-  // Month headers must stay TEXT so Excel doesn't turn them into dates in some locales
-  months.forEach((m, i) => { const c = ps.getRow(1).getCell(3 + i); c.value = m; c.numFmt = '@'; });
-  const ex1: Record<string, any> = { code: 'EX-0001', name: 'Example: Rahim Uddin' };
-  months.forEach((m, i) => { ex1[m] = i === 4 ? '' : i % 3 === 0 ? 'P' : defaultDue; });
-  const ex2: Record<string, any> = { code: 'EX-0002', name: 'Example: Karima Begum' };
-  months.slice(-2).forEach(m => { ex2[m] = defaultDue; });
-  for (const e of [ex1, ex2]) ps.addRow(e).font = { italic: true, color: { argb: GREY } };
-  for (let c = 3; c < 3 + months.length; c++) ps.getColumn(c).numFmt = '#,##0';
-  const note = ps.getCell(`A${6}`);
-  note.value = 'Enter the amount paid for each month (or P = paid in full). Empty / 0 = not paid. Add more month columns (YYYY-MM) on the right or before the first month if needed.';
-  note.font = { italic: true, color: { argb: GREY } };
-  ps.getCell('A7').value = 'প্রতি মাসের ঘরে পরিশোধিত টাকা লিখুন (বা P = পূর্ণ পরিশোধ)। ফাঁকা/0 = অপরিশোধিত। প্রয়োজনে আরও মাসের কলাম (YYYY-MM) যোগ করুন।';
-  ps.getCell('A7').font = { italic: true, color: { argb: GREY } };
-
-  wb.views = [{ x: 0, y: 0, width: 20000, height: 12000, firstSheet: 0, activeTab: 1, visibility: 'visible' }];
-  const buf = await wb.xlsx.writeBuffer();
-  return Buffer.from(buf as ArrayBuffer);
-}
-
-function styleHeader(row: ExcelJS.Row) {
-  row.height = 34;
-  row.eachCell(c => {
-    const required = /\*/.test(String(c.value));
-    c.font = { bold: true, color: { argb: required ? 'FF0F4A3C' : 'FFFFFFFF' } };
-    c.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: required ? AMBER : BRAND } };
-    c.alignment = { wrapText: true, vertical: 'middle', horizontal: 'center' };
-    c.border = { bottom: { style: 'thin', color: { argb: BRAND } } };
+  section('What goes in each column (Members sheet)', 'কোন কলামে কী লিখবেন');
+  const head = ws.getRow(r);
+  ['Column', 'Required?', 'What to type', 'বাংলা নির্দেশনা'].forEach((h, i) => {
+    const c = head.getCell(2 + i);
+    c.value = h; c.font = { bold: true, color: { argb: WHITE } }; c.fill = solid(BRAND_MID); c.alignment = { vertical: 'middle', horizontal: i === 1 ? 'center' : 'left', indent: 1 };
   });
+  head.height = 24;
+  r++;
+  const dict: Array<[string, string, string, string]> = [
+    ['Member Code', 'Optional', 'e.g. BF-0012. Leave empty and the app makes one. If the code is already in the app, that member is matched (updated or skipped — you choose at import).', 'ঐচ্ছিক। ফাঁকা রাখলে অ্যাপ নিজেই তৈরি করবে।'],
+    ['Name *', 'Required', 'Full name in English.', 'পূর্ণ নাম (ইংরেজিতে)।'],
+    ['Name (Bangla)', 'Optional', 'Shown when the app is in Bangla.', 'বাংলায় নাম — অ্যাপ বাংলায় থাকলে দেখাবে।'],
+    ['National ID (NID) *', 'Required', '10, 13 or 17 digits. Used to recognise the person, so re-importing the same file never creates a duplicate.', 'এনআইডি — ১০, ১৩ বা ১৭ অঙ্ক। এর মাধ্যমে একই ব্যক্তিকে চেনা যায়।'],
+    ['Phone / Email', 'Optional', 'Mobile number, e-mail address.', 'মোবাইল নম্বর, ইমেইল।'],
+    ['Designation', 'Optional', 'Pick from the list or type your own (Member, President, Treasurer …).', 'তালিকা থেকে বাছুন বা নিজে লিখুন।'],
+    ['Status', 'Optional', 'Active (default). New members must be Active — use Settle in the app when someone leaves.', 'Active (ডিফল্ট)। নতুন সদস্য Active হতে হবে।'],
+    ['Monthly Due', 'Optional', `Amount owed each month. Empty = the app default (${opts.defaultDue}). The due day is the ${opts.dueDay}th of each month.`, `প্রতি মাসের চাঁদা। ফাঁকা = ডিফল্ট (${opts.defaultDue})।`],
+    ['Join Date *', 'Required', 'Day/Month/Year, e.g. 15/01/2024. Dues are counted from this month.', 'দিন/মাস/বছর। এই মাস থেকে চাঁদা গণনা শুরু।'],
+    ['Opening Balance', 'Optional', 'Method B only: total paid before the app. Leave 0 if you type the months on Payment History.', 'শুধু পদ্ধতি খ: অ্যাপের আগে মোট পরিশোধ।'],
+    ['Notes', 'Optional', 'Anything else.', 'মন্তব্য।'],
+  ];
+  dict.forEach(([c, req, en, bn], i) => {
+    const row = ws.getRow(r);
+    row.getCell(2).value = c; row.getCell(2).font = { bold: true };
+    row.getCell(3).value = req; row.getCell(3).alignment = { horizontal: 'center', vertical: 'top' };
+    row.getCell(3).font = { bold: true, color: { argb: req === 'Required' ? AMBER_DEEP : GREY } };
+    row.getCell(4).value = en; row.getCell(5).value = bn; row.getCell(5).font = bnFont;
+    for (const k of [2, 4, 5]) row.getCell(k).alignment = { wrapText: true, vertical: 'top', indent: k === 2 ? 1 : 0 };
+    for (let k = 2; k <= 5; k++) { row.getCell(k).border = { bottom: thin('FFE2E8F0') }; if (i % 2 === 1) row.getCell(k).fill = solid(MINT); }
+    row.height = Math.max(22, Math.ceil(en.length / 62) * 17 + 4);
+    r++;
+  });
+  r++;
+  section('Colours', 'রঙের অর্থ');
+  const colours: Array<[string, string, string, string]> = [
+    ['Yellow header', AMBER, BRAND, 'Required column'], ['Green header', BRAND_MID, WHITE, 'Optional column'], ['Grey header', GREY_LIGHT, GREY, 'Filled in automatically — do not type'],
+    ['Red cell', RED_LIGHT, RED, 'Wrong or duplicate NID / code'], ['Yellow cell', AMBER, AMBER_DEEP, 'A required cell is still empty'],
+  ];
+  for (const [label, fill, font, meaning] of colours) {
+    const c = ws.getCell(`B${r}`);
+    c.value = label; c.fill = solid(fill); c.font = { bold: true, color: { argb: font } }; c.alignment = { horizontal: 'center', vertical: 'middle' };
+    c.border = { top: thin('FFD0DAD5'), bottom: thin('FFD0DAD5'), left: thin('FFD0DAD5'), right: thin('FFD0DAD5') };
+    ws.mergeCells(`C${r}:E${r}`);
+    ws.getCell(`C${r}`).value = meaning;
+    ws.getRow(r).height = 22;
+    r++;
+  }
 }
 
-/** Optional: export current members in the same layout (for round-tripping corrections). */
+/** Export current members in the same layout (for round-tripping corrections). */
 export async function buildMembersExport(members: any[], payments: Array<{ member_code: string; payment_month: string; contribution_amount: number }>, months: string[]): Promise<Buffer> {
   const wb = new ExcelJS.Workbook();
-  const ms = wb.addWorksheet('Members', { views: [{ state: 'frozen', ySplit: 1, xSplit: 2 }] });
-  ms.columns = [
-    { header: 'Member Code\nসদস্য কোড', key: 'member_code', width: 16 }, { header: 'Name *\nনাম', key: 'name', width: 26 },
-    { header: 'Name (Bangla)\nবাংলায় নাম', key: 'name_bn', width: 24 }, { header: 'National ID (NID) *\nজাতীয় পরিচয়পত্র নম্বর', key: 'nid', width: 24 }, { header: 'Phone\nমোবাইল', key: 'phone', width: 16 },
-    { header: 'Email\nইমেইল', key: 'email', width: 26 }, { header: 'Designation\nপদবি', key: 'designation', width: 16 },
-    { header: 'Status\nঅবস্থা', key: 'status', width: 12 }, { header: 'Monthly Due\nমাসিক চাঁদা', key: 'monthly_due', width: 14 },
-    { header: 'Join Date *\nযোগদানের তারিখ', key: 'join_date', width: 16 }, { header: 'Opening Balance\nআগের মোট পরিশোধ', key: 'opening_balance', width: 18 },
-    { header: 'Notes\nমন্তব্য', key: 'notes', width: 30 },
-  ];
-  styleHeader(ms.getRow(1));
-  for (const m of members) {
-    const [y, mo, d] = String(m.join_date || '').split('-').map(Number);
-    const na = (x: any) => (x === null || x === undefined || String(x).trim() === '' ? 'N/A' : x);
-    ms.addRow({ ...m, name_bn: na(m.name_bn), nid: na(m.nid), phone: na(m.phone), email: na(m.email), designation: na(m.designation), notes: na(m.notes), join_date: y ? new Date(Date.UTC(y, mo - 1, d)) : null });
-  }
-  ms.getColumn('join_date').numFmt = 'dd/mm/yyyy';
-  const ps = wb.addWorksheet('Payment History', { views: [{ state: 'frozen', ySplit: 1, xSplit: 2 }] });
-  ps.columns = [{ header: 'Member Code\nসদস্য কোড', key: 'code', width: 16 }, { header: 'Name\nনাম', key: 'name', width: 26 }, ...months.map(m => ({ header: m, key: m, width: 11 }))];
-  styleHeader(ps.getRow(1));
+  wb.creator = 'Bondhu Fund';
+  wb.created = new Date();
+  const shown = months.length ? months : monthsEndingAt(isoOf(new Date()).slice(0, 7), 12);
+  buildMembersSheet(wb, members.map(m => ({ code: m.member_code, name: m.name, name_bn: m.name_bn || '', nid: m.nid || '', phone: m.phone || '', email: m.email || '',
+    designation: m.designation || '', status: m.status || 'Active', monthly_due: m.monthly_due, join_date: m.join_date, opening_balance: m.opening_balance, notes: m.notes || '' })),
+    { example: false, defaultDue: 0 });
   const byMember = new Map<string, Record<string, number>>();
   for (const p of payments) {
     if (!byMember.has(p.member_code)) byMember.set(p.member_code, {});
     byMember.get(p.member_code)![p.payment_month] = p.contribution_amount;
   }
-  for (const m of members) ps.addRow({ code: m.member_code, name: m.name, ...(byMember.get(m.member_code) || {}) });
+  buildHistorySheet(wb, shown, members.map(m => ({ name: m.name, code: m.member_code, nid: m.nid || '', paid: byMember.get(m.member_code) || {} })), { example: false, staticIds: true });
+  wb.views = [{ x: 0, y: 0, width: 24000, height: 14000, firstSheet: 0, activeTab: 0, visibility: 'visible' }];
   return Buffer.from((await wb.xlsx.writeBuffer()) as ArrayBuffer);
 }

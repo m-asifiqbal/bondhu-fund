@@ -1034,8 +1034,14 @@ function planImport(p: ParsedWorkbook, opts: ImportOptions = {}) {
       else seenCodes.set(key, m.row);
     }
     let existing = code ? dbByCode.get(key) : undefined;
+    const nidCheck = checkNid(m.nid);
+    if (!existing && !code && nidCheck.ok && dbByNid.has(nidCheck.value)) {
+      existing = dbByNid.get(nidCheck.value);
+      code = String(existing.member_code);
+      msgs.push({ level: 'warning', text: `No member code — matched existing member ${code} ${existing.name} by NID${String(existing.name).trim().toLowerCase() === name.toLowerCase() ? '' : ' (the name in the sheet is different)'}` });
+    }
     // No code: re-importing the same sheet must not duplicate people → match a unique exact name already in the app
-    if (!code && name) {
+    if (!existing && !code && name) {
       const same = dbByName.get(name.toLowerCase()) || [];
       if (same.length === 1) {
         existing = same[0];
@@ -1051,7 +1057,7 @@ function planImport(p: ParsedWorkbook, opts: ImportOptions = {}) {
     // National ID: required for every new member; checked for format and for duplicates (in the app and in the file)
     let nid = '';
     {
-      const c = checkNid(m.nid);
+      const c = nidCheck;
       if (c.ok) {
         nid = c.value;
         const other = dbByNid.get(nid);
@@ -1083,6 +1089,8 @@ function planImport(p: ParsedWorkbook, opts: ImportOptions = {}) {
   // First occurrence wins: a later duplicate-code row (an error) must not capture the valid member's payments.
   const fileByCode = new Map<string, (typeof members)[number]>();
   for (const m of members) if (m.code && !fileByCode.has(m.code.toLowerCase())) fileByCode.set(m.code.toLowerCase(), m);
+  const fileByNid = new Map<string, (typeof members)[number]>();
+  for (const m of members) if (m.nid && !fileByNid.has(m.nid)) fileByNid.set(m.nid, m);
   const fileByName = new Map<string, typeof members>();
   for (const m of members) { const k = m.name.toLowerCase(); fileByName.set(k, [...(fileByName.get(k) || []), m]); }
 
@@ -1094,6 +1102,11 @@ function planImport(p: ParsedWorkbook, opts: ImportOptions = {}) {
     // resolve member: code first (file, then DB), then unique exact name
     let fileM = x.code ? fileByCode.get(x.code.toLowerCase()) : undefined;
     let dbM = !fileM && x.code ? dbByCode.get(x.code.toLowerCase()) : undefined;
+    const xnid = checkNid(x.nid);
+    if (!fileM && !dbM && !x.code && xnid.ok) {
+      fileM = fileByNid.get(xnid.value);
+      if (!fileM) dbM = dbByNid.get(xnid.value);
+    }
     if (!fileM && !dbM && !x.code && x.name) {
       const k = x.name.trim().toLowerCase();
       const fm = fileByName.get(k) || [];
@@ -1102,7 +1115,7 @@ function planImport(p: ParsedWorkbook, opts: ImportOptions = {}) {
       if (fm.length + dm.length > 1) msgs.push({ level: 'error', text: `More than one member is named "${x.name}" — add the Member Code` });
       else { fileM = fm[0]; dbM = dm[0]; }
     }
-    if (!fileM && !dbM) msgs.push({ level: 'error', text: `Member ${x.code || x.name} not found in the Members sheet or the app` });
+    if (!fileM && !dbM) msgs.push({ level: 'error', text: `Member ${x.code || x.name || x.nid} not found in the Members sheet or the app` });
     if (fileM && fileM.action === 'error') msgs.push({ level: 'error', text: `Member row ${fileM.row} has errors` });
     if (x.month > curM) msgs.push({ level: 'error', text: `${x.month} is in the future` });
 

@@ -272,7 +272,7 @@ export const ReportsView: React.FC = () => {
 
   // ---- Filter controls --------------------------------------------------------
   const sel = (key: string, options: SelectOption[], allLabel: string) => (
-    <SearchableSelect key={key} size="sm" clearable className="min-w-[180px]" options={options}
+    <SearchableSelect key={key} size="sm" clearable className="filter-select" options={options}
       value={filters[key] || ''} onChange={v => setFilter(key, v ? String(v) : '')}
       placeholder={allLabel} searchPlaceholder={t('common.search_options', 'Search…')} />
   );
@@ -291,7 +291,7 @@ export const ReportsView: React.FC = () => {
       case 'investments': return sel('status', statusOptions.investments, allStatus);
       case 'audit':
         return (
-          <div className="relative min-w-[220px]">
+          <div className="relative filter-search">
             <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
             <input className="form-input !py-2 !pl-8 w-full" placeholder={t('reports.search_audit', 'Search user, action, details…')}
               aria-label={t('reports.search_audit', 'Search user, action, details…')}
@@ -373,7 +373,7 @@ export const ReportsView: React.FC = () => {
       </div>
 
       {/* Filter bar */}
-      <div className="no-print card-base p-4 flex flex-wrap items-end gap-3">
+      <div className="no-print tbl-filter card-base p-4 flex flex-wrap items-end gap-3">
         {def.scope === 'range' && (
           <>
             <div className="min-w-0">

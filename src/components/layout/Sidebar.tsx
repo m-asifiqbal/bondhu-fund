@@ -231,6 +231,7 @@ export const Sidebar: React.FC = () => {
   const itemRefs = useRef<Record<string, HTMLButtonElement | null>>({});
   const [ind, setInd] = useState<{ y: number; h: number } | null>(null);
   const [indReady, setIndReady] = useState(false);
+  const [syncing, setSyncing] = useState(true);
   const activeRef = useRef(activeTab);
   activeRef.current = activeTab;
   const measureInd = () => {
@@ -245,6 +246,19 @@ export const Sidebar: React.FC = () => {
     const id = requestAnimationFrame(() => setIndReady(true));
     return () => cancelAnimationFrame(id);
   }, [activeTab, isCollapsed, navSections]); // eslint-disable-line react-hooks/exhaustive-deps
+  // While the sidebar opens or closes the items move (section titles grow/shrink), so the selection pill is
+  // re-measured every frame with its own glide switched off — it then stays glued to the active item.
+  useLayoutEffect(() => {
+    setSyncing(true);
+    const start = performance.now();
+    let id = 0;
+    const loop = () => {
+      measureIndRef.current();
+      if (performance.now() - start < 420) id = requestAnimationFrame(loop); else { measureIndRef.current(); setSyncing(false); }
+    };
+    id = requestAnimationFrame(loop);
+    return () => cancelAnimationFrame(id);
+  }, [isCollapsed]);
   useLayoutEffect(() => {
     const run = () => measureIndRef.current();
     const ro = new ResizeObserver(run);
@@ -255,69 +269,69 @@ export const Sidebar: React.FC = () => {
 
   return (
     <aside
-      className={`${isCollapsed ? 'w-20' : 'w-64'
-        } no-print relative z-50 bg-white dark:bg-[#101b21] text-slate-700 dark:text-slate-300 flex flex-col justify-between shrink-0 h-screen select-none border-r border-slate-200/90 dark:border-[#22353f] transition-all duration-200`}
+      onTransitionEnd={e => { if (e.target === e.currentTarget) measureIndRef.current(); }}
+      className={`sb ${isCollapsed ? 'sb-collapsed' : ''} no-print relative z-50 bg-white dark:bg-[#101b21] text-slate-700 dark:text-slate-300 flex flex-col justify-between shrink-0 h-screen select-none border-r border-slate-200/90 dark:border-[#22353f]`}
     >
       {/* Top Branding & Collapse */}
       <div className="min-h-0 flex flex-col">
-        <div className={`p-4 flex items-center ${isCollapsed ? 'justify-center' : 'justify-between gap-2'} border-b border-slate-100 dark:border-slate-800/80`}>
+        <div className="py-4 pl-5 pr-4 flex items-center overflow-hidden border-b border-slate-100 dark:border-slate-800/80">
           <button
             type="button"
             onClick={() => setActiveTab('overview')}
             title={orgName}
-            className="flex items-center gap-3 min-w-0 text-left"
+            className="flex items-center gap-3 text-left"
           >
             {logo ? (
               <LogoMark src={logo} alt={orgName} className="w-10 h-10" />
             ) : (
-              <div className="w-9 h-9 rounded-xl bg-slate-900 dark:bg-emerald-600 text-white flex items-center justify-center font-black text-xs tracking-wide shadow-sm shrink-0">
+              <div className="w-10 h-10 rounded-xl bg-slate-900 dark:bg-emerald-600 text-white flex items-center justify-center font-black text-xs tracking-wide shadow-sm shrink-0">
                 {orgInitials(settings?.organization_name)}
               </div>
             )}
-            {!isCollapsed && (
-              <div className="flex flex-col min-w-0">
-                <span className="text-[15.1px] font-black text-slate-900 dark:text-white tracking-tight leading-tight line-clamp-2 break-words">
-                  {orgName}
-                </span>
-                <span className="text-[10px] font-semibold text-slate-400 dark:text-slate-500 uppercase tracking-wider truncate">
-                  {t('shell.tagline', 'Savings fund manager')}
-                </span>
-              </div>
-            )}
+            <div className="sb-label flex flex-col w-[10.5rem] shrink-0">
+              <span className="text-[15.1px] font-black text-slate-900 dark:text-white tracking-tight leading-tight line-clamp-2 break-words whitespace-normal">
+                {orgName}
+              </span>
+              <span className="text-[10px] font-semibold text-slate-400 dark:text-slate-500 uppercase tracking-wider truncate">
+                {t('shell.tagline', 'Savings fund manager')}
+              </span>
+            </div>
           </button>
         </div>
 
         {/* Categorized Nav Sections */}
-        <nav ref={navRef} onMouseLeave={hideTip} className={`relative p-3 overflow-y-auto max-h-[calc(100vh-150px)] nav-scroll ${isCollapsed ? 'space-y-5' : 'space-y-7'}`}>
-          <span aria-hidden className={`nav-ind ${isCollapsed ? 'nav-ind-collapsed' : ''} ${indReady ? 'nav-ind-anim' : ''}`}
+        <nav ref={navRef} onMouseLeave={hideTip} className="relative p-3 overflow-y-auto overflow-x-hidden max-h-[calc(100vh-150px)] nav-scroll space-y-6">
+          <span aria-hidden className={`nav-ind ${indReady && !syncing ? 'nav-ind-anim' : ''}`}
             style={{ transform: `translateY(${ind?.y ?? 0}px)`, height: ind?.h ?? 0, opacity: ind ? 1 : 0 }} />
           {navSections.map((section, si) => (
-            <div key={section.key} className={`space-y-1.5 ${si > 0 ? 'nav-section-sep pt-6' : ''}`}>
-              {!isCollapsed && (
-                <div className="px-3 pb-1 text-[10.8px] font-bold text-slate-400 dark:text-slate-500 tracking-wider uppercase">
+            <div key={section.key} className={si > 0 ? 'nav-section-sep pt-6' : ''}>
+              <div className="sb-sec" aria-hidden={isCollapsed}>
+                <div className="px-3 pb-1.5 text-[10.8px] font-bold text-slate-400 dark:text-slate-500 tracking-wider uppercase whitespace-nowrap">
                   {section.title}
                 </div>
-              )}
-              {section.items.map(item => {
-                const Icon = item.icon;
-                const isActive = activeTab === item.id;
-                return (
-                  <button
-                    key={item.id}
-                    ref={el => { itemRefs.current[item.id] = el; }}
-                    onClick={() => setActiveTab(item.id)}
-                    aria-label={isCollapsed ? item.label : undefined}
-                    onMouseEnter={showTip(item.label)}
-                    onFocus={showTip(item.label)}
-                    onBlur={hideTip}
-                    aria-current={isActive ? 'page' : undefined}
-                    className={`nav-item ${isCollapsed ? 'nav-item-collapsed' : ''} relative z-[1] flex items-center ${isCollapsed ? 'justify-center' : 'w-full gap-3 px-3'} py-2.5 rounded-xl text-[13px] font-semibold ${isActive ? 'nav-item-active font-bold' : 'text-slate-600 dark:text-slate-400'}`}
-                  >
-                    <Icon size={17} strokeWidth={isActive ? 2.4 : 1.9} className="nav-icon shrink-0" />
-                    {!isCollapsed && <span className="truncate">{item.label}</span>}
-                  </button>
-                );
-              })}
+              </div>
+              <div className="space-y-1.5">
+                {section.items.map(item => {
+                  const Icon = item.icon;
+                  const isActive = activeTab === item.id;
+                  return (
+                    <button
+                      key={item.id}
+                      ref={el => { itemRefs.current[item.id] = el; }}
+                      onClick={() => setActiveTab(item.id)}
+                      aria-label={isCollapsed ? item.label : undefined}
+                      onMouseEnter={showTip(item.label)}
+                      onFocus={showTip(item.label)}
+                      onBlur={hideTip}
+                      aria-current={isActive ? 'page' : undefined}
+                      className={`nav-item ${isCollapsed ? 'nav-item-collapsed' : ''} relative z-[1] flex items-center w-full gap-3 pl-[1.2rem] pr-3 py-2.5 rounded-xl text-[13px] font-semibold overflow-hidden ${isActive ? 'nav-item-active font-bold' : 'text-slate-600 dark:text-slate-400'}`}
+                    >
+                      <Icon size={17} strokeWidth={isActive ? 2.4 : 1.9} className="nav-icon shrink-0" />
+                      <span className="sb-label truncate">{item.label}</span>
+                    </button>
+                  );
+                })}
+              </div>
             </div>
           ))}
         </nav>
@@ -334,7 +348,7 @@ export const Sidebar: React.FC = () => {
           onMouseLeave={hideTip}
           aria-haspopup="menu"
           aria-expanded={showUserMenu}
-          className={`w-full flex items-center ${isCollapsed ? 'justify-center' : 'justify-between'} p-2 rounded-xl cursor-pointer transition-colors border ${
+          className={`w-full flex items-center justify-between overflow-hidden py-2 pl-3 pr-2 rounded-xl cursor-pointer transition-colors border ${
             showUserMenu || activeTab === 'profile'
               ? 'bg-slate-100 dark:bg-slate-800/80 border-slate-200 dark:border-slate-700'
               : 'border-transparent hover:bg-slate-100 dark:hover:bg-slate-800/80 hover:border-slate-200 dark:hover:border-slate-700'
@@ -342,14 +356,12 @@ export const Sidebar: React.FC = () => {
         >
           <span className="flex items-center gap-3 min-w-0">
             <UserAvatar user={currentUser} className="w-8 h-8 rounded-lg" />
-            {!isCollapsed && (
-              <span className="flex flex-col text-left min-w-0">
-                <span className="text-xs font-bold text-slate-900 dark:text-white truncate">{bnName(currentUser?.full_name, currentUser?.full_name_bn) || '—'}</span>
-                <span className="text-[10px] text-slate-400 dark:text-slate-500 truncate">{tv(currentUser?.role)}</span>
-              </span>
-            )}
+            <span className="sb-label flex flex-col text-left min-w-0">
+              <span className="text-xs font-bold text-slate-900 dark:text-white truncate">{bnName(currentUser?.full_name, currentUser?.full_name_bn) || '—'}</span>
+              <span className="text-[10px] text-slate-400 dark:text-slate-500 truncate">{tv(currentUser?.role)}</span>
+            </span>
           </span>
-          {!isCollapsed && <ChevronsUpDown size={15} className="text-slate-400 shrink-0" />}
+          <ChevronsUpDown size={15} className="sb-label text-slate-400 shrink-0" />
         </button>
 
         {showUserMenu && (

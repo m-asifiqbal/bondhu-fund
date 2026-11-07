@@ -108,9 +108,17 @@ export const EChart: React.FC<EChartProps> = ({ option, height = 260, onClick, c
   useEffect(() => {
     if (!ref.current) return;
     chart.current = echarts.init(ref.current, undefined, { renderer: 'svg' });
-    const ro = new ResizeObserver(() => chart.current?.resize());
+    // Resize at once the first time, then only when the size has settled — redrawing on every frame of an
+    // animated resize (e.g. the sidebar sliding) stalls the whole window.
+    let first = true;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const ro = new ResizeObserver(() => {
+      if (first) { first = false; chart.current?.resize(); return; }
+      if (timer) clearTimeout(timer);
+      timer = setTimeout(() => chart.current?.resize(), 90);
+    });
     ro.observe(ref.current);
-    return () => { ro.disconnect(); chart.current?.dispose(); chart.current = null; };
+    return () => { if (timer) clearTimeout(timer); ro.disconnect(); chart.current?.dispose(); chart.current = null; };
   }, []);
 
   useEffect(() => {

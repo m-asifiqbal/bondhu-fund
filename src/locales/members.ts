@@ -252,7 +252,7 @@ const dict: Record<string, { en: string; bn: string }> = {
   'members.imp_step2': { en: 'Review', bn: 'যাচাই' },
   'members.imp_step3': { en: 'Done', bn: 'সম্পন্ন' },
   'members.imp_get_template': { en: 'Download the template', bn: 'টেমপ্লেট ডাউনলোড করুন' },
-  'members.imp_template_desc': { en: 'An Excel file with three sheets: Instructions (English + বাংলা), Members, and Payment History. Example rows show exactly how to fill each column.', bn: 'তিনটি শিটসহ একটি Excel ফাইল: নির্দেশনা (বাংলা + ইংরেজি), Members ও Payment History। উদাহরণ সারিতে প্রতিটি কলাম কীভাবে পূরণ করবেন তা দেখানো আছে।' },
+  'members.imp_template_desc': { en: 'An Excel file with three sheets: Start Here (English + বাংলা guide), Members (with the National ID column and live checks) and Payment History. Each row shows a ✓ Ready or ⚠ Check flag, and the example rows show how to fill every column.', bn: 'তিনটি শিটসহ একটি Excel ফাইল: Start Here (বাংলা + ইংরেজি নির্দেশনা), Members (জাতীয় পরিচয়পত্র কলাম ও স্বয়ংক্রিয় যাচাইসহ) এবং Payment History। প্রতিটি সারিতে ✓ Ready বা ⚠ Check চিহ্ন দেখাবে, উদাহরণ সারিতে প্রতিটি কলাম কীভাবে পূরণ করবেন দেখানো আছে।' },
   'members.imp_download': { en: 'Download template (.xlsx)', bn: 'টেমপ্লেট ডাউনলোড (.xlsx)' },
   'members.imp_template_saved': { en: 'Template saved and opened in Excel', bn: 'টেমপ্লেট সংরক্ষিত হয়েছে ও Excel-এ খোলা হয়েছে' },
   'members.imp_fill': { en: 'Fill members and till-date collections', bn: 'সদস্য ও আজ পর্যন্ত আদায় পূরণ করুন' },

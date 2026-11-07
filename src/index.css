@@ -337,12 +337,10 @@ html[lang="bn"] body :where(p, span, label, td, th, li, button, h1, h2, h3, h4) 
 /* ---- Sidebar: section spacing, collapsed icon state, readable tooltip -------------- */
 .nav-section-sep { border-top: 1px solid #e6edf2; }
 .dark .nav-section-sep { border-top-color: #22353f; }
-.nav-item-collapsed { width: 2.9rem; height: 2.9rem; margin-left: auto; margin-right: auto; padding: 0 !important; border-radius: .59rem; }
 .nav-item-collapsed:not(.nav-item-active):hover { transform: scale(1.06); }
-.nav-ind-collapsed { left: 50%; right: auto; width: 2.9rem; margin-left: -1.45rem; border-radius: .59rem; }
 .nav-tip {
   position: fixed; z-index: 70; transform: translateY(-50%); pointer-events: none; white-space: nowrap;
-  padding: .55rem .95rem; border-radius: .4375rem; font-size: 1rem; font-weight: 700; letter-spacing: .01em;
+  padding: .55rem .95rem; border-radius: .4375rem; font-size: .96rem; font-weight: 700; letter-spacing: .01em;
   background: #0f1f27; color: #fff; box-shadow: 0 10px 26px -8px rgba(0, 0, 0, .5); animation: nav-tip-in .16s var(--bf-ease);
 }
 .nav-tip::before { content: ''; position: absolute; left: -5px; top: 50%; width: 10px; height: 10px; margin-top: -5px; background: inherit; transform: rotate(45deg); border-radius: 2px; }
@@ -445,3 +443,33 @@ html:not(.dark) main .tbl-filter { background-color: #ecf5f0; border-color: #bcd
   /* Bangla has no capitals: headers are set a step larger and bolder so they stay as clear as the English ones */
   html[lang="bn"] main table thead th { font-size: 12.5px; font-weight: 800; }
 }
+
+/* ---- Table rows: alternate shading, clear hover and a prominent selected row -------- */
+:root { --row-alt: #ebf4ef; --row-hover: #dcece3; --row-sel: #bfe3d0; --row-sel-bar: #0f4a3c; }
+.dark { --row-alt: #1b2c35; --row-hover: #243d48; --row-sel: #1f5a47; --row-sel-bar: #34d399; }
+@media screen {
+  main table tbody tr:nth-child(even):not(:has(> td[colspan])) > td { background-color: var(--row-alt); }
+  main table tbody tr:not(:has(> td[colspan])):hover > td { background-color: var(--row-hover) !important; }
+  main table tbody tr[data-selected] > td { background-color: var(--row-sel) !important; }
+  main table tbody tr[data-selected] > td:first-child { box-shadow: inset 5px 0 0 var(--row-sel-bar); }
+  main table tbody tr[data-selected] > td { font-weight: 600; }
+}
+
+/* ---- Filter bars: search box, drop-downs, date pickers and buttons share one height ---- */
+.tbl-filter .form-input, .tbl-filter .form-select, .tbl-filter .btn { height: 38px; min-height: 38px; font-size: .75rem; }
+.tbl-filter .form-input { padding-top: 0; padding-bottom: 0; }
+
+/* ---- Sidebar open / collapse: one smooth motion --------------------------------------
+   The same elements exist in both states. Only the width glides; labels and section titles fade and
+   fold away inside it (never re-wrap or pop), so nothing jumps while it moves. */
+.sb { width: 16rem; transition: width .34s var(--bf-ease); }
+.sb.sb-collapsed { width: 5rem; }
+.sb-label { white-space: nowrap; opacity: 1; transition: opacity .2s ease .14s; }
+.sb-collapsed .sb-label { opacity: 0; transition: opacity .1s ease; }
+.sb-sec { height: 1.5rem; overflow: hidden; opacity: 1; transition: height .34s var(--bf-ease), opacity .2s ease .14s; }
+.sb-collapsed .sb-sec { height: 0; opacity: 0; transition: height .34s var(--bf-ease), opacity .1s ease; }
+@media (prefers-reduced-motion: reduce) { .sb, .sb-label, .sb-sec { transition: none !important; } }
+
+/* ---- Filter bars: every search box and every drop-down has the same width on every screen ---- */
+.filter-search { flex: 0 1 26rem; width: 26rem; min-width: 14rem; max-width: 100%; }
+.filter-select { flex: 0 0 13rem; width: 13rem; min-width: 0; max-width: 100%; }

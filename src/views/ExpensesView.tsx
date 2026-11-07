@@ -493,7 +493,7 @@ export const ExpensesView: React.FC = () => {
         </div>
 
         <div className="tbl-filter p-4 bg-slate-50 dark:bg-[#121f26] border-b border-slate-200 dark:border-slate-800 flex flex-wrap items-center gap-3 text-xs">
-          <div className="relative flex-1 min-w-[220px]">
+          <div className="relative filter-search">
             <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
             <input
               type="text"
@@ -504,7 +504,7 @@ export const ExpensesView: React.FC = () => {
               className="form-input pl-8 py-1.5 text-xs"
             />
           </div>
-          <div className="min-w-[180px] flex-1 sm:flex-none sm:w-48">
+          <div className="filter-select">
             <SearchableSelect
               size="sm"
               options={filterCategoryOptions}
@@ -514,7 +514,7 @@ export const ExpensesView: React.FC = () => {
               placeholder={t('finance.exp_category', 'Category')}
             />
           </div>
-          <div className="min-w-[160px] flex-1 sm:flex-none sm:w-44">
+          <div className="filter-select">
             <SearchableSelect
               size="sm"
               options={statusOptions}
@@ -524,7 +524,7 @@ export const ExpensesView: React.FC = () => {
               placeholder={t('common.status', 'Status')}
             />
           </div>
-          <div className="min-w-[180px] flex-1 sm:flex-none sm:w-52">
+          <div className="filter-select">
             <SearchableSelect
               size="sm"
               options={sortOptions}

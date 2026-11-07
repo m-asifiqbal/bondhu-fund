@@ -204,7 +204,7 @@ export const UserManagementView: React.FC = () => {
               <p className="text-xs text-slate-500 dark:text-slate-400">{num(users.length)} {t('admin.profiles_count', 'profiles')} · {t('admin.click_to_open', 'Click a user to open their profile')}</p>
             </div>
           </div>
-          <div className="relative min-w-[220px]">
+          <div className="relative filter-search">
             <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
             <input
               value={query}

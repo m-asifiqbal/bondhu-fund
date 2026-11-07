@@ -424,7 +424,7 @@ export const MembersView: React.FC = () => {
       {/* Filters */}
       <div className="card-base tbl-filter p-4">
         <div className="flex flex-wrap items-center gap-3">
-          <div className="relative flex-1 min-w-[240px]">
+          <div className="relative filter-search">
             <Search size={15} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400 dark:text-slate-500" />
             <input
               type="text"
@@ -438,7 +438,7 @@ export const MembersView: React.FC = () => {
           <SearchableSelect
             size="sm"
             clearable
-            className="min-w-[180px]"
+            className="filter-select"
             options={statusOptions}
             value={memberFilterStatus === 'All' ? '' : memberFilterStatus}
             onChange={v => setMemberFilterStatus(v ? String(v) : 'All')}
@@ -446,7 +446,7 @@ export const MembersView: React.FC = () => {
           />
           <SearchableSelect
             size="sm"
-            className="min-w-[200px]"
+            className="filter-select"
             options={sortOptions}
             value={sortBy}
             onChange={v => { setSortBy(String(v || 'newest')); setPage(1); }}
@@ -506,6 +506,8 @@ export const MembersView: React.FC = () => {
                       <tr
                         key={m.id}
                         onClick={() => setStatementId(m.id)}
+                        data-selected={statementId === m.id ? 'true' : undefined}
+                        aria-selected={statementId === m.id}
                         className={`group cursor-pointer transition-colors ${statementId === m.id ? 'bg-emerald-50 dark:bg-[#12302a]' : 'hover:bg-[#f0f7f3] dark:hover:bg-[#1a2b34]'}`}
                       >
                         <td className={`py-3 px-4 text-center text-slate-400 dark:text-slate-500 font-semibold tabular-nums sticky left-0 z-10 ${statementId === m.id ? 'bg-emerald-50 dark:bg-[#12302a]' : 'bg-white dark:bg-[#142026] group-hover:bg-[#f0f7f3] dark:group-hover:bg-[#1a2b34]'}`} style={{ width: '3.25rem', minWidth: '3.25rem', maxWidth: '3.25rem' }}>{serial((page - 1) * PAGE_SIZE + __i + 1)}</td>
