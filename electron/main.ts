@@ -17,15 +17,40 @@ let backupsDir = '';
 
 const isDev = !app.isPackaged && process.env.NODE_ENV === 'development';
 
+// Software rendering: this is a forms-and-tables app, and a faulty graphics driver must never leave it without a window.
+app.disableHardwareAcceleration();
+
+/** Tiny startup log (%APPDATA%/Bondhu Fund/startup.log) so a PC that cannot open the app can be diagnosed. */
+function startupLog(msg: string) {
+  try {
+    const f = path.join(app.getPath('userData'), 'startup.log');
+    fs.mkdirSync(path.dirname(f), { recursive: true });
+    try { if (fs.statSync(f).size > 200_000) fs.writeFileSync(f, ''); } catch { /* new file */ }
+    fs.appendFileSync(f, `${new Date().toISOString()}  ${msg}
+`);
+  } catch { /* logging must never break startup */ }
+}
+process.on('uncaughtException', err => {
+  startupLog('uncaughtException: ' + (err?.stack || err));
+  try { dialog.showErrorBox('Bondhu Fund', String(err?.stack || err)); } catch { /* ignore */ }
+});
+
 // ---------------------------------------------------------------------------
 // Single instance: two windows writing the same database would corrupt it.
 // ---------------------------------------------------------------------------
 if (!app.requestSingleInstanceLock()) {
-  app.quit();
+  // Do not quit silently: an earlier copy that is still running (even with no visible window) holds the lock.
+  app.whenReady().then(() => {
+    dialog.showErrorBox('Bondhu Fund is already running',
+      'Another copy of Bondhu Fund is already open (it may have no visible window).\n\n' +
+      'Open Task Manager, end every "Bondhu Fund" process, then start the app again.');
+    app.quit();
+  });
 } else {
   app.on('second-instance', () => {
     if (mainWindow) {
       if (mainWindow.isMinimized()) mainWindow.restore();
+      if (!mainWindow.isVisible()) mainWindow.show();
       mainWindow.focus();
     }
   });
@@ -113,6 +138,7 @@ function snapshot(prefix: string) {
 
 async function start() {
   initPaths();
+  startupLog(`start v${app.getVersion()} electron ${process.versions.electron} ${process.platform} ${process.arch} ${require('os').release()}`);
   const fallbacks = listBackups().map(b => b.filePath); // newest first, used only if main DB is unreadable
   // Start loading the database and the window at the same time (they used to run one after the other).
   dbReady = store.openDatabase(dbFile, readWasm(), fallbacks);
@@ -155,7 +181,30 @@ function createWindow() {
   const applyScale = () => mainWindow?.webContents.setZoomFactor(UI_SCALE);
   mainWindow.webContents.on('dom-ready', applyScale);
   mainWindow.webContents.on('did-finish-load', applyScale);
-  mainWindow.once('ready-to-show', () => { mainWindow?.maximize(); mainWindow?.show(); });
+  let shown = false;
+  const showNow = (why: string) => {
+    if (shown || !mainWindow) return;
+    shown = true;
+    startupLog('window shown (' + why + ')');
+    mainWindow.maximize(); mainWindow.show();
+  };
+  mainWindow.once('ready-to-show', () => showNow('ready-to-show'));
+  // Safety net: never stay invisible. If the page has not reported ready after 5 s, show the window anyway.
+  setTimeout(() => showNow('timeout'), 5000);
+  mainWindow.webContents.on('did-fail-load', (_e, code, desc, url, isMain) => {
+    startupLog(`did-fail-load ${code} ${desc} ${url}`);
+    if (!isMain || code === -3) return;
+    showNow('load-failed');
+    dialog.showErrorBox('Bondhu Fund', `The application screen could not be loaded.
+
+${desc} (${code})
+${url}`);
+  });
+  mainWindow.webContents.on('render-process-gone', (_e, d) => {
+    startupLog('render-process-gone ' + d.reason);
+    dialog.showErrorBox('Bondhu Fund', `The application screen stopped working (${d.reason}). The app will restart.`);
+    app.relaunch(); app.exit(0);
+  });
 
   if (isDev) mainWindow.loadURL('http://localhost:5173');
   else mainWindow.loadFile(path.join(__dirname, '../dist/index.html'));
