@@ -1,7 +1,11 @@
 import React, { useMemo } from 'react';
 import type { CellKind, ColumnDef } from './reportBuilders';
 
-const STATUS_EN: Record<string, string> = { collection: 'Collection', expense: 'Expense', investment: 'Investment', sale: 'Sale' };
+const STATUS_EN: Record<string, string> = {
+  collection: 'Collection', expense: 'Expense', investment: 'Investment', sale: 'Sale',
+  return: 'Investment return', settlement: 'Member settlement', loan: 'Loan given', loan_repayment: 'Loan repayment',
+  Running: 'Running', Closed: 'Repaid', 'Written off': 'Written off',
+};
 
 const STATUS_TONE: Record<string, string> = {
   Paid: 'bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-950/50 dark:text-emerald-300 dark:border-emerald-800',
@@ -16,6 +20,9 @@ const STATUS_TONE: Record<string, string> = {
   investment: 'bg-sky-50 text-sky-700 border-sky-200 dark:bg-sky-950/50 dark:text-sky-300 dark:border-sky-800',
   Overdue: 'bg-rose-50 text-rose-700 border-rose-200 dark:bg-rose-950/50 dark:text-rose-300 dark:border-rose-800',
   expense: 'bg-rose-50 text-rose-700 border-rose-200 dark:bg-rose-950/50 dark:text-rose-300 dark:border-rose-800',
+  loan: 'bg-amber-50 text-amber-700 border-amber-200 dark:bg-amber-950/50 dark:text-amber-300 dark:border-amber-800',
+  loan_repayment: 'bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-950/50 dark:text-emerald-300 dark:border-emerald-800',
+  Running: 'bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-950/50 dark:text-emerald-300 dark:border-emerald-800',
 };
 
 export interface Formatters {

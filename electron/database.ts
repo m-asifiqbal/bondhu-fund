@@ -16,8 +16,9 @@ import * as crypto from 'crypto';
 import initSqlJs from 'sql.js';
 import type { Database, SqlJsStatic } from 'sql.js';
 import type { ParsedWorkbook } from './excel';
+import { buildPlan, validateTerms, compareTerms, COMMON_TERMS, allocatePayment, scheduleState, addMonthsKeepDay, daysBetween, LOAN_METHODS, type LoanTerms, type LoanMethod } from './loans';
 
-export const SCHEMA_VERSION = 4;
+export const SCHEMA_VERSION = 5;
 
 let SQL: SqlJsStatic;
 let db: Database;
@@ -226,6 +227,39 @@ CREATE TABLE IF NOT EXISTS member_settlements (
   total_paid REAL NOT NULL CHECK (total_paid >= 0),
   payment_method TEXT NOT NULL, trx_id TEXT, note TEXT, created_by TEXT,
   created_at TEXT DEFAULT (datetime('now','localtime')));
+CREATE TABLE IF NOT EXISTS personal_loans (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  loan_no TEXT NOT NULL UNIQUE,
+  member_id INTEGER NOT NULL REFERENCES members(id),
+  principal REAL NOT NULL CHECK (principal > 0),
+  method TEXT NOT NULL CHECK (method IN ('reducing','flat','free')),
+  annual_rate REAL NOT NULL DEFAULT 0,
+  term_months INTEGER NOT NULL CHECK (term_months >= 1),
+  disbursed_date TEXT NOT NULL, first_due_date TEXT NOT NULL,
+  installment REAL NOT NULL, total_interest REAL NOT NULL, total_payable REAL NOT NULL,   -- fixed when the loan is made
+  payment_method TEXT, reference TEXT, purpose TEXT, guarantor TEXT, notes TEXT,
+  status TEXT NOT NULL DEFAULT 'Active' CHECK (status IN ('Active','Closed','Written off')),
+  closed_date TEXT,
+  written_off_amount REAL NOT NULL DEFAULT 0, written_off_date TEXT, written_off_reason TEXT,
+  created_by TEXT, created_at TEXT DEFAULT (datetime('now','localtime')), updated_at TEXT);
+CREATE TABLE IF NOT EXISTS loan_schedule (
+  loan_id INTEGER NOT NULL REFERENCES personal_loans(id) ON DELETE CASCADE,
+  no INTEGER NOT NULL, due_date TEXT NOT NULL,
+  principal REAL NOT NULL, interest REAL NOT NULL, total REAL NOT NULL,
+  PRIMARY KEY (loan_id, no));
+CREATE TABLE IF NOT EXISTS loan_repayments (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  loan_id INTEGER NOT NULL REFERENCES personal_loans(id) ON DELETE CASCADE,
+  paid_date TEXT NOT NULL,
+  kind TEXT NOT NULL DEFAULT 'Installment' CHECK (kind IN ('Installment','Closure')),
+  principal_paid REAL NOT NULL DEFAULT 0, interest_paid REAL NOT NULL DEFAULT 0, penalty_paid REAL NOT NULL DEFAULT 0,
+  total_paid REAL NOT NULL CHECK (total_paid > 0),   -- = principal + interest + penalty
+  payment_method TEXT, trx_id TEXT, note TEXT, created_by TEXT,
+  created_at TEXT DEFAULT (datetime('now','localtime')));
+CREATE INDEX IF NOT EXISTS idx_loans_member ON personal_loans(member_id);
+CREATE INDEX IF NOT EXISTS idx_loans_status ON personal_loans(status);
+CREATE INDEX IF NOT EXISTS idx_loanrep_loan ON loan_repayments(loan_id, id);
+CREATE INDEX IF NOT EXISTS idx_loanrep_date ON loan_repayments(paid_date);
 CREATE INDEX IF NOT EXISTS idx_ret_inv ON investment_returns(investment_id);
 CREATE INDEX IF NOT EXISTS idx_ret_date ON investment_returns(entry_date);
 CREATE TABLE IF NOT EXISTS backup_logs (
@@ -260,6 +294,11 @@ const DEFAULT_SETTINGS: Record<string, string> = {
   auto_backup_keep: '14',
   organization_name_bn: '',
   org_logo: '',
+  // personal-loan policy (suggestions on the loan form; Admin can change them)
+  loan_default_rate: '12',
+  loan_default_method: 'reducing',
+  loan_max_multiple: '0',     // 0 = no limit; otherwise a member's loans may not exceed this × their savings without a written reason
+  loan_late_fee: '0',         // suggested penalty per installment paid late (0 = none)
 };
 
 const DEFAULT_MASTER: Array<[string, string, string, string]> = [
@@ -484,6 +523,10 @@ function getAppSettings() {
     auto_backup_keep: Number(s.auto_backup_keep) || 14,
     organization_name_bn: s.organization_name_bn || '',
     org_logo: s.org_logo || '',
+    loan_default_rate: Number(s.loan_default_rate) || 0,
+    loan_default_method: (LOAN_METHODS as string[]).includes(s.loan_default_method) ? s.loan_default_method : 'reducing',
+    loan_max_multiple: Number(s.loan_max_multiple) || 0,
+    loan_late_fee: Number(s.loan_late_fee) || 0,
   };
 }
 
@@ -496,6 +539,10 @@ function saveAppSettings(patch: Record<string, any>) {
       if (k === 'hijri_adjust_days' && !(Number.isInteger(+val) && +val >= -3 && +val <= 3)) fail('Hijri adjustment must be a whole number from -3 to 3');
       if (k === 'monthly_due_day' && (!(+val >= 1 && +val <= 28))) fail('Due day must be between 1 and 28');
       if (k === 'org_logo') checkImage(val, 'Logo');
+      if (k === 'loan_default_rate' && !(Number.isFinite(+val) && +val >= 0 && +val <= 100)) fail('Default loan interest rate must be between 0 and 100 percent a year.');
+      if (k === 'loan_default_method' && !(LOAN_METHODS as string[]).includes(val)) fail('Choose a valid default interest method.');
+      if (k === 'loan_max_multiple' && !(Number.isFinite(+val) && +val >= 0 && +val <= 100)) fail('Loan limit must be 0 (no limit) or a positive multiple.');
+      if (k === 'loan_late_fee' && !(Number.isFinite(+val) && +val >= 0)) fail('Loan late fee cannot be negative.');
       run('INSERT OR REPLACE INTO app_settings (key, value) VALUES (?,?)', [k, val]);
     }
     audit('update', 'settings', null, Object.keys(patch || {}).join(', '));
@@ -553,8 +600,15 @@ function fundPosition(asOf = todayISO()) {
   // investment benefits received (+) and losses booked (-), and money paid out to settled members
   const returnsNet = num(`SELECT SUM(CASE entry_type WHEN 'Profit' THEN amount ELSE -amount END) FROM investment_returns WHERE entry_date <= ?`, [asOf]);
   const settlements = num('SELECT SUM(total_paid) FROM member_settlements WHERE settlement_date <= ?', [asOf]);
-  const fundBalance = opening + collected - expenses + realized + returnsNet - settlements;
-  return { opening, collected, expenses, realized, returnsNet, settlements, investedAtCost, fundBalance, cashInHand: fundBalance - investedAtCost };
+  // personal loans: lending is a cash → receivable transfer (net worth unchanged); interest and penalties are income;
+  // a write-off is a loss. The unpaid principal is an asset held at cost, exactly like an investment.
+  const loansLent = num('SELECT SUM(principal) FROM personal_loans WHERE disbursed_date <= ?', [asOf]);
+  const loanPrincipalBack = num('SELECT SUM(principal_paid) FROM loan_repayments WHERE paid_date <= ?', [asOf]);
+  const loanIncome = num('SELECT SUM(interest_paid + penalty_paid) FROM loan_repayments WHERE paid_date <= ?', [asOf]);
+  const loanWrittenOff = num(`SELECT SUM(written_off_amount) FROM personal_loans WHERE status = 'Written off' AND written_off_date <= ?`, [asOf]);
+  const loansOutstanding = r2(loansLent - loanPrincipalBack - loanWrittenOff);
+  const fundBalance = opening + collected - expenses + realized + returnsNet - settlements + loanIncome - loanWrittenOff;
+  return { opening, collected, expenses, realized, returnsNet, settlements, investedAtCost, loansOutstanding, loanIncome, loanWrittenOff, fundBalance, cashInHand: fundBalance - investedAtCost - loansOutstanding };
 }
 
 // ---------------------------------------------------------------------------
@@ -575,6 +629,11 @@ function memberBenefitShare(memberId: number, settleDate: string) {
             FROM investment_returns r JOIN investments i ON i.id = r.investment_id WHERE r.entry_date <= ?`, [settleDate]),
     ...all(`SELECT sold_date AS date, sold_amount - invested_amount AS amount, name AS label FROM investments
             WHERE status = 'Sold' AND sold_date IS NOT NULL AND sold_date <= ?`, [settleDate]),
+    // loan interest earned by the fund is shared with members like any other benefit; a written-off loan is a shared loss
+    ...all(`SELECT r.paid_date AS date, r.interest_paid AS amount, l.loan_no AS label FROM loan_repayments r JOIN personal_loans l ON l.id = r.loan_id
+            WHERE r.interest_paid > 0 AND r.paid_date <= ?`, [settleDate]),
+    ...all(`SELECT written_off_date AS date, -written_off_amount AS amount, loan_no AS label FROM personal_loans
+            WHERE status = 'Written off' AND written_off_date IS NOT NULL AND written_off_date <= ?`, [settleDate]),
   ].map(e => ({ date: String(e.date), amount: Number(e.amount) || 0, label: String(e.label) }));
   events.sort((a, b) => a.date.localeCompare(b.date));
 
@@ -637,6 +696,9 @@ function settleMember(d: any) {
   if (!m) fail('Member not found.');
   if (get('SELECT 1 FROM member_settlements WHERE member_id = ?', [memberId])) fail('This member already has a settlement. Cancel it first (Admin) to redo it.');
   if (m.status !== 'Active') fail('Only an active member can be settled.');
+  const openLoan = get(`SELECT l.loan_no, l.principal - COALESCE((SELECT SUM(principal_paid) FROM loan_repayments r WHERE r.loan_id = l.id),0) AS owed
+                        FROM personal_loans l WHERE l.member_id = ? AND l.status = 'Active' LIMIT 1`, [memberId]);
+  if (openLoan) fail(`This member still owes personal loan ${openLoan.loan_no} (TK ${r2(Number(openLoan.owed))} unpaid). Collect or write off the loan first, then settle.`);
   const date = toISODate(d.settlement_date) || todayISO();
   if (date > todayISO()) fail('Settlement date cannot be in the future.');
   const prev = previewMemberSettlement(memberId, date);
@@ -740,6 +802,420 @@ function deleteInvestmentReturn(id: number) {
   const settledAfter = get('SELECT 1 FROM member_settlements WHERE settlement_date >= ?', [r.entry_date]);
   if (settledAfter) fail('A member has already been settled on or after this entry\'s date, so it cannot be removed. Cancel that settlement first (Admin).');
   tx(() => { run('DELETE FROM investment_returns WHERE id = ?', [Number(id)]); audit('void', 'investment_return', Number(id), `${r.entry_type} ${r.amount}`); });
+  mutated();
+}
+
+// ---------------------------------------------------------------------------
+// Personal loans (fund → member). Schedule maths lives in loans.ts; this section stores, validates and books them.
+//
+// Books:   lending     cash −P, loans receivable +P            (net worth unchanged)
+//          repayment   cash +(p+i+f), receivable −p, income +(i+f)
+//          write-off   receivable −outstanding, loss −outstanding (cash unchanged)
+// ---------------------------------------------------------------------------
+const addDaysISO = (iso: string, n: number) => { const d = new Date(`${iso}T12:00:00`); d.setDate(d.getDate() + n); return todayISO(d); };
+
+/** Cash the fund can lend as of `date`: the lower of its cash on that date and its cash today, so a back-dated loan can never overdraw money spent since. */
+const lendableCash = (date: string) => r2(Math.min(fundPosition(date).cashInHand, fundPosition(todayISO()).cashInHand));
+
+const memberSavings = (memberId: number) =>
+  r2(num('SELECT opening_balance FROM members WHERE id = ?', [memberId]) + num('SELECT SUM(contribution_amount) FROM collections WHERE member_id = ?', [memberId]));
+
+const loansOwedBy = (memberId: number) =>
+  r2(num(`SELECT SUM(l.principal - COALESCE((SELECT SUM(principal_paid) FROM loan_repayments r WHERE r.loan_id = l.id), 0))
+          FROM personal_loans l WHERE l.member_id = ? AND l.status = 'Active'`, [memberId]));
+
+/** Loan interest and write-offs are shared with members at settlement, so they cannot be dated before a settlement that already paid members out. */
+function assertAfterLastSettlement(date: string, what: string) {
+  const last = get('SELECT MAX(settlement_date) d FROM member_settlements')?.d;
+  if (last && date <= last) fail(`A member was already settled on ${last}. ${what} must be dated after the latest settlement.`);
+}
+
+const loanSchedule = (id: number) => all('SELECT no, due_date, principal, interest, total FROM loan_schedule WHERE loan_id = ? ORDER BY no', [Number(id)]);
+
+/** Every loan with its member and everything derived from the schedule and repayments (as of `today`). */
+function enrichLoans(where = '', params: any[] = [], today = todayISO()): Row[] {
+  const loans = all(`SELECT l.*, m.member_code, m.name AS member_name, m.name_bn AS member_name_bn, m.avatar_initials, m.phone AS member_phone, m.status AS member_status
+                     FROM personal_loans l JOIN members m ON m.id = l.member_id ${where} ORDER BY l.id`, params);
+  if (!loans.length) return [];
+  const sched = new Map<number, Row[]>();
+  for (const r of all('SELECT loan_id, no, due_date, principal, interest, total FROM loan_schedule ORDER BY loan_id, no')) {
+    if (!sched.has(r.loan_id)) sched.set(r.loan_id, []);
+    sched.get(r.loan_id)!.push(r);
+  }
+  const paid = new Map<number, Row>();
+  for (const r of all(`SELECT loan_id, SUM(principal_paid) p, SUM(interest_paid) i, SUM(penalty_paid) f, SUM(total_paid) t,
+        SUM(CASE WHEN kind = 'Installment' THEN principal_paid + interest_paid ELSE 0 END) s, COUNT(*) n, MAX(paid_date) last
+        FROM loan_repayments GROUP BY loan_id`)) paid.set(r.loan_id, r);
+  const in30 = addDaysISO(today, 30);
+  return loans.map(l => {
+    const rows = sched.get(l.id) || [];
+    const p = paid.get(l.id) || {};
+    const pp = Number(p.p) || 0, pi = Number(p.i) || 0, pf = Number(p.f) || 0, pt = Number(p.t) || 0, ps = Number(p.s) || 0;
+    const open = l.status === 'Active';
+    const st = scheduleState(rows as any, ps, today);
+    const cumThrough = (pred: (x: Row) => boolean) => r2(rows.filter(pred).reduce((a, x) => a + Number(x.total), 0));
+    const dueToDate = cumThrough(x => x.due_date < today);
+    const due30 = open ? Math.max(0, r2(cumThrough(x => x.due_date <= in30) - ps - st.overdueAmount)) : 0;
+    return {
+      ...l,
+      paid_principal: r2(pp), paid_interest: r2(pi), paid_penalty: r2(pf), total_paid: r2(pt), paid_schedule: r2(ps),
+      outstanding_principal: open ? r2(Math.max(0, Number(l.principal) - pp)) : 0,
+      remaining_interest: open ? Math.max(0, r2(Number(l.total_interest) - pi)) : 0,
+      remaining_payable: open ? Math.max(0, r2(Number(l.total_payable) - ps)) : 0,
+      installments_total: rows.length, installments_paid: st.paidCount,
+      next_due_date: open ? st.nextDueDate : null, next_due_amount: open ? st.nextDueAmount : 0,
+      overdue_count: open ? st.overdueCount : 0, overdue_amount: open ? st.overdueAmount : 0,
+      days_overdue: open && st.firstOverdueDate ? Math.max(0, daysBetween(st.firstOverdueDate, today)) : 0,
+      due_30: due30, due_to_date: open ? dueToDate : 0,
+      last_payment_date: p.last || null, repayment_count: Number(p.n) || 0,
+      derived_status: open ? (st.overdueCount > 0 ? 'Overdue' : 'Running') : l.status,
+      progress_pct: Number(l.principal) > 0 ? Math.min(100, r2((100 * pp) / Number(l.principal))) : 0,
+    };
+  });
+}
+
+function loadLoan(id: number): Row {
+  const l = enrichLoans('WHERE l.id = ?', [Number(id)])[0];
+  if (!l) fail('Loan not found.');
+  return l;
+}
+
+const LOAN_SORT: Record<string, (a: Row, b: Row) => number> = {
+  newest: (a, b) => b.id - a.id,
+  oldest: (a, b) => a.id - b.id,
+  amount_high: (a, b) => b.principal - a.principal,
+  amount_low: (a, b) => a.principal - b.principal,
+  outstanding_high: (a, b) => b.outstanding_principal - a.outstanding_principal,
+  overdue_high: (a, b) => b.overdue_amount - a.overdue_amount || b.days_overdue - a.days_overdue,
+  due_soon: (a, b) => String(a.next_due_date || '9999').localeCompare(String(b.next_due_date || '9999')) || b.id - a.id,
+  name_asc: (a, b) => String(a.member_name).localeCompare(String(b.member_name), undefined, { sensitivity: 'base' }) || b.id - a.id,
+  progress_high: (a, b) => b.progress_pct - a.progress_pct,
+};
+
+/** Loan list. status: All | Open (running + overdue) | Running | Overdue | Closed | Written off. Dates filter the loan date. */
+function getLoans(sortBy = 'newest', status = 'All', startDate?: string, endDate?: string, search = '', memberId?: number) {
+  const where: string[] = []; const params: any[] = [];
+  const s = toISODate(startDate), e = toISODate(endDate);
+  if (s) { where.push('l.disbursed_date >= ?'); params.push(s); }
+  if (e) { where.push('l.disbursed_date <= ?'); params.push(e); }
+  if (memberId) { where.push('l.member_id = ?'); params.push(Number(memberId)); }
+  let list = enrichLoans(where.length ? 'WHERE ' + where.join(' AND ') : '', params);
+  if (status && status !== 'All') list = list.filter(l => status === 'Open' ? ['Running', 'Overdue'].includes(l.derived_status) : l.derived_status === status);
+  const q = String(search || '').trim().toLowerCase();
+  if (q) list = list.filter(l => [l.loan_no, l.member_name, l.member_name_bn, l.member_code, l.member_phone, l.purpose, l.guarantor, l.reference]
+    .some(v => v && String(v).toLowerCase().includes(q)));
+  return list.sort(LOAN_SORT[sortBy] || LOAN_SORT.newest);
+}
+
+/** Top-of-page numbers across all loans. */
+function getLoanSummary() {
+  const today = todayISO();
+  const ls = enrichLoans('', [], today);
+  const sum = (f: (l: Row) => number) => r2(ls.reduce((a, l) => a + (Number(f(l)) || 0), 0));
+  const open = ls.filter(l => l.status === 'Active');
+  const pos = fundPosition('9999-12-31');
+  const dueToDate = sum(l => l.due_to_date), overdue = sum(l => l.overdue_amount);
+  return {
+    loans: ls.length,
+    running: ls.filter(l => l.derived_status === 'Running').length,
+    overdueLoans: ls.filter(l => l.derived_status === 'Overdue').length,
+    closed: ls.filter(l => l.status === 'Closed').length,
+    writtenOff: ls.filter(l => l.status === 'Written off').length,
+    borrowers: new Set(open.map(l => l.member_id)).size,
+    totalLent: sum(l => l.principal),
+    outstanding: sum(l => l.outstanding_principal),
+    principalRepaid: sum(l => l.paid_principal),
+    interestEarned: sum(l => l.paid_interest),
+    penaltyEarned: sum(l => l.paid_penalty),
+    interestExpected: sum(l => l.remaining_interest),
+    totalCollected: sum(l => l.total_paid),
+    overdueAmount: overdue,
+    overduePrincipal: sum(l => (l.derived_status === 'Overdue' ? l.outstanding_principal : 0)),
+    dueNext30: sum(l => l.due_30),
+    writtenOffAmount: sum(l => (l.status === 'Written off' ? l.written_off_amount : 0)),
+    onTrackPct: dueToDate > 0 ? r2(Math.max(0, 100 * (dueToDate - overdue) / dueToDate)) : 100,
+    cashInHand: r2(pos.cashInHand),
+    fundBalance: r2(pos.fundBalance),
+    lentPctOfFund: pos.fundBalance > 0 ? r2(100 * pos.loansOutstanding / pos.fundBalance) : 0,
+    avgRate: (() => { const w = open.filter(l => l.method !== 'free'); const tot = w.reduce((a, l) => a + l.outstanding_principal, 0);
+      return tot > 0 ? r2(w.reduce((a, l) => a + l.annual_rate * l.outstanding_principal, 0) / tot) : 0; })(),
+  };
+}
+
+/** One loan: terms, the full schedule with the state of every installment, repayments, and the borrower's other loans. */
+function getLoan(id: number) {
+  const l = loadLoan(id);
+  const today = todayISO();
+  const rows = loanSchedule(l.id);
+  const st = scheduleState(rows as any, l.paid_schedule, today);
+  let cum = 0, cumP = 0;
+  const schedule = rows.map((r, i) => {
+    const start = cum; cum = r2(cum + Number(r.total)); cumP = r2(cumP + Number(r.principal));
+    let status: string = st.status[i];
+    if (status !== 'Paid' && l.status === 'Closed') status = 'Waived';
+    if (status !== 'Paid' && l.status === 'Written off') status = 'Written off';
+    return { ...r, paid: Math.max(0, Math.min(Number(r.total), r2(l.paid_schedule - start))), status, balance_after: r2(Number(l.principal) - cumP) };
+  });
+  const repayments = all('SELECT * FROM loan_repayments WHERE loan_id = ? ORDER BY paid_date DESC, id DESC', [l.id]);
+  const m = get('SELECT id, member_code, name, name_bn, avatar_initials, phone, monthly_due, status FROM members WHERE id = ?', [l.member_id]) || {};
+  return {
+    loan: l, schedule, repayments,
+    latestRepaymentId: repayments.length ? Math.max(...repayments.map(r => Number(r.id))) : null,
+    member: { ...m, savings: memberSavings(l.member_id), owed: loansOwedBy(l.member_id) },
+    memberLoans: enrichLoans('WHERE l.member_id = ? AND l.id != ?', [l.member_id, l.id]),
+  };
+}
+
+/** Builds the terms from form input, filling the fund's default policy and the usual first-installment date. */
+function loanTermsFrom(d: any): { terms: LoanTerms; disbursed: string } {
+  const st = settingsMap();
+  const disbursed = toISODate(d?.disbursed_date) || todayISO();
+  const method = (LOAN_METHODS as string[]).includes(d?.method) ? (d.method as LoanMethod) : (st.loan_default_method as LoanMethod);
+  const rate = d?.annual_rate === undefined || d?.annual_rate === '' || d?.annual_rate === null ? Number(st.loan_default_rate) || 0 : Number(d.annual_rate);
+  return {
+    disbursed,
+    terms: {
+      principal: Number(d?.principal), method, annual_rate: method === 'free' ? 0 : rate, term_months: Number(d?.term_months),
+      first_due_date: toISODate(d?.first_due_date) || addMonthsKeepDay(disbursed, 1), round_to_taka: d?.round_to_taka !== false,
+    },
+  };
+}
+
+/** Live calculator for the loan form: schedule, totals, the same loan over other terms, and policy warnings. Never throws. */
+function previewLoan(d: any) {
+  try {
+    const { terms, disbursed } = loanTermsFrom(d);
+    const err = validateTerms(terms);
+    if (err) return { valid: false, error: err };
+    const plan = buildPlan(terms);
+    const { term_months, ...base } = terms;
+    const options = compareTerms(base, [...COMMON_TERMS, term_months]);
+    const warnings: Array<{ level: 'error' | 'warn' | 'info'; text: string }> = [];
+    const cash = lendableCash(disbursed);
+    if (terms.principal > cash + 0.005) warnings.push({ level: 'error', text: `The fund can lend only TK ${Math.max(0, cash)} (its cash in hand).` });
+    if (terms.first_due_date <= disbursed) warnings.push({ level: 'error', text: 'The first installment must be after the loan date.' });
+    let member: any = null;
+    const mid = Number(d?.member_id);
+    if (mid) {
+      const m = get('SELECT id, member_code, name, status, monthly_due FROM members WHERE id = ?', [mid]);
+      if (m) {
+        const savings = memberSavings(mid), owed = loansOwedBy(mid);
+        const mult = Number(settingsMap().loan_max_multiple) || 0;
+        const limit = mult > 0 ? r2(mult * savings) : null;
+        const overdue = enrichLoans('WHERE l.member_id = ?', [mid]).filter(l => l.derived_status === 'Overdue');
+        member = { ...m, savings, owed, limit, multiple: mult, available: limit === null ? null : Math.max(0, r2(limit - owed)), overdueLoans: overdue.length };
+        if (m.status !== 'Active') warnings.push({ level: 'error', text: `${m.name} is not an active member.` });
+        if (limit !== null && terms.principal + owed > limit + 0.005)
+          warnings.push({ level: 'warn', text: `Above the fund limit (${mult}× savings = TK ${limit}). A written approval reason is required.` });
+        if (overdue.length) warnings.push({ level: 'warn', text: `${m.name} has ${overdue.length} overdue loan(s).` });
+        else if (owed > 0) warnings.push({ level: 'info', text: `${m.name} already owes TK ${owed} on another loan.` });
+        if (plan.installment > 0 && Number(m.monthly_due) > 0 && plan.installment > 4 * Number(m.monthly_due))
+          warnings.push({ level: 'info', text: `The installment is more than 4× the member's monthly contribution; check it is affordable.` });
+      }
+    }
+    return { valid: true, terms: { ...terms, disbursed_date: disbursed }, plan, options, warnings, cash, member };
+  } catch (e: any) {
+    return { valid: false, error: e?.message || 'Could not calculate this loan.' };
+  }
+}
+
+function nextLoanNo() {
+  const last = all('SELECT loan_no FROM personal_loans').reduce((mx, r) => Math.max(mx, Number(String(r.loan_no).replace(/\D/g, '')) || 0), 0);
+  return `PL-${pad4(last + 1)}`;
+}
+
+function addLoan(d: any) {
+  const memberId = Number(d?.member_id);
+  const m = get('SELECT * FROM members WHERE id = ?', [memberId]);
+  if (!m) fail('Please choose the member who is taking the loan.');
+  if (m.status !== 'Active') fail(`${m.name} is not an active member, so a loan cannot be given.`);
+  const { terms, disbursed } = loanTermsFrom(d);
+  const err = validateTerms(terms);
+  if (err) fail(err);
+  const today = todayISO();
+  if (disbursed > today) fail('Loan date cannot be in the future.');
+  if (disbursed < String(m.join_date)) fail(`Loan date cannot be before the member joined (${m.join_date}).`);
+  if (terms.first_due_date <= disbursed) fail('The first installment must be after the loan date.');
+  if (daysBetween(disbursed, terms.first_due_date) > 100) fail('The first installment should fall within about three months of the loan date.');
+  const method = String(d.payment_method || '').trim();
+  if (!method) fail('Choose how the money was paid out (cash, bank, bKash…).');
+  const cash = lendableCash(disbursed);
+  if (terms.principal > cash + 0.005) fail(`The fund can lend only TK ${Math.max(0, cash)} (its cash in hand on ${disbursed} and today), so it cannot lend TK ${r2(terms.principal)}.`);
+  const mult = Number(settingsMap().loan_max_multiple) || 0;
+  const limitNote = String(d.limit_note || '').trim();
+  if (mult > 0) {
+    const savings = memberSavings(memberId), owed = loansOwedBy(memberId);
+    if (terms.principal + owed > mult * savings + 0.005 && !limitNote)
+      fail(`With this loan ${m.name} would owe TK ${r2(terms.principal + owed)}, above the fund limit of ${mult}× savings (TK ${r2(mult * savings)}). Write the approval reason to continue.`);
+  }
+  const plan = buildPlan(terms);
+  const notes = [String(d.notes || '').trim(), limitNote ? `Over-limit approval: ${limitNote}` : ''].filter(Boolean).join(' | ');
+  const id = tx(() => {
+    const no = nextLoanNo();
+    run(`INSERT INTO personal_loans (loan_no, member_id, principal, method, annual_rate, term_months, disbursed_date, first_due_date, installment, total_interest, total_payable,
+           payment_method, reference, purpose, guarantor, notes, created_by) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+      [no, memberId, r2(terms.principal), terms.method, terms.annual_rate, plan.rows.length, disbursed, terms.first_due_date, plan.installment, plan.totalInterest, plan.totalPayable,
+        method, String(d.reference || '').trim(), String(d.purpose || '').trim(), String(d.guarantor || '').trim(), notes, actor]);
+    const lid = lastId();
+    for (const r of plan.rows) run('INSERT INTO loan_schedule (loan_id, no, due_date, principal, interest, total) VALUES (?,?,?,?,?,?)', [lid, r.no, r.due_date, r.principal, r.interest, r.total]);
+    audit('create', 'loan', lid, `${no} ${m.member_code} TK ${r2(terms.principal)} · ${plan.rows.length} months · ${terms.method}${terms.method === 'free' ? '' : ` ${terms.annual_rate}%`}`);
+    return lid;
+  });
+  mutated();
+  return id;
+}
+
+/** Descriptive fields only — money terms are fixed once a loan is given (delete and re-create to change them). */
+function updateLoan(id: number, d: any) {
+  const l = get('SELECT id, loan_no FROM personal_loans WHERE id = ?', [Number(id)]);
+  if (!l) fail('Loan not found.');
+  const f: Record<string, any> = { purpose: d?.purpose, guarantor: d?.guarantor, notes: d?.notes, reference: d?.reference };
+  const keys = Object.keys(f).filter(k => f[k] !== undefined);
+  if (!keys.length) return;
+  tx(() => {
+    run(`UPDATE personal_loans SET ${keys.map(k => `${k} = ?`).join(', ')}, updated_at = datetime('now','localtime') WHERE id = ?`, [...keys.map(k => String(f[k] ?? '').trim()), Number(id)]);
+    audit('update', 'loan', Number(id), `${l.loan_no}: ${keys.join(', ')}`);
+  });
+  mutated();
+}
+
+/** Only a loan nobody has paid anything on can be deleted (to undo a mistake). */
+function deleteLoan(id: number) {
+  const l = get('SELECT * FROM personal_loans WHERE id = ?', [Number(id)]);
+  if (!l) fail('Loan not found.');
+  if (num('SELECT COUNT(*) FROM loan_repayments WHERE loan_id = ?', [l.id]) > 0) fail('This loan already has repayments. Remove them first (latest first), or close the loan instead.');
+  if (l.status === 'Written off') fail('This loan was written off. Cancel the write-off first (Admin).');
+  tx(() => { run('DELETE FROM loan_schedule WHERE loan_id = ?', [l.id]); run('DELETE FROM personal_loans WHERE id = ?', [l.id]); audit('delete', 'loan', l.id, `${l.loan_no} TK ${l.principal}`); });
+  mutated();
+}
+
+/** What a payment on `loan` would do: split into principal and interest, which installments it completes, and the late fee to suggest. */
+function repaymentQuote(l: Row, date: string, amount: number | undefined, kind: 'Installment' | 'Closure', interestOverride?: number) {
+  const rows = loanSchedule(l.id);
+  if (kind === 'Closure') {
+    const dueInterest = r2(rows.filter(x => x.due_date <= date).reduce((a, x) => a + Number(x.interest), 0));
+    const calcInterest = Math.max(0, r2(dueInterest - l.paid_interest));
+    const principal = l.outstanding_principal;
+    const interest = interestOverride === undefined || Number.isNaN(interestOverride) ? calcInterest : r2(interestOverride);
+    return { kind, principal, interest, calcInterest, amount: r2(principal + interest), lines: [] as any[], completed: [] as number[], lateCompleted: 0, closes: true,
+      waivedInterest: Math.max(0, r2(l.remaining_interest - interest)) };
+  }
+  const remaining = l.remaining_payable;
+  let amt = amount === undefined || Number.isNaN(amount) ? l.next_due_amount : r2(amount);
+  if (amt > remaining && amt - remaining <= 0.005) amt = remaining;
+  const a = allocatePayment(rows as any, l.paid_schedule, Math.max(0, amt));
+  const completed: number[] = [];
+  let cum = 0, lateCompleted = 0;
+  for (const r of rows) {
+    cum = r2(cum + Number(r.total));
+    if (cum > l.paid_schedule + 0.005 && cum <= l.paid_schedule + amt + 0.005) { completed.push(r.no); if (r.due_date < date) lateCompleted++; }
+  }
+  const closes = amt > 0 && l.paid_principal + a.principal >= Number(l.principal) - 0.005;
+  let principal = a.principal, interest = a.interest;
+  if (closes) { principal = r2(Number(l.principal) - l.paid_principal); interest = r2(amt - principal); }   // no cent is ever left over
+  return { kind, principal, interest, calcInterest: interest, amount: amt, lines: a.lines, completed, lateCompleted, closes, waivedInterest: 0 };
+}
+
+function previewLoanRepayment(loanId: number, paidDate?: string, amount?: any, kind?: string, interest?: any) {
+  const l = loadLoan(loanId);
+  const date = toISODate(paidDate) || todayISO();
+  const k = kind === 'Closure' ? 'Closure' : 'Installment';
+  if (l.status !== 'Active') return { open: false, status: l.status };
+  const amt = amount === undefined || amount === null || amount === '' ? undefined : Number(amount);
+  const q = repaymentQuote(l, date, amt, k, interest === undefined || interest === null || interest === '' ? undefined : Number(interest));
+  const lateFee = Number(settingsMap().loan_late_fee) || 0;
+  return {
+    open: true, loan_no: l.loan_no, date, ...q,
+    suggestedPenalty: k === 'Closure' ? (l.overdue_count > 0 ? r2(lateFee * l.overdue_count) : 0) : r2(lateFee * q.lateCompleted),
+    nextDueAmount: l.next_due_amount, nextDueDate: l.next_due_date, overdueAmount: l.overdue_amount, overdueCount: l.overdue_count,
+    outstanding: l.outstanding_principal, remainingPayable: l.remaining_payable,
+    outstandingAfter: r2(Math.max(0, l.outstanding_principal - q.principal)),
+  };
+}
+
+function recordLoanRepayment(d: any) {
+  const l = loadLoan(d?.loan_id);
+  if (l.status !== 'Active') fail(`Loan ${l.loan_no} is ${l.status === 'Closed' ? 'already fully repaid' : 'written off'}, so no more repayments can be recorded.`);
+  const today = todayISO();
+  const date = toISODate(d.paid_date) || today;
+  if (date > today) fail('Payment date cannot be in the future.');
+  if (date < String(l.disbursed_date)) fail(`Payment date cannot be before the loan was given (${l.disbursed_date}).`);
+  if (l.last_payment_date && date < l.last_payment_date) fail(`Payment date cannot be before the previous repayment (${l.last_payment_date}).`);
+  const method = String(d.payment_method || '').trim();
+  if (!method) fail('Choose how the money was received (cash, bank, bKash…).');
+  const kind = d.kind === 'Closure' ? 'Closure' : 'Installment';
+  const penalty = r2(Number(d.penalty) || 0);
+  if (penalty < 0) fail('Penalty cannot be negative.');
+  const note = String(d.note || '').trim();
+  let q;
+  if (kind === 'Closure') {
+    const override = d.interest === undefined || d.interest === null || d.interest === '' ? undefined : Number(d.interest);
+    if (override !== undefined && !(override >= 0)) fail('Interest cannot be negative.');
+    q = repaymentQuote(l, date, undefined, 'Closure', override);
+    if (Math.abs(q.interest - q.calcInterest) > 0.009 && !note) fail('You changed the calculated interest — please write the reason in the note.');
+  } else {
+    const amt = Number(d.amount);
+    if (!(amt > 0)) fail('Enter the amount received (greater than zero).');
+    if (amt > l.remaining_payable + 0.005) fail(`This is more than the loan still needs (TK ${l.remaining_payable}). To pay it all off early use "Close loan early".`);
+    q = repaymentQuote(l, date, amt, 'Installment');
+  }
+  const total = r2(q.principal + q.interest + penalty);
+  if (!(total > 0)) fail('Nothing to record: the amount is zero.');
+  if (q.interest > 0) assertAfterLastSettlement(date, 'A repayment that includes interest');
+  const id = tx(() => {
+    run(`INSERT INTO loan_repayments (loan_id, paid_date, kind, principal_paid, interest_paid, penalty_paid, total_paid, payment_method, trx_id, note, created_by)
+         VALUES (?,?,?,?,?,?,?,?,?,?,?)`, [l.id, date, kind, q.principal, q.interest, penalty, total, method, String(d.trx_id || '').trim(), note, actor]);
+    const rid = lastId();
+    if (q.closes) run(`UPDATE personal_loans SET status = 'Closed', closed_date = ?, updated_at = datetime('now','localtime') WHERE id = ?`, [date, l.id]);
+    audit(kind === 'Closure' ? 'close' : 'repayment', 'loan', l.id, `${l.loan_no} ${l.member_code} received ${total} (principal ${q.principal}, interest ${q.interest}, penalty ${penalty}) on ${date}${q.closes ? ' — loan fully repaid' : ''}`);
+    return rid;
+  });
+  mutated();
+  return id;
+}
+
+/** Removes the most recent repayment of a loan (to correct a mistake). */
+function deleteLoanRepayment(id: number) {
+  const r = get('SELECT r.*, l.loan_no, l.status AS loan_status FROM loan_repayments r JOIN personal_loans l ON l.id = r.loan_id WHERE r.id = ?', [Number(id)]);
+  if (!r) fail('Repayment not found.');
+  if (r.loan_status === 'Written off') fail('This loan was written off. Cancel the write-off first (Admin).');
+  if (num('SELECT MAX(id) FROM loan_repayments WHERE loan_id = ?', [r.loan_id]) !== Number(r.id)) fail('Only the most recent repayment of a loan can be removed. Remove the later ones first.');
+  if (Number(r.interest_paid) > 0) assertAfterLastSettlement(String(r.paid_date), 'A repayment that included interest');
+  tx(() => {
+    run('DELETE FROM loan_repayments WHERE id = ?', [Number(id)]);
+    if (r.loan_status === 'Closed') run(`UPDATE personal_loans SET status = 'Active', closed_date = NULL, updated_at = datetime('now','localtime') WHERE id = ?`, [r.loan_id]);
+    audit('void', 'loan_repayment', Number(id), `${r.loan_no} repayment ${r.total_paid} on ${r.paid_date}`);
+  });
+  mutated();
+}
+
+/** Admin: the borrower cannot pay. The unpaid principal becomes a loss shared by the members; unpaid interest is simply never booked. */
+function writeOffLoan(d: any) {
+  const l = loadLoan(d?.loan_id);
+  if (l.status !== 'Active') fail('Only a running loan can be written off.');
+  const date = toISODate(d.date) || todayISO();
+  if (date > todayISO()) fail('Write-off date cannot be in the future.');
+  if (date < String(l.disbursed_date) || (l.last_payment_date && date < l.last_payment_date)) fail('Write-off date cannot be before the loan or its last repayment.');
+  const reason = String(d.reason || '').trim();
+  if (!reason) fail('Write the reason for writing this loan off.');
+  if (!(l.outstanding_principal > 0)) fail('Nothing is outstanding on this loan.');
+  assertAfterLastSettlement(date, 'A write-off');
+  tx(() => {
+    run(`UPDATE personal_loans SET status = 'Written off', written_off_amount = ?, written_off_date = ?, written_off_reason = ?, closed_date = ?, updated_at = datetime('now','localtime') WHERE id = ?`,
+      [l.outstanding_principal, date, reason, date, l.id]);
+    audit('write-off', 'loan', l.id, `${l.loan_no} ${l.member_code} TK ${l.outstanding_principal} written off: ${reason}`);
+  });
+  mutated();
+}
+
+function cancelLoanWriteOff(loanId: number) {
+  const l = get('SELECT * FROM personal_loans WHERE id = ?', [Number(loanId)]);
+  if (!l || l.status !== 'Written off') fail('This loan is not written off.');
+  assertAfterLastSettlement(String(l.written_off_date), 'Cancelling a write-off');
+  tx(() => {
+    run(`UPDATE personal_loans SET status = 'Active', written_off_amount = 0, written_off_date = NULL, written_off_reason = NULL, closed_date = NULL, updated_at = datetime('now','localtime') WHERE id = ?`, [l.id]);
+    audit('void', 'loan_writeoff', l.id, `${l.loan_no} write-off of ${l.written_off_amount} cancelled`);
+  });
   mutated();
 }
 
@@ -891,6 +1367,7 @@ function updateMember(id: number, d: any) {
 function deleteMember(id: number) {
   const payments = num('SELECT COUNT(*) FROM collections WHERE member_id = ?', [id]);
   if (get('SELECT 1 FROM member_settlements WHERE member_id = ?', [id])) fail('This member has a settlement record, so the member cannot be deleted.');
+  if (get('SELECT 1 FROM personal_loans WHERE member_id = ?', [id])) fail('This member has personal loan records, so the member cannot be deleted.');
   if (payments > 0) fail(`This member has ${payments} payment record(s). Settle the member so they become Inactive instead, so the fund history stays correct.`);
   tx(() => {
     const m = get('SELECT member_code, name FROM members WHERE id = ?', [id]);
@@ -1714,7 +2191,7 @@ function validateNewPassword(p: string, username: string) {
 // Permission model -----------------------------------------------------------------------
 const PUBLIC = new Set(['login', 'getSession', 'getAppSettings']);
 const UPLOAD = new Set(['bulkAddMembers']);                          // + Excel import IPC (main.ts)
-const ADMIN = new Set(['cancelSettlement', 'addUser', 'deleteUser', 'setUserPassword', 'saveAppSettings', 'resetDatabase', 'loadDemoData',
+const ADMIN = new Set(['cancelSettlement', 'writeOffLoan', 'cancelLoanWriteOff', 'addUser', 'deleteUser', 'setUserPassword', 'saveAppSettings', 'resetDatabase', 'loadDemoData',
   'addMasterItem', 'updateMasterItem', 'deleteMasterItem']);
 const READ = /^(get|suggest|preview|export)/;
 const SYSTEM_ONLY = new Set(['loadDemoData', 'checkAccountingHealth', 'deleteMember']);   // iqbal_labs only
@@ -1887,6 +2364,9 @@ function getOverviewData(month?: string) {
       UNION ALL SELECT 'return', r.id, i.name || CASE r.entry_type WHEN 'Profit' THEN ' benefit received' ELSE ' loss booked' END, i.sector,
                 CASE r.entry_type WHEN 'Profit' THEN r.amount ELSE -r.amount END, r.entry_date, r.created_at FROM investment_returns r JOIN investments i ON i.id = r.investment_id
       UNION ALL SELECT 'settlement', s.id, m.name || ' settled', s.payment_method, -s.total_paid, s.settlement_date, s.created_at FROM member_settlements s JOIN members m ON m.id = s.member_id
+      UNION ALL SELECT 'loan', l.id, m.name || ' took loan ' || l.loan_no, l.payment_method, -l.principal, l.disbursed_date, l.created_at FROM personal_loans l JOIN members m ON m.id = l.member_id
+      UNION ALL SELECT 'repayment', r.id, m.name || ' repaid ' || l.loan_no, r.payment_method, r.total_paid, r.paid_date, r.created_at
+                FROM loan_repayments r JOIN personal_loans l ON l.id = r.loan_id JOIN members m ON m.id = l.member_id
       UNION ALL SELECT 'member', id, name || ' joined', member_code, 0, join_date, created_at FROM members
     ) ORDER BY date DESC, created_at DESC LIMIT 10`);
 
@@ -1899,6 +2379,7 @@ function getOverviewData(month?: string) {
       prevNetWorth: prevPos.fundBalance + (value - invested),
       fundBalance: pos.fundBalance, prevFundBalance: prevPos.fundBalance,
       cashInHand: pos.cashInHand, prevCashInHand: prevPos.cashInHand,
+      loansOutstanding: pos.loansOutstanding, loanIncome: pos.loanIncome,
       lifetimeCollected: pos.opening + pos.collected, totalExpenses: pos.expenses, realizedGain: pos.realized,
       monthCollected: ms.collected, prevMonthCollected: prevMs.collected, monthReceived: ms.received,
       monthExpected: ms.expected, collectionRate: ms.rate, prevCollectionRate: prevMs.rate,
@@ -1942,7 +2423,8 @@ function getOverviewData(month?: string) {
 /** Unified ledger for reports: every money movement in a date range. */
 function getTransactions(startDate?: string, endDate?: string, type = 'All') {
   const s = toISODate(startDate) || '0000-01-01', e = toISODate(endDate) || '9999-12-31';
-  const parts: string[] = [];
+  // the first SELECT of a UNION names the columns; this empty one guarantees the names whichever single type is asked for
+  const parts: string[] = [`SELECT '' AS type, '' AS date, '' AS party, '' AS description, '' AS method, '' AS reference, 0 AS credit, 0 AS debit WHERE 0`];
   const params: any[] = [];
   if (type === 'All' || type === 'collection') {
     parts.push(`SELECT 'collection' AS type, c.payment_date AS date, m.member_code || ' ' || m.name AS party, 'Contribution ' || c.payment_month AS description,
@@ -1965,12 +2447,20 @@ function getTransactions(startDate?: string, endDate?: string, type = 'All') {
                 FROM investment_returns r JOIN investments i ON i.id = r.investment_id WHERE r.entry_date BETWEEN ? AND ?`);
     params.push(s, e);
   }
+  if (type === 'All' || type === 'loan') {
+    parts.push(`SELECT 'loan', l.disbursed_date, m.member_code || ' ' || m.name, 'Personal loan ' || l.loan_no || ' given (' || l.term_months || ' months)', l.payment_method, l.reference, 0, l.principal
+                FROM personal_loans l JOIN members m ON m.id = l.member_id WHERE l.disbursed_date BETWEEN ? AND ?`);
+    parts.push(`SELECT 'loan_repayment', r.paid_date, m.member_code || ' ' || m.name, 'Loan ' || l.loan_no || ' repayment (principal ' || r.principal_paid || ', interest ' || r.interest_paid
+                || CASE WHEN r.penalty_paid > 0 THEN ', penalty ' || r.penalty_paid ELSE '' END || ')', r.payment_method, r.trx_id, r.total_paid, 0
+                FROM loan_repayments r JOIN personal_loans l ON l.id = r.loan_id JOIN members m ON m.id = l.member_id WHERE r.paid_date BETWEEN ? AND ?`);
+    params.push(s, e, s, e);
+  }
   if (type === 'All' || type === 'settlement') {
     parts.push(`SELECT 'settlement', s.settlement_date, m.member_code || ' ' || m.name, 'Member settlement (principal ' || s.principal || ', share ' || s.profit_share || ')',
                 s.payment_method, s.trx_id, 0, s.total_paid FROM member_settlements s JOIN members m ON m.id = s.member_id WHERE s.settlement_date BETWEEN ? AND ?`);
     params.push(s, e);
   }
-  if (!parts.length) return [];
+  if (parts.length === 1) return [];
   return all(`${parts.join(' UNION ALL ')} ORDER BY date, type`, params);
 }
 
@@ -1989,6 +2479,11 @@ function getDynamicNotifications() {
   const in30 = todayISO(new Date(Date.now() + 30 * 864e5));
   for (const r of all(`SELECT id, name, review_date FROM investments WHERE status != 'Sold' AND review_date IS NOT NULL AND review_date <= ? ORDER BY review_date LIMIT 3`, [in30])) {
     out.push({ id: `review_${r.id}_${r.review_date}`, title: `${r.name}: review ${r.review_date < todayISO() ? 'overdue' : 'due'}`, message: `Committee review date ${r.review_date}.`, type: 'info', targetTab: 'investments', actionLabel: 'Open investments', createdAt: r.review_date });
+  }
+  const lateLoans = enrichLoans().filter(l => l.derived_status === 'Overdue');
+  if (lateLoans.length) {
+    const amt = r2(lateLoans.reduce((a, l) => a + l.overdue_amount, 0));
+    out.push({ id: `loans_overdue_${lateLoans.length}_${amt}`, title: `${lateLoans.length} personal loan(s) overdue`, message: `TK ${amt} of loan installments is past its due date.`, type: 'warning', targetTab: 'loans', targetFilter: 'Overdue', actionLabel: 'View loans', createdAt: 'Now' });
   }
   const rc = num(`SELECT COUNT(*) FROM expenses WHERE status='Needs receipt'`);
   if (rc > 0) out.push({ id: `receipts_${rc}`, title: `${rc} expense(s) need a receipt`, message: 'Attach voucher references to keep the audit trail complete.', type: 'warning', targetTab: 'expenses', targetFilter: 'Needs receipt', actionLabel: 'Verify receipts', createdAt: 'Pending' });
@@ -2017,7 +2512,7 @@ function getDatabaseStats() {
   return {
     schemaVersion: num('PRAGMA user_version'),
     members: c('members'), collections: c('collections'), investments: c('investments'), expenses: c('expenses'),
-    returns: c('investment_returns'), settlements: c('member_settlements'),
+    returns: c('investment_returns'), settlements: c('member_settlements'), loans: c('personal_loans'), loanRepayments: c('loan_repayments'),
     users: c('users'), masterData: c('master_data'), auditEntries: c('audit_log'),
   };
 }
@@ -2025,9 +2520,9 @@ function getDatabaseStats() {
 /** Wipes business data. keepSetup keeps users, master data and settings. */
 function resetDatabase(keepSetup = true) {
   tx(() => {
-    for (const t of ['member_settlements', 'investment_returns', 'collections', 'members', 'investments', 'expenses']) run(`DELETE FROM ${t}`);
+    for (const t of ['loan_repayments', 'loan_schedule', 'personal_loans', 'member_settlements', 'investment_returns', 'collections', 'members', 'investments', 'expenses']) run(`DELETE FROM ${t}`);
     if (!keepSetup) { run('DELETE FROM master_data'); run('DELETE FROM users'); run('DELETE FROM app_settings'); }
-    run(`DELETE FROM sqlite_sequence WHERE name IN ('member_settlements','investment_returns','collections','members','investments','expenses')`);
+    run(`DELETE FROM sqlite_sequence WHERE name IN ('loan_repayments','personal_loans','member_settlements','investment_returns','collections','members','investments','expenses')`);
     audit('reset', 'database', null, keepSetup ? 'business data cleared' : 'factory reset');
   });
   ensureDefaults();
@@ -2126,6 +2621,37 @@ function checkAccountingHealth() {
   }
   add('set_math', 'Member settlements add up', 'fail', badSet, r => r.t);
 
+  // personal loans
+  const badLoans: Row[] = [];
+  for (const l of all('SELECT l.*, m.member_code FROM personal_loans l LEFT JOIN members m ON m.id = l.member_id')) {
+    const sc = get('SELECT COUNT(*) n, COALESCE(SUM(principal),0) p, COALESCE(SUM(interest),0) i FROM loan_schedule WHERE loan_id = ?', [l.id]) || {};
+    const back = get('SELECT COALESCE(SUM(principal_paid),0) p, COUNT(*) n FROM loan_repayments WHERE loan_id = ?', [l.id]) || {};
+    const tag = `${l.loan_no} ${l.member_code ?? 'missing member'}`;
+    if (!l.member_code) badLoans.push({ t: `${tag}: member record is missing` });
+    if (!(l.principal > 0) || !/^\d{4}-\d{2}-\d{2}$/.test(String(l.disbursed_date)) || l.disbursed_date > today) badLoans.push({ t: `${tag}: amount ${l.principal} or date "${l.disbursed_date}" is not valid` });
+    if (Number(sc.n) !== Number(l.term_months)) badLoans.push({ t: `${tag}: schedule has ${sc.n} installments but the term is ${l.term_months}` });
+    if (Math.abs(Number(sc.p) - Number(l.principal)) > 0.01) badLoans.push({ t: `${tag}: schedule principal ${sc.p} ≠ loan amount ${l.principal}` });
+    if (Math.abs(Number(sc.i) - Number(l.total_interest)) > 0.01 || Math.abs(Number(l.principal) + Number(l.total_interest) - Number(l.total_payable)) > 0.01)
+      badLoans.push({ t: `${tag}: interest ${sc.i} / total payable ${l.total_payable} do not add up` });
+    if (Number(back.p) > Number(l.principal) + 0.01) badLoans.push({ t: `${tag}: principal repaid ${back.p} is more than the loan ${l.principal}` });
+    if (l.status === 'Closed' && Math.abs(Number(back.p) - Number(l.principal)) > 0.01) badLoans.push({ t: `${tag}: marked closed but principal repaid is ${back.p} of ${l.principal}` });
+    if (l.status === 'Active' && Number(back.p) >= Number(l.principal) - 0.004) badLoans.push({ t: `${tag}: fully repaid but still marked running` });
+    if (l.status === 'Written off' && Math.abs(Number(l.principal) - Number(back.p) - Number(l.written_off_amount)) > 0.01)
+      badLoans.push({ t: `${tag}: written-off amount ${l.written_off_amount} ≠ unpaid principal ${r2(Number(l.principal) - Number(back.p))}` });
+  }
+  add('loan_math', 'Personal loans: schedules, repayments and statuses add up', 'fail', badLoans, r => r.t);
+  add('loan_repay', 'Loan repayments are valid', 'fail',
+    all(`SELECT r.id, l.loan_no, r.paid_date, r.total_paid, r.principal_paid, r.interest_paid, r.penalty_paid FROM loan_repayments r LEFT JOIN personal_loans l ON l.id = r.loan_id
+         WHERE l.id IS NULL OR r.total_paid <= 0 OR r.principal_paid < 0 OR r.interest_paid < 0 OR r.penalty_paid < 0
+            OR ABS(r.total_paid - (r.principal_paid + r.interest_paid + r.penalty_paid)) > 0.009 OR NOT ${iso('r.paid_date')} OR r.paid_date > ? OR r.paid_date < l.disbursed_date`, [today]),
+    r => `#${r.id} ${r.loan_no ?? 'missing loan'}: ${r.total_paid} (= ${r.principal_paid} + ${r.interest_paid} + ${r.penalty_paid}) on "${r.paid_date}"`);
+  add('loan_inactive', 'Members with an unpaid loan are still active', 'warn',
+    all(`SELECT m.member_code, m.name, l.loan_no FROM personal_loans l JOIN members m ON m.id = l.member_id WHERE l.status = 'Active' AND m.status != 'Active'`),
+    r => `${r.member_code} ${r.name}: inactive but still owes ${r.loan_no}`);
+  add('loan_overdue', 'No personal loan installments are overdue', 'warn',
+    enrichLoans().filter(l => l.derived_status === 'Overdue'),
+    r => `${r.loan_no} ${r.member_code} ${r.member_name}: TK ${r.overdue_amount} overdue (${r.overdue_count} installment${r.overdue_count === 1 ? '' : 's'}, ${r.days_overdue} days)`);
+
   // settings
   const st = settingsMap();
   const badSettings: Row[] = [];
@@ -2139,8 +2665,10 @@ function checkAccountingHealth() {
   const opening = num('SELECT COALESCE(SUM(opening_balance),0) FROM members');
   const credits = num('SELECT COALESCE(SUM(total_amount),0) FROM collections')
     + num(`SELECT COALESCE(SUM(sold_amount),0) FROM investments WHERE status='Sold'`)
-    + num(`SELECT COALESCE(SUM(amount),0) FROM investment_returns WHERE entry_type='Profit'`);
+    + num(`SELECT COALESCE(SUM(amount),0) FROM investment_returns WHERE entry_type='Profit'`)
+    + num('SELECT COALESCE(SUM(total_paid),0) FROM loan_repayments');
   const debits = num('SELECT COALESCE(SUM(amount),0) FROM expenses') + num('SELECT COALESCE(SUM(invested_amount),0) FROM investments')
+    + num('SELECT COALESCE(SUM(principal),0) FROM personal_loans')
     + num(`SELECT COALESCE(SUM(amount),0) FROM investment_returns WHERE entry_type='Loss'`)
     + num('SELECT COALESCE(SUM(total_paid),0) FROM member_settlements');
   const ledgerCash = opening + credits - debits;
@@ -2271,6 +2799,7 @@ export const api: Record<string, (...args: any[]) => any> = {
   getInvestments, addInvestment, updateInvestment, updateInvestmentValuation, deleteInvestment,
   getInvestmentReturns, getReturnsSummary, addInvestmentReturn, deleteInvestmentReturn,
   previewMemberSettlement, settleMember, getMemberSettlements, cancelSettlement,
+  getLoans, getLoan, getLoanSummary, previewLoan, addLoan, updateLoan, deleteLoan, previewLoanRepayment, recordLoanRepayment, deleteLoanRepayment, writeOffLoan, cancelLoanWriteOff,
   getExpenses, addExpense, updateExpense, verifyExpenseReceipt, deleteExpense,
   getUsers, getUserProfile, addUser, updateUser, deleteUser,
   login, logout, getSession, changeOwnPassword, setUserPassword, checkAccountingHealth,

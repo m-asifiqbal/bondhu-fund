@@ -10,6 +10,7 @@ import type {
   Member, CollectionRecord, Investment, Expense, AppUser, MasterCategory, BackupRecord,
   OverviewMetrics, AppSettings, AppNotification, OverviewData, MemberStats, CollectionStats,
   LedgerRow, AuditEntry, InvestmentReturn, ReturnsSummary, SettlementPreview, MemberSettlement, SnapshotFile, AppInfo, MemberStatement, UserProfile, ImportOptions, ImportPreview, ImportResult, SessionInfo, HealthReport,
+  Loan, LoanDetail, LoanSummary, LoanPreview, LoanInput, LoanRepaymentQuote,
 } from '../types';
 
 type Result<T> = { ok: true; data: T } | { ok: false; error: string };
@@ -251,3 +252,23 @@ export const settleMember = (d: { member_id: number; settlement_date: string; pa
   call<number>('settleMember', d);
 export const getMemberSettlements = () => call<MemberSettlement[]>('getMemberSettlements');
 export const cancelSettlement = (memberId: number) => call<void>('cancelSettlement', memberId);
+
+// Personal loans ------------------------------------------------------------------------------
+/** status: All | Open | Overdue | Running | Closed | Written off */
+export const getLoans = (sortBy = 'newest', status = 'All', startDate?: string, endDate?: string, search = '', memberId?: number) =>
+  call<Loan[]>('getLoans', sortBy, status, startDate, endDate, search, memberId);
+export const getLoan = (id: number) => call<LoanDetail>('getLoan', id);
+export const getLoanSummary = () => call<LoanSummary>('getLoanSummary');
+/** Live schedule + totals + other terms + policy warnings. Never rejects for bad input: check `valid`. */
+export const previewLoan = (d: Partial<LoanInput>) => call<LoanPreview>('previewLoan', d);
+export const addLoan = (d: LoanInput) => call<number>('addLoan', d);
+export const updateLoan = (id: number, d: { purpose?: string; guarantor?: string; notes?: string; reference?: string }) => call<void>('updateLoan', id, d);
+export const deleteLoan = (id: number) => call<void>('deleteLoan', id);
+export const previewLoanRepayment = (loanId: number, paidDate?: string, amount?: number | string, kind?: 'Installment' | 'Closure', interest?: number | string) =>
+  call<LoanRepaymentQuote>('previewLoanRepayment', loanId, paidDate, amount, kind, interest);
+export const recordLoanRepayment = (d: { loan_id: number; paid_date: string; kind?: 'Installment' | 'Closure'; amount?: number; interest?: number; penalty?: number; payment_method: string; trx_id?: string; note?: string }) =>
+  call<number>('recordLoanRepayment', d);
+export const deleteLoanRepayment = (id: number) => call<void>('deleteLoanRepayment', id);
+/** Admin only. */
+export const writeOffLoan = (d: { loan_id: number; date: string; reason: string }) => call<void>('writeOffLoan', d);
+export const cancelLoanWriteOff = (loanId: number) => call<void>('cancelLoanWriteOff', loanId);

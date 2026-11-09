@@ -24,7 +24,7 @@ const L = {
   collectedShort: ['Collected', 'আদায়'],
   netWorth: ['Net worth', 'মোট সম্পদ'], cash: ['Cash in hand', 'হাতে নগদ'], collected: ['Collected this month', 'এ মাসে আদায়'],
   outstanding: ['Outstanding dues', 'বকেয়া'], portfolio: ['Portfolio value', 'বিনিয়োগ মূল্য'], expenses: ['Expenses this month', 'এ মাসের খরচ'],
-  vsLast: ['vs last month', 'গত মাসের তুলনায়'], of: ['of', 'এর মধ্যে'],
+  vsLast: ['vs last month', 'গত মাসের তুলনায়'], of: ['of', 'এর মধ্যে'], lentOut: ['lent to members as loans', 'সদস্যদের ঋণ হিসেবে দেওয়া'],
   collections: ['Collections', 'আদায়'], fund: ['Fund growth & cash flow', 'তহবিল বৃদ্ধি ও নগদ প্রবাহ'],
   portfolioSpend: ['Portfolio & spending', 'বিনিয়োগ ও খরচ'], members: ['Members', 'সদস্য'],
   expVsColl: ['Expected vs collected', 'প্রত্যাশিত বনাম আদায়'], expected: ['Expected', 'প্রত্যাশিত'], last12: ['Last 12 months', 'গত ১২ মাস'],
@@ -399,7 +399,8 @@ export const OverviewView: React.FC = () => {
       {/* KPI tiles */}
       <div className="kpi-zoom grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 min-[1800px]:grid-cols-6 min-[2200px]:grid-cols-8 gap-4">
         <Kpi accent="purple" icon={<Wallet size={16} />} label={tr('netWorth')} value={money(k.netWorth)} delta={pct(k.fundBalance, k.prevFundBalance)} deltaLabel={tr('vsLast')} digits={digits} />
-        <Kpi accent="blue" icon={<Landmark size={16} />} label={tr('cash')} value={money(k.cashInHand)} delta={pct(k.cashInHand, k.prevCashInHand)} deltaLabel={tr('vsLast')} digits={digits} />
+        <Kpi accent="blue" icon={<Landmark size={16} />} label={tr('cash')} value={money(k.cashInHand)} delta={pct(k.cashInHand, k.prevCashInHand)} deltaLabel={tr('vsLast')} digits={digits}
+          note={k.loansOutstanding > 0 ? `${money(k.loansOutstanding)} ${tr('lentOut')}` : undefined} />
         <Kpi accent="green" icon={<HandCoins size={16} />} label={tr('collected')} value={money(k.monthCollected)}
           foot={<Progress value={k.collectionRate} label={`${digits(k.collectionRate)}% ${tr('of')} ${money(k.monthExpected)}`} />} />
         <Kpi accent="amber" icon={<AlertTriangle size={16} />} label={tr('outstanding')} value={money(k.outstanding)} tone={k.outstanding > 0 ? 'warn' : undefined}
@@ -600,8 +601,8 @@ export const OverviewView: React.FC = () => {
             <ul className="divide-y divide-slate-100 dark:divide-[#1b2c34]">
               {data.recent.map(r => (
                 <li key={`${r.kind}-${r.id}`} className="py-2.5 flex items-center gap-3">
-                  <span className={`w-8 h-8 shrink-0 rounded-xl flex items-center justify-center ${(r.kind === 'collection' || (r.kind === 'return' && r.amount >= 0)) ? 'bg-emerald-50 text-emerald-600 dark:bg-emerald-950/50 dark:text-emerald-400' : r.kind === 'member' ? 'bg-sky-50 text-sky-600 dark:bg-sky-950/50 dark:text-sky-400' : 'bg-rose-50 text-rose-600 dark:bg-rose-950/50 dark:text-rose-400'}`}>
-                    {(r.kind === 'collection' || (r.kind === 'return' && r.amount >= 0)) ? <ArrowDownLeft size={14} /> : r.kind === 'member' ? <UserPlus size={14} /> : <ArrowUpRight size={14} />}
+                  <span className={`w-8 h-8 shrink-0 rounded-xl flex items-center justify-center ${(r.kind === 'collection' || r.kind === 'repayment' || (r.kind === 'return' && r.amount >= 0)) ? 'bg-emerald-50 text-emerald-600 dark:bg-emerald-950/50 dark:text-emerald-400' : r.kind === 'member' ? 'bg-sky-50 text-sky-600 dark:bg-sky-950/50 dark:text-sky-400' : 'bg-rose-50 text-rose-600 dark:bg-rose-950/50 dark:text-rose-400'}`}>
+                    {(r.kind === 'collection' || r.kind === 'repayment' || (r.kind === 'return' && r.amount >= 0)) ? <ArrowDownLeft size={14} /> : r.kind === 'member' ? <UserPlus size={14} /> : <ArrowUpRight size={14} />}
                   </span>
                   <div className="min-w-0 flex-1">
                     <div className="text-xs font-bold text-slate-800 dark:text-slate-100 truncate">{recentTitle(r)}</div>
@@ -639,8 +640,8 @@ const Section: React.FC<{ icon: React.ReactNode; title: string; children: React.
 
 const Kpi: React.FC<{
   accent?: string; icon: React.ReactNode; label: string; value: string; delta?: number | null; deltaLabel?: string; invertDelta?: boolean;
-  foot?: React.ReactNode; tone?: 'warn'; onClick?: () => void; digits?: (s: string | number) => string;
-}> = ({ accent = 'green', icon, label, value, delta, deltaLabel, invertDelta, foot, tone, onClick, digits = String }) => {
+  foot?: React.ReactNode; note?: React.ReactNode; tone?: 'warn'; onClick?: () => void; digits?: (s: string | number) => string;
+}> = ({ accent = 'green', icon, label, value, delta, deltaLabel, invertDelta, foot, note, tone, onClick, digits = String }) => {
   const good = delta === null || delta === undefined ? null : invertDelta ? delta <= 0 : delta >= 0;
   const Tag: any = onClick ? 'button' : 'div';
   return (
@@ -656,6 +657,7 @@ const Kpi: React.FC<{
           {delta > 0 ? '+' : ''}{digits(delta)}% <span className="font-medium text-slate-400">{deltaLabel}</span>
         </span>
       ))}
+      {note && <span className="text-[11px] text-slate-500 dark:text-slate-400 -mt-1.5 truncate">{note}</span>}
     </Tag>
   );
 };

@@ -14,6 +14,7 @@ const MembersView = React.lazy(() => import('./views/MembersView').then(m => ({ 
 const CollectionsView = React.lazy(() => import('./views/CollectionsView').then(m => ({ default: m.CollectionsView })));
 const InvestmentsView = React.lazy(() => import('./views/InvestmentsView').then(m => ({ default: m.InvestmentsView })));
 const InvestmentReturnsView = React.lazy(() => import('./views/InvestmentReturnsView').then(m => ({ default: m.InvestmentReturnsView })));
+const PersonalLoansView = React.lazy(() => import('./views/PersonalLoansView').then(m => ({ default: m.PersonalLoansView })));
 const ExpensesView = React.lazy(() => import('./views/ExpensesView').then(m => ({ default: m.ExpensesView })));
 const EntryCenterView = React.lazy(() => import('./views/EntryCenterView').then(m => ({ default: m.EntryCenterView })));
 const MasterDataView = React.lazy(() => import('./views/MasterDataView').then(m => ({ default: m.MasterDataView })));
@@ -102,6 +103,8 @@ const MainLayout: React.FC = () => {
         return <InvestmentsView />;
       case 'returns':
         return <InvestmentReturnsView />;
+      case 'loans':
+        return <PersonalLoansView />;
       case 'expenses':
         return <ExpensesView />;
       case 'entry':

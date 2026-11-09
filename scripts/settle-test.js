@@ -109,7 +109,7 @@ const throws = (fn, re, m) => { try { fn(); ok(false, `${m} (no error)`); } catc
 
   // ---- backup round trip keeps the new tables ----
   const st = A.getDatabaseStats();
-  ok(st.settlements === 2 && st.returns === 4 && st.schemaVersion === 4, `stats: ${st.settlements} settlements, ${st.returns} returns, schema v${st.schemaVersion}`);
+  ok(st.settlements === 2 && st.returns === 4 && st.schemaVersion === 5, `stats: ${st.settlements} settlements, ${st.returns} returns, schema v${st.schemaVersion}`);
 
   console.log(fails ? `\n${fails} FAILURE(S)` : '\nALL SETTLEMENT CHECKS PASSED');
   process.exit(fails ? 1 : 0);

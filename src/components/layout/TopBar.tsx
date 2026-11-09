@@ -27,6 +27,7 @@ const TAB_KEYS: Record<NavTab, [string, string]> = {
   collections: ['nav.collections', 'Collections'],
   investments: ['nav.investments', 'Investments'],
   returns: ['nav.returns', 'Investment Returns'],
+  loans: ['nav.loans', 'Personal Loans'],
   expenses: ['nav.expenses', 'Expenses'],
   entry: ['nav.entry', 'Entry Center'],
   master: ['nav.master', 'Master Data'],

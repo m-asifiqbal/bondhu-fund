@@ -1,6 +1,6 @@
 {
   "name": "bondhu-fund-desktop",
-  "version": "2.6.1",
+  "version": "2.7.0",
   "description": "Bondhu Fund - offline fund management for member savings groups",
   "author": "Bondhu Fund",
   "homepage": "https://www.iqballabs.com",
@@ -22,7 +22,8 @@
     "typecheck:electron": "tsc -p tsconfig.electron.json --noEmit",
     "test:audit": "node scripts/bundle-electron.js && node scripts/audit-test.js",
     "test:backup": "node scripts/bundle-electron.js && node scripts/backup-test.js",
-    "test:nid": "node scripts/bundle-electron.js && node scripts/nid-test.js"
+    "test:nid": "node scripts/bundle-electron.js && node scripts/nid-test.js",
+    "test:loans": "node scripts/bundle-electron.js && node scripts/loan-test.js"
   },
   "build": {
     "appId": "org.bondhufund.desktop",

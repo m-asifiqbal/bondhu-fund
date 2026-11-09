@@ -21,6 +21,7 @@ import {
   Lock,
   KeyRound,
   Coins,
+  HandCoins,
   LogOut,
 } from 'lucide-react';
 import { Modal } from '../common/Modal';
@@ -200,6 +201,7 @@ export const Sidebar: React.FC = () => {
       items: [
         { id: 'investments', label: t('nav.investments', 'Investments'), icon: TrendingUp },
         { id: 'returns', label: t('nav.returns', 'Investment Returns'), icon: Coins },
+        { id: 'loans', label: t('nav.loans', 'Personal Loans'), icon: HandCoins },
         { id: 'reports', label: t('nav.reports', 'Reports & Export'), icon: FileSpreadsheet },
       ],
     },

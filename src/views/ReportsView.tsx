@@ -132,6 +132,7 @@ export const ReportsView: React.FC = () => {
     { value: 'investment', label: t('reports.investments_only', 'Investments only') },
     { value: 'return', label: t('reports.returns_only', 'Investment profit / loss only') },
     { value: 'settlement', label: t('reports.settlements_only', 'Member settlements only') },
+    { value: 'loan', label: t('reports.loans_only', 'Personal loans only') },
   ], [t]);
   const statusOptions = useMemo(() => {
     const mk = (vals: string[]): SelectOption[] => vals.map(v => ({ value: v, label: tv(v) }));

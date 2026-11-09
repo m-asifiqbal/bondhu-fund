@@ -10,6 +10,7 @@ export type NavTab =
   | 'collections'
   | 'investments'
   | 'returns'
+  | 'loans'
   | 'expenses'
   | 'entry'
   | 'master'
@@ -162,6 +163,11 @@ export interface AppSettings {
   organization_name_bn?: string;
   /** data:image/... logo, '' when unset */
   org_logo?: string;
+  /** personal-loan policy (Settings → Personal loans) */
+  loan_default_rate?: number;
+  loan_default_method?: LoanMethod;
+  loan_max_multiple?: number;
+  loan_late_fee?: number;
 }
 
 export interface OverviewMetrics {
@@ -199,7 +205,7 @@ export interface MemberStatement {
 }
 
 export interface LedgerRow {
-  type: 'collection' | 'expense' | 'investment' | 'sale' | 'return' | 'settlement';
+  type: 'collection' | 'expense' | 'investment' | 'sale' | 'return' | 'settlement' | 'loan' | 'loan_repayment';
   date: string; party: string; description: string; method: string; reference: string; credit: number; debit: number;
 }
 
@@ -224,7 +230,7 @@ export interface OverviewData {
   today: string;
   kpis: {
     netWorth: number; prevNetWorth: number; fundBalance: number; prevFundBalance: number;
-    cashInHand: number; prevCashInHand: number; lifetimeCollected: number; totalExpenses: number; realizedGain: number;
+    cashInHand: number; prevCashInHand: number; loansOutstanding: number; loanIncome: number; lifetimeCollected: number; totalExpenses: number; realizedGain: number;
     monthCollected: number; prevMonthCollected: number; monthReceived: number; monthExpected: number;
     collectionRate: number; prevCollectionRate: number; monthLateFees: number; monthLateCount: number; prevMonthLateFees: number; yearLateFees: number; yearLateCount: number; lifetimeLateFees: number; monthExpenses: number; prevMonthExpenses: number;
     outstanding: number; paid: number; pending: number; overdue: number; dueMembers: number;
@@ -249,7 +255,7 @@ export interface OverviewData {
     receiptCount: number;
     lastBackup: string;
   };
-  recent: Array<{ kind: 'collection' | 'expense' | 'investment' | 'member' | 'return' | 'settlement'; id: number; title: string; sub: string; amount: number; date: string; created_at: string }>;
+  recent: Array<{ kind: 'collection' | 'expense' | 'investment' | 'member' | 'return' | 'settlement' | 'loan' | 'repayment'; id: number; title: string; sub: string; amount: number; date: string; created_at: string }>;
 }
 
 export interface UserProfile {
@@ -326,4 +332,63 @@ export interface MemberSettlement {
   id: number; member_id: number; member_code: string; member_name: string; member_name_bn?: string | null; avatar_initials?: string;
   settlement_date: string; principal: number; calc_profit_share: number; profit_share: number; total_paid: number;
   payment_method: string; trx_id?: string | null; note?: string | null;
+}
+
+// Personal loans ----------------------------------------------------------------------------
+export type LoanMethod = 'reducing' | 'flat' | 'free';
+/** derived: 'Running' = open and on time; 'Overdue' = open with a past-due installment */
+export type LoanStatus = 'Running' | 'Overdue' | 'Closed' | 'Written off';
+export interface Loan {
+  id: number; loan_no: string; member_id: number;
+  member_code: string; member_name: string; member_name_bn?: string | null; avatar_initials?: string; member_phone?: string | null; member_status?: string;
+  principal: number; method: LoanMethod; annual_rate: number; term_months: number;
+  disbursed_date: string; first_due_date: string; installment: number; total_interest: number; total_payable: number;
+  payment_method?: string | null; reference?: string | null; purpose?: string | null; guarantor?: string | null; notes?: string | null;
+  status: 'Active' | 'Closed' | 'Written off'; closed_date?: string | null;
+  written_off_amount: number; written_off_date?: string | null; written_off_reason?: string | null;
+  paid_principal: number; paid_interest: number; paid_penalty: number; total_paid: number; paid_schedule: number;
+  outstanding_principal: number; remaining_interest: number; remaining_payable: number;
+  installments_total: number; installments_paid: number;
+  next_due_date: string | null; next_due_amount: number;
+  overdue_count: number; overdue_amount: number; days_overdue: number; due_30: number; due_to_date: number;
+  last_payment_date: string | null; repayment_count: number;
+  derived_status: LoanStatus; progress_pct: number;
+}
+export interface LoanSummary {
+  loans: number; running: number; overdueLoans: number; closed: number; writtenOff: number; borrowers: number;
+  totalLent: number; outstanding: number; principalRepaid: number; interestEarned: number; penaltyEarned: number; interestExpected: number; totalCollected: number;
+  overdueAmount: number; overduePrincipal: number; dueNext30: number; writtenOffAmount: number; onTrackPct: number;
+  cashInHand: number; fundBalance: number; lentPctOfFund: number; avgRate: number;
+}
+export interface LoanPlanRow { no: number; due_date: string; principal: number; interest: number; total: number; balance: number }
+export interface LoanTermOption { term: number; installment: number; totalInterest: number; totalPayable: number; effectiveRate: number }
+export interface LoanPreview {
+  valid: boolean; error?: string;
+  terms?: { principal: number; method: LoanMethod; annual_rate: number; term_months: number; first_due_date: string; disbursed_date: string };
+  plan?: { rows: LoanPlanRow[]; installment: number; lastInstallment: number; totalInterest: number; totalPayable: number; effectiveRate: number };
+  options?: LoanTermOption[];
+  warnings?: Array<{ level: 'error' | 'warn' | 'info'; text: string }>;
+  cash?: number;
+  member?: { id: number; member_code: string; name: string; status: string; monthly_due: number; savings: number; owed: number; limit: number | null; multiple: number; available: number | null; overdueLoans: number } | null;
+}
+export interface LoanInstallment { no: number; due_date: string; principal: number; interest: number; total: number; paid: number; status: 'Paid' | 'Partial' | 'Due' | 'Overdue' | 'Waived' | 'Written off'; balance_after: number }
+export interface LoanRepayment {
+  id: number; loan_id: number; paid_date: string; kind: 'Installment' | 'Closure';
+  principal_paid: number; interest_paid: number; penalty_paid: number; total_paid: number;
+  payment_method?: string | null; trx_id?: string | null; note?: string | null; created_by?: string | null;
+}
+export interface LoanDetail {
+  loan: Loan; schedule: LoanInstallment[]; repayments: LoanRepayment[]; latestRepaymentId: number | null;
+  member: { id: number; member_code: string; name: string; name_bn?: string | null; avatar_initials?: string; phone?: string; monthly_due: number; status: string; savings: number; owed: number };
+  memberLoans: Loan[];
+}
+export interface LoanRepaymentQuote {
+  open: boolean; status?: string; loan_no?: string; date?: string; kind?: 'Installment' | 'Closure';
+  principal?: number; interest?: number; calcInterest?: number; amount?: number; completed?: number[]; closes?: boolean; waivedInterest?: number;
+  suggestedPenalty?: number; nextDueAmount?: number; nextDueDate?: string | null; overdueAmount?: number; overdueCount?: number;
+  outstanding?: number; remainingPayable?: number; outstandingAfter?: number;
+}
+export interface LoanInput {
+  member_id: number; principal: number; method: LoanMethod; annual_rate: number; term_months: number;
+  disbursed_date: string; first_due_date?: string; payment_method: string; reference?: string; purpose?: string; guarantor?: string; notes?: string; limit_note?: string;
 }

@@ -79,6 +79,8 @@ const VALUE_KEYS: Record<string, string> = {
   Admin: 'role.admin', Treasurer: 'role.treasurer', Auditor: 'role.auditor', Manager: 'role.manager', Member: 'role.member',
   Manual: 'backup.manual', Automatic: 'backup.automatic', 'Pre-Restore': 'backup.pre_restore', Restored: 'backup.restored',
   collection: 'ledger.collection', expense: 'ledger.expense', investment: 'ledger.investment', sale: 'ledger.sale',
+  return: 'ledger.return', settlement: 'ledger.settlement', loan: 'ledger.loan', loan_repayment: 'ledger.loan_repayment',
+  Running: 'loan.s_running', Closed: 'loan.s_closed', 'Written off': 'loan.s_written_off',
 };
 
 export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
