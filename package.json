@@ -1,6 +1,6 @@
 {
   "name": "bondhu-fund-desktop",
-  "version": "2.7.0",
+  "version": "2.8.0",
   "description": "Bondhu Fund - offline fund management for member savings groups",
   "author": "Bondhu Fund",
   "homepage": "https://www.iqballabs.com",
@@ -12,6 +12,7 @@
     "build:all": "npm run build && npm run build:electron",
     "dist": "npm run build:all && electron-builder --win nsis portable zip --x64",
     "dist:dir": "npm run build:all && electron-builder --win --dir",
+    "dist:mac": "npm run build:all && electron-builder --mac dmg zip --arm64",
     "electron:dev": "npm run build:electron && concurrently -k \"vite\" \"wait-on tcp:5173 && cross-env NODE_ENV=development ELECTRON_RUN_AS_NODE= electron .\"",
     "start": "cmd /c \"set ELECTRON_RUN_AS_NODE=&& node_modules\\electron\\dist\\electron.exe .\"",
     "typecheck": "tsc --noEmit && tsc -p tsconfig.electron.json --noEmit",
@@ -23,7 +24,13 @@
     "test:audit": "node scripts/bundle-electron.js && node scripts/audit-test.js",
     "test:backup": "node scripts/bundle-electron.js && node scripts/backup-test.js",
     "test:nid": "node scripts/bundle-electron.js && node scripts/nid-test.js",
-    "test:loans": "node scripts/bundle-electron.js && node scripts/loan-test.js"
+    "test:loans": "node scripts/bundle-electron.js && node scripts/loan-test.js",
+    "test:access": "node scripts/bundle-electron.js && node scripts/access-test.js",
+    "test:gsync": "node scripts/bundle-electron.js && node scripts/gsync-test.js",
+    "test:license": "node scripts/bundle-electron.js && node scripts/license-test.js",
+    "test:review": "node scripts/bundle-electron.js && node scripts/review-test.js",
+    "test:fines": "node scripts/bundle-electron.js && node scripts/fines-test.js",
+    "test:fuzz": "node scripts/bundle-electron.js && node scripts/books-fuzz-test.js"
   },
   "build": {
     "appId": "org.bondhufund.desktop",
@@ -84,6 +91,17 @@
         "rfc3161TimeStampServer": "http://timestamp.digicert.com"
       }
     },
+    "mac": {
+      "icon": "build/icon-mac.png",
+      "category": "public.app-category.finance",
+      "target": [
+        { "target": "dmg", "arch": ["arm64"] },
+        { "target": "zip", "arch": ["arm64"] }
+      ],
+      "identity": null,
+      "artifactName": "BondhuFund-macOS-${version}-${arch}.${ext}"
+    },
+    "dmg": { "title": "Bondhu Fund ${version}" },
     "nsis": {
       "oneClick": false,
       "perMachine": false,

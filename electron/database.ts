@@ -18,7 +18,7 @@ import type { Database, SqlJsStatic } from 'sql.js';
 import type { ParsedWorkbook } from './excel';
 import { buildPlan, validateTerms, compareTerms, COMMON_TERMS, allocatePayment, scheduleState, addMonthsKeepDay, daysBetween, LOAN_METHODS, type LoanTerms, type LoanMethod } from './loans';
 
-export const SCHEMA_VERSION = 5;
+export const SCHEMA_VERSION = 9;
 
 let SQL: SqlJsStatic;
 let db: Database;
@@ -66,8 +66,18 @@ function tx<T>(fn: () => T): T {
   }
 }
 
-function mutated() {
+let changeHook: (() => void) | null = null;
+/** Google sync wants to know when real data changed (not sign-ins or backup log lines). */
+export function setChangeHook(fn: (() => void) | null) { changeHook = fn; }
+
+let accessGate: ((username: string) => string | null) | null = null;
+/** The software licence: while it returns a message for a username, that user cannot sign in or keep working (iqbal_labs is never asked). Nothing in the data is touched. */
+export function setAccessGate(fn: ((username: string) => string | null) | null) { accessGate = fn; }
+
+/** `noise`: the change is bookkeeping (a sign-in, a backup log line) and must not count as "data changed" for cloud sync. */
+function mutated(noise = false) {
   dirty = true;
+  if (!noise) { try { changeHook?.(); } catch { /* sync must never break a save */ } }
   if (saveTimer) clearTimeout(saveTimer);
   saveTimer = setTimeout(flush, 250);
 }
@@ -99,6 +109,17 @@ function ensureV2Columns() {
   for (const [, n, , bn] of DEFAULT_MASTER) run('UPDATE master_data SET name_bn = ? WHERE name = ? AND name_bn IS NULL', [bn, n]);
   addColumn('audit_log', 'user_id', 'INTEGER');
   run('CREATE INDEX IF NOT EXISTS idx_audit_user ON audit_log(user_id, id)');
+}
+
+/** Schema v6: structured guarantor details on personal loans (v5 only had a free-text name). */
+function ensureLoanColumns() {
+  for (const [c, d] of [
+    ['guarantor_type', 'TEXT'], ['guarantor_member_id', 'INTEGER'], ['guarantor_name', 'TEXT'], ['guarantor_address', 'TEXT'],
+    ['guarantor_nid', 'TEXT'], ['guarantor_phone', 'TEXT'], ['guarantor_relation', 'TEXT'],
+    // schema v7: the signed consent paper that must exist before disbursement
+    ['application_no', 'TEXT'], ['consent_status', 'TEXT'], ['consent_file', 'TEXT'], ['consent_name', 'TEXT'], ['consent_size', 'INTEGER'], ['consent_sha256', 'TEXT'], ['consent_uploaded_at', 'TEXT'],
+  ]) addColumn('personal_loans', c, d);
+  run('CREATE INDEX IF NOT EXISTS idx_loans_guarantor ON personal_loans(guarantor_member_id)');
 }
 
 /** Image data URLs (avatar/logo) are stored inline; keep them small. */
@@ -140,7 +161,10 @@ export function toISODate(v: any, fallbackYear?: number): string | null {
   if (!v) return null;
   const s = String(v).trim();
   let m = s.match(/^(\d{4})-(\d{2})-(\d{2})/);
-  if (m) return `${m[1]}-${m[2]}-${m[3]}`;
+  if (m) {   // a real calendar date only (2025-99-99 or 2025-02-30 are not dates)
+    const y = +m[1], mo = +m[2], dd = +m[3], t = new Date(Date.UTC(y, mo - 1, dd));
+    return t.getUTCFullYear() === y && t.getUTCMonth() === mo - 1 && t.getUTCDate() === dd ? `${m[1]}-${m[2]}-${m[3]}` : null;
+  }
   m = s.match(/^(\d{1,2})[/.-](\d{1,2})[/.-](\d{4})$/);
   if (m) return `${m[3]}-${pad(+m[2])}-${pad(+m[1])}`;
   m = s.match(/^(\d{1,2})\s+([A-Za-z]+),?\s*(\d{4})?$/);
@@ -256,6 +280,30 @@ CREATE TABLE IF NOT EXISTS loan_repayments (
   total_paid REAL NOT NULL CHECK (total_paid > 0),   -- = principal + interest + penalty
   payment_method TEXT, trx_id TEXT, note TEXT, created_by TEXT,
   created_at TEXT DEFAULT (datetime('now','localtime')));
+CREATE TABLE IF NOT EXISTS investment_reviews (            -- schema v9: what the committee decided at each review meeting
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  investment_id INTEGER NOT NULL REFERENCES investments(id) ON DELETE CASCADE,
+  meeting_date TEXT NOT NULL,
+  decision TEXT NOT NULL CHECK (decision IN ('Hold','Watch','Sell','Other')),
+  notes TEXT,
+  value_before REAL NOT NULL, value_after REAL NOT NULL,   -- the estimated market value before and as agreed at the meeting
+  status_after TEXT, next_review_date TEXT,
+  attendees TEXT,
+  created_by TEXT, created_at TEXT DEFAULT (datetime('now','localtime')));
+CREATE INDEX IF NOT EXISTS idx_invrev_inv ON investment_reviews(investment_id, meeting_date);
+CREATE TABLE IF NOT EXISTS loan_applications (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  app_no TEXT NOT NULL UNIQUE,
+  member_id INTEGER NOT NULL REFERENCES members(id),
+  principal REAL NOT NULL, method TEXT NOT NULL, annual_rate REAL NOT NULL DEFAULT 0, term_months INTEGER NOT NULL,
+  disbursed_date TEXT NOT NULL, first_due_date TEXT NOT NULL,
+  installment REAL NOT NULL, total_interest REAL NOT NULL, total_payable REAL NOT NULL,   -- exactly what is printed on the consent paper
+  payment_method TEXT, reference TEXT, purpose TEXT, notes TEXT, limit_note TEXT,
+  guarantor TEXT, guarantor_type TEXT, guarantor_member_id INTEGER, guarantor_name TEXT, guarantor_address TEXT, guarantor_nid TEXT, guarantor_phone TEXT, guarantor_relation TEXT,
+  consent_file TEXT, consent_name TEXT, consent_size INTEGER, consent_sha256 TEXT, consent_uploaded_at TEXT,
+  status TEXT NOT NULL DEFAULT 'Draft',           -- Draft → Activated (the loan exists). A draft never touches the books.
+  loan_id INTEGER, created_by TEXT, created_at TEXT DEFAULT (datetime('now','localtime')), updated_at TEXT);
+CREATE INDEX IF NOT EXISTS idx_loanapp_status ON loan_applications(status);
 CREATE INDEX IF NOT EXISTS idx_loans_member ON personal_loans(member_id);
 CREATE INDEX IF NOT EXISTS idx_loans_status ON personal_loans(status);
 CREATE INDEX IF NOT EXISTS idx_loanrep_loan ON loan_repayments(loan_id, id);
@@ -299,6 +347,7 @@ const DEFAULT_SETTINGS: Record<string, string> = {
   loan_default_method: 'reducing',
   loan_max_multiple: '0',     // 0 = no limit; otherwise a member's loans may not exceed this × their savings without a written reason
   loan_late_fee: '0',         // suggested penalty per installment paid late (0 = none)
+  loan_consent_required: '1', // 1 = a loan is a draft until its signed consent paper is uploaded; 0 = loans are disbursed immediately
 };
 
 const DEFAULT_MASTER: Array<[string, string, string, string]> = [
@@ -347,6 +396,8 @@ function migrate(target: Database) {
     // future: if (version < 2) { ... }
     run(SCHEMA); // idempotent: creates any missing table/index
     ensureV2Columns();
+    ensureLoanColumns();
+    addColumn('users', 'permissions', 'TEXT');   // schema v8: the Super User's per-module access grants (JSON); NULL = the role's default
     ensureDefaults();
     ensureAccounts();
     run(`PRAGMA user_version = ${SCHEMA_VERSION}`);
@@ -493,6 +544,7 @@ export function replaceWith(bytes: Buffer) {
   db = candidate;
   old?.close();
   flush();
+  try { changeHook?.(); } catch { /* ignore */ }   // the data is now different from whatever was last synced (cloud sync resets this after a pull)
 }
 
 export function setActor(name: string, id?: number | null) { actor = name || 'System'; actorId = id ?? null; }
@@ -527,6 +579,7 @@ function getAppSettings() {
     loan_default_method: (LOAN_METHODS as string[]).includes(s.loan_default_method) ? s.loan_default_method : 'reducing',
     loan_max_multiple: Number(s.loan_max_multiple) || 0,
     loan_late_fee: Number(s.loan_late_fee) || 0,
+    loan_consent_required: s.loan_consent_required !== '0',
   };
 }
 
@@ -617,14 +670,17 @@ function fundPosition(asOf = todayISO()) {
 const r2 = (n: number) => Math.round((n + Number.EPSILON) * 100) / 100;
 
 /**
- * Share of investment benefit for one member, from the date each benefit was earned.
- * Every benefit event (profit entry, loss entry, realised gain/loss on a sale) is split between the members
- * who were still in the fund on that date, in proportion to each member's principal (opening balance +
- * contributions paid up to that date). A member only shares in events dated up to their settlement date.
+ * Share of investment benefit, from the date each benefit was earned.
+ * Every benefit event (profit entry, loss entry, realised gain/loss on a sale, loan interest, a loan written off) is split between the members
+ * who were still in the fund on that date, in proportion to each member's principal (opening balance + contributions paid up to that date).
+ * A member only shares in events dated up to their settlement date.
+ * Computed for all members in one pass, so the settlement of one member and the books-balance check use exactly the same arithmetic.
+ *   own = the member being settled: counts as present up to `own.date` (instead of any settlement already recorded for him).
+ *   unallocated = benefit that had nobody to be shared with (no member in the fund on that date): it stays in the fund.
  */
-function memberBenefitShare(memberId: number, settleDate: string) {
-  type E = { date: string; amount: number; label: string };
-  const events: E[] = [
+type BenefitEvent = { date: string; amount: number; label: string; borrower?: number };
+function benefitEvents(settleDate: string): BenefitEvent[] {
+  const events = [
     ...all(`SELECT r.entry_date AS date, CASE r.entry_type WHEN 'Profit' THEN r.amount ELSE -r.amount END AS amount, i.name AS label
             FROM investment_returns r JOIN investments i ON i.id = r.investment_id WHERE r.entry_date <= ?`, [settleDate]),
     ...all(`SELECT sold_date AS date, sold_amount - invested_amount AS amount, name AS label FROM investments
@@ -632,39 +688,225 @@ function memberBenefitShare(memberId: number, settleDate: string) {
     // loan interest earned by the fund is shared with members like any other benefit; a written-off loan is a shared loss
     ...all(`SELECT r.paid_date AS date, r.interest_paid AS amount, l.loan_no AS label FROM loan_repayments r JOIN personal_loans l ON l.id = r.loan_id
             WHERE r.interest_paid > 0 AND r.paid_date <= ?`, [settleDate]),
-    ...all(`SELECT written_off_date AS date, -written_off_amount AS amount, loan_no AS label FROM personal_loans
+    ...all(`SELECT written_off_date AS date, -written_off_amount AS amount, loan_no AS label, member_id AS borrower FROM personal_loans
             WHERE status = 'Written off' AND written_off_date IS NOT NULL AND written_off_date <= ?`, [settleDate]),
-  ].map(e => ({ date: String(e.date), amount: Number(e.amount) || 0, label: String(e.label) }));
+  ].map((e: any) => ({ date: String(e.date), amount: Number(e.amount) || 0, label: String(e.label), borrower: e.borrower ? Number(e.borrower) : undefined }));
   events.sort((a, b) => a.date.localeCompare(b.date));
+  return events;
+}
 
+function benefitAllocation(settleDate: string, own?: { id: number; date: string }) {
+  const events = benefitEvents(settleDate);
   const members = all('SELECT id, opening_balance FROM members');
   const pays = new Map<number, Array<{ d: string; a: number }>>();
   for (const r of all('SELECT member_id, payment_date, contribution_amount FROM collections')) {
     if (!pays.has(r.member_id)) pays.set(r.member_id, []);
     pays.get(r.member_id)!.push({ d: String(r.payment_date), a: Number(r.contribution_amount) || 0 });
   }
-  const settledOn = new Map<number, string>(all('SELECT member_id, settlement_date FROM member_settlements WHERE member_id != ?', [memberId])
+  const settledOn = new Map<number, string>(all('SELECT member_id, settlement_date FROM member_settlements' + (own ? ' WHERE member_id != ?' : ''), own ? [own.id] : [])
     .map(r => [Number(r.member_id), String(r.settlement_date)]));
-  settledOn.set(memberId, settleDate);
+  if (own) settledOn.set(own.id, own.date);
   const principalAt = (id: number, opening: number, d: string) =>
     opening + (pays.get(id) || []).reduce((s, p) => s + (p.d <= d ? p.a : 0), 0);
 
-  let total = 0;
-  const lines: Array<{ date: string; label: string; amount: number; share: number }> = [];
+  const total = new Map<number, number>();
+  const lines = new Map<number, Array<{ date: string; label: string; amount: number; share: number }>>();
+  let unallocated = 0;
+  const give = (id: number, ev: BenefitEvent, share: number) => {
+    total.set(id, (total.get(id) || 0) + share);
+    if (Math.abs(share) >= 0.005) { if (!lines.has(id)) lines.set(id, []); lines.get(id)!.push({ date: ev.date, label: ev.label, amount: ev.amount, share: r2(share) }); }
+  };
   for (const ev of events) {
-    let mine = 0, all_ = 0;
+    // A written-off loan is the borrower's own debt: their savings absorb it first; only what their savings cannot cover is shared by the other members.
+    let bear = 0, rest = ev.amount;
+    if (ev.borrower !== undefined) {
+      const bm = members.find(m => Number(m.id) === ev.borrower);
+      const bsd = settledOn.get(ev.borrower);
+      const pb = bm && !(bsd !== undefined && bsd < ev.date) ? principalAt(ev.borrower, Number(bm.opening_balance) || 0, ev.date) : 0;
+      bear = Math.min(-ev.amount, pb);
+      rest = ev.amount + bear;                                   // still negative (or zero)
+    }
+    const eligible: Array<{ id: number; p: number }> = [];
+    let all_ = 0;
     for (const m of members) {
       const sd = settledOn.get(Number(m.id));
       if (sd !== undefined && sd < ev.date) continue;          // already paid out before this benefit existed
+      if (ev.borrower !== undefined && Number(m.id) === ev.borrower) continue;   // the borrower is charged separately
       const p = principalAt(Number(m.id), Number(m.opening_balance) || 0, ev.date);
       all_ += p;
-      if (Number(m.id) === memberId) mine = p;
+      eligible.push({ id: Number(m.id), p });
     }
-    const share = all_ > 0 ? (ev.amount * mine) / all_ : 0;
-    total += share;
-    if (Math.abs(share) >= 0.005) lines.push({ date: ev.date, label: ev.label, amount: ev.amount, share: r2(share) });
+    if (ev.borrower !== undefined) give(ev.borrower, ev, -bear);
+    const sharedAmount = ev.borrower !== undefined ? rest : ev.amount;
+    if (all_ > 0) for (const e of eligible) give(e.id, ev, (sharedAmount * e.p) / all_);
+    else unallocated += sharedAmount;
   }
-  return { share: r2(total), lines };
+  return { total, lines, unallocated };
+}
+
+function memberBenefitShare(memberId: number, settleDate: string) {
+  const a = benefitAllocation(settleDate, { id: Number(memberId), date: settleDate });
+  return { share: r2(a.total.get(Number(memberId)) || 0), lines: a.lines.get(Number(memberId)) || [] };
+}
+
+// ---------------------------------------------------------------------------
+// Fines: late fees on contributions and penalties on loan installments, and the proof that the books balance
+// ---------------------------------------------------------------------------
+const dayDiff = (a: string, b: string) => Math.round((Date.parse(`${b}T12:00:00Z`) - Date.parse(`${a}T12:00:00Z`)) / 86400000);
+
+/**
+ * Every fine that was collected, one row each. A contribution late fee belongs to the payment (the month it was for, the day it was paid, the day
+ * it was due, how many days late); a loan penalty belongs to a loan repayment. `flag` = 'on_time' when a fine was charged on a payment made by the due date.
+ */
+function fineRows(f: { start?: string | null; end?: string | null; memberId?: number; source?: string; search?: string }) {
+  const dd = dueDay();
+  const out: any[] = [];
+  const like = f.search?.trim() ? `%${f.search.trim()}%` : null;
+  if (f.source !== 'loan') {
+    const w = ['c.late_fee > 0']; const p: any[] = [];
+    if (f.start) { w.push('c.payment_date >= ?'); p.push(f.start); }
+    if (f.end) { w.push('c.payment_date <= ?'); p.push(f.end); }
+    if (f.memberId) { w.push('c.member_id = ?'); p.push(f.memberId); }
+    if (like) { w.push('(m.name LIKE ? OR m.member_code LIKE ? OR c.trx_id LIKE ? OR c.note LIKE ? OR c.payment_month LIKE ?)'); p.push(like, like, like, like, like); }
+    for (const r of all(`SELECT c.id, c.payment_date, c.payment_month, c.late_fee, c.contribution_amount, c.payment_method, c.trx_id, c.note, m.id AS member_id, m.member_code, m.name, m.name_bn
+                         FROM collections c JOIN members m ON m.id = c.member_id WHERE ${w.join(' AND ')}`, p)) {
+      const due = dueDateOf(String(r.payment_month), dd);
+      const late = dayDiff(due, String(r.payment_date));
+      out.push({ key: `c${r.id}`, source: 'contribution', id: r.id, date: r.payment_date, month: r.payment_month, due_date: due, days_late: Math.max(0, late), amount: r2(Number(r.late_fee)),
+        base: r2(Number(r.contribution_amount)), method: r.payment_method, trx_id: r.trx_id || '', note: r.note || '', member_id: r.member_id, member_code: r.member_code, name: r.name, name_bn: r.name_bn,
+        label: `Contribution ${r.payment_month}`, flag: late > 0 ? 'ok' : 'on_time' });
+    }
+  }
+  if (f.source !== 'contribution') {
+    const w = ['r.penalty_paid > 0']; const p: any[] = [];
+    if (f.start) { w.push('r.paid_date >= ?'); p.push(f.start); }
+    if (f.end) { w.push('r.paid_date <= ?'); p.push(f.end); }
+    if (f.memberId) { w.push('l.member_id = ?'); p.push(f.memberId); }
+    if (like) { w.push('(m.name LIKE ? OR m.member_code LIKE ? OR r.trx_id LIKE ? OR r.note LIKE ? OR l.loan_no LIKE ?)'); p.push(like, like, like, like, like); }
+    for (const r of all(`SELECT r.id, r.paid_date, r.penalty_paid, r.total_paid, r.payment_method, r.trx_id, r.note, l.loan_no, m.id AS member_id, m.member_code, m.name, m.name_bn
+                         FROM loan_repayments r JOIN personal_loans l ON l.id = r.loan_id JOIN members m ON m.id = l.member_id WHERE ${w.join(' AND ')}`, p)) {
+      out.push({ key: `l${r.id}`, source: 'loan', id: r.id, date: r.paid_date, month: String(r.paid_date).slice(0, 7), due_date: null, days_late: null, amount: r2(Number(r.penalty_paid)),
+        base: r2(Number(r.total_paid) - Number(r.penalty_paid)), method: r.payment_method, trx_id: r.trx_id || '', note: r.note || '', member_id: r.member_id, member_code: r.member_code, name: r.name, name_bn: r.name_bn,
+        label: `Loan ${r.loan_no} installment`, flag: 'ok' });
+    }
+  }
+  return out;
+}
+
+const FINE_SORT: Record<string, (a: any, b: any) => number> = {
+  newest: (a, b) => String(b.date).localeCompare(String(a.date)) || String(b.key).localeCompare(String(a.key)),
+  oldest: (a, b) => String(a.date).localeCompare(String(b.date)) || String(a.key).localeCompare(String(b.key)),
+  amount_high: (a, b) => b.amount - a.amount || String(b.date).localeCompare(String(a.date)),
+  amount_low: (a, b) => a.amount - b.amount || String(b.date).localeCompare(String(a.date)),
+  member: (a, b) => String(a.member_code).localeCompare(String(b.member_code), undefined, { numeric: true }) || String(b.date).localeCompare(String(a.date)),
+  days_late: (a, b) => (b.days_late ?? -1) - (a.days_late ?? -1) || String(b.date).localeCompare(String(a.date)),
+};
+
+/** The Fines page: the register, the totals, who pays most, which payments were late without a fine, who is overdue now, and where the money sits. */
+function getFineRegister(f: any = {}) {
+  const start = toISODate(f.start_date) || null, end = toISODate(f.end_date) || null;
+  const memberId = Number(f.member_id) || 0;
+  const source = f.source === 'contribution' || f.source === 'loan' ? f.source : 'All';
+  const rows = fineRows({ start, end, memberId, source: source === 'All' ? undefined : source, search: String(f.search || '') });
+  rows.sort(FINE_SORT[f.sort_by] || FINE_SORT.newest);
+  const sum = (xs: any[]) => r2(xs.reduce((s, x) => s + x.amount, 0));
+  const totals = { total: sum(rows), contribution: sum(rows.filter(x => x.source === 'contribution')), loan: sum(rows.filter(x => x.source === 'loan')), count: rows.length,
+    members: new Set(rows.map(x => x.member_id)).size, onTime: rows.filter(x => x.flag === 'on_time').length, average: rows.length ? r2(sum(rows) / rows.length) : 0 };
+
+  // overall figures (never filtered): what the fund has collected in fines in all, this month, this year
+  const mk = todayISO().slice(0, 7), yr = mk.slice(0, 4);
+  const pen = (where: string, p: any[] = []) => num(`SELECT SUM(penalty_paid) FROM loan_repayments WHERE penalty_paid > 0 AND ${where}`, p);
+  const fee = (where: string, p: any[] = []) => num(`SELECT SUM(late_fee) FROM collections WHERE late_fee > 0 AND ${where}`, p);
+  const overall = {
+    contribution: r2(fee('1=1')), loan: r2(pen('1=1')), total: r2(fee('1=1') + pen('1=1')),
+    thisMonth: r2(fee('substr(payment_date,1,7) = ?', [mk]) + pen('substr(paid_date,1,7) = ?', [mk])),
+    thisYear: r2(fee('substr(payment_date,1,4) = ?', [yr]) + pen('substr(paid_date,1,4) = ?', [yr])),
+    count: num('SELECT COUNT(*) FROM collections WHERE late_fee > 0') + num('SELECT COUNT(*) FROM loan_repayments WHERE penalty_paid > 0'),
+    rate: Number(settingsMap().late_fee_amount) || 0, dueDay: dueDay(),
+  };
+
+  const byMonthMap = new Map<string, { month: string; contribution: number; loan: number; total: number; count: number }>();
+  for (const x of rows) {
+    const k = String(x.date).slice(0, 7);
+    const b = byMonthMap.get(k) || { month: k, contribution: 0, loan: 0, total: 0, count: 0 };
+    if (x.source === 'loan') b.loan += x.amount; else b.contribution += x.amount;
+    b.total += x.amount; b.count++;
+    byMonthMap.set(k, b);
+  }
+  const byMonth = [...byMonthMap.values()].sort((a, b) => b.month.localeCompare(a.month)).map(b => ({ ...b, contribution: r2(b.contribution), loan: r2(b.loan), total: r2(b.total) }));
+  const byMemberMap = new Map<number, { member_id: number; member_code: string; name: string; name_bn: string | null; count: number; total: number; last_date: string }>();
+  for (const x of rows) {
+    const b = byMemberMap.get(x.member_id) || { member_id: x.member_id, member_code: x.member_code, name: x.name, name_bn: x.name_bn, count: 0, total: 0, last_date: '' };
+    b.count++; b.total += x.amount; if (String(x.date) > b.last_date) b.last_date = String(x.date);
+    byMemberMap.set(x.member_id, b);
+  }
+  const byMember = [...byMemberMap.values()].sort((a, b) => b.total - a.total || a.member_code.localeCompare(b.member_code, undefined, { numeric: true })).map(b => ({ ...b, total: r2(b.total) }));
+
+  // payments made after the due date with no fine charged (a waiver, or a missed fine) — in the same date range / member
+  const dd = dueDay(), rate = overall.rate;
+  const lateNoFineAll: any[] = source === 'loan' ? [] : all(`SELECT c.id, c.payment_date, c.payment_month, c.contribution_amount, m.id AS member_id, m.member_code, m.name, m.name_bn
+        FROM collections c JOIN members m ON m.id = c.member_id WHERE c.late_fee = 0 ${start ? 'AND c.payment_date >= ?' : ''} ${end ? 'AND c.payment_date <= ?' : ''} ${memberId ? 'AND c.member_id = ?' : ''}`,
+    [...(start ? [start] : []), ...(end ? [end] : []), ...(memberId ? [memberId] : [])])
+    .map((r: any) => { const due = dueDateOf(String(r.payment_month), dd); return { ...r, due_date: due, days_late: dayDiff(due, String(r.payment_date)) }; })
+    .filter((r: any) => r.days_late > 0)
+    .sort((a: any, b: any) => String(b.payment_date).localeCompare(String(a.payment_date)));
+  const lateNoFine = { count: lateNoFineAll.length, potential: r2(lateNoFineAll.length * rate), rows: lateNoFineAll.slice(0, 500).map(r => ({ id: r.id, date: r.payment_date, month: r.payment_month, due_date: r.due_date, days_late: r.days_late, amount: r2(Number(r.contribution_amount)), member_id: r.member_id, member_code: r.member_code, name: r.name, name_bn: r.name_bn })) };
+
+  // overdue right now: unpaid months already past their due date (a fine applies when they are paid)
+  const paid = new Map<number, Set<string>>();
+  for (const r of all('SELECT member_id, payment_month FROM collections')) { if (!paid.has(r.member_id)) paid.set(r.member_id, new Set()); paid.get(r.member_id)!.add(r.payment_month); }
+  const today = todayISO();
+  const overdueNow: any[] = [];
+  for (const m of all(`SELECT id, member_code, name, name_bn, monthly_due, join_date FROM members WHERE status = 'Active'`)) {
+    if (memberId && Number(m.id) !== memberId) continue;
+    let months = 0;
+    for (let k = String(m.join_date).slice(0, 7); k <= mk; k = addMonths(k, 1)) if (dueDateOf(k, dd) < today && !paid.get(m.id)?.has(k)) months++;
+    if (months > 0) overdueNow.push({ member_id: m.id, member_code: m.member_code, name: m.name, name_bn: m.name_bn, months, owed: r2(months * (Number(m.monthly_due) || 0)), fine_if_paid_today: r2(months * rate) });
+  }
+  overdueNow.sort((a, b) => b.months - a.months || a.member_code.localeCompare(b.member_code, undefined, { numeric: true }));
+
+  return { filters: { start_date: start, end_date: end, member_id: memberId || null, source }, rows, totals, overall, byMonth, byMember, lateNoFine,
+    overdueNow: { count: overdueNow.length, potential: r2(overdueNow.reduce((s, x) => s + x.fine_if_paid_today, 0)), rows: overdueNow.slice(0, 500) }, books: getFundBooks() };
+}
+
+/**
+ * The books-balance proof. Money is held by the fund; every member is owed their principal (opening balance + contributions) plus their share of the
+ * benefit earned; what is left over belongs to the fund itself: the RESERVE. It must be explained, to the paisa, by
+ *   fines + loan penalties − operating expenses − (settlements paid above what the books said was owed) + benefit that nobody could share.
+ * The two sides are computed independently (the left from the cash and asset totals, the right from the member allocation), so an entry that one of
+ * them misses shows up as a difference. Valued at cost, like the fund balance: unrealised gains are not part of it.
+ */
+function getFundBooks() {
+  const today = todayISO();
+  const pos = fundPosition(today);
+  const alloc = benefitAllocation(today);
+  const settled = new Map<number, any>(all('SELECT * FROM member_settlements').map(s => [Number(s.member_id), s]));
+  const pays = new Map<number, number>();
+  for (const r of all('SELECT member_id, SUM(contribution_amount) AS s FROM collections GROUP BY member_id')) pays.set(Number(r.member_id), Number(r.s) || 0);
+  let owed = 0, settledEntitlement = 0, settlementPaid = 0;
+  const drift: Array<{ member_code: string; name: string; stored: number; now: number }> = [];
+  let members = 0;
+  for (const m of all('SELECT id, member_code, name, opening_balance FROM members')) {
+    const principal = (Number(m.opening_balance) || 0) + (pays.get(Number(m.id)) || 0);
+    const entitled = principal + (alloc.total.get(Number(m.id)) || 0);
+    const s = settled.get(Number(m.id));
+    if (!s) { owed += entitled; members++; continue; }
+    settledEntitlement += entitled;
+    settlementPaid += Number(s.total_paid);
+    // what the system calculated when the member was paid (not the amount actually paid, which the committee may have changed on purpose) against what the books give now
+    const calcThen = Number(s.principal) + Number(s.calc_profit_share);
+    if (Math.abs(entitled - calcThen) > 0.01) drift.push({ member_code: m.member_code, name: m.name, stored: r2(calcThen), now: r2(entitled) });
+  }
+  const fines = num('SELECT SUM(late_fee) FROM collections'), penalties = num('SELECT SUM(penalty_paid) FROM loan_repayments'), expenses = num('SELECT SUM(amount) FROM expenses');
+  const settlementAdjustment = settlementPaid - settledEntitlement;      // > 0: paid out more than the books said was owed
+  const reserve = pos.fundBalance - owed;
+  const explained = fines + penalties - expenses - settlementAdjustment + alloc.unallocated;
+  const residual = reserve - explained;
+  return {
+    fundBalance: r2(pos.fundBalance), cashInHand: r2(pos.cashInHand), owedToMembers: r2(owed), members, reserve: r2(reserve),
+    parts: { fines: r2(fines), penalties: r2(penalties), expenses: r2(expenses), settlementAdjustment: r2(settlementAdjustment), unshared: r2(alloc.unallocated) },
+    explained: r2(explained), residual: r2(residual), balanced: Math.abs(residual) < 0.05, drift,
+  };
 }
 
 /** Everything the settlement dialog needs: contributions, calculated profit share, suggested payout, cash check. */
@@ -699,11 +941,15 @@ function settleMember(d: any) {
   const openLoan = get(`SELECT l.loan_no, l.principal - COALESCE((SELECT SUM(principal_paid) FROM loan_repayments r WHERE r.loan_id = l.id),0) AS owed
                         FROM personal_loans l WHERE l.member_id = ? AND l.status = 'Active' LIMIT 1`, [memberId]);
   if (openLoan) fail(`This member still owes personal loan ${openLoan.loan_no} (TK ${r2(Number(openLoan.owed))} unpaid). Collect or write off the loan first, then settle.`);
+  const guaranteeing = get(`SELECT loan_no FROM personal_loans WHERE guarantor_member_id = ? AND status = 'Active' LIMIT 1`, [memberId]);
+  if (guaranteeing) fail(`This member is the guarantor of running loan ${guaranteeing.loan_no}. The loan must be repaid (or another arrangement made) before this member can be settled.`);
   const date = toISODate(d.settlement_date) || todayISO();
   if (date > todayISO()) fail('Settlement date cannot be in the future.');
   const prev = previewMemberSettlement(memberId, date);
   if (prev.lastPaymentDate && date < prev.lastPaymentDate) fail(`Settlement date cannot be before the member's last payment (${prev.lastPaymentDate}).`);
   if (date < String(m.join_date)) fail('Settlement date cannot be before the join date.');
+  const lastSettle = get('SELECT MAX(settlement_date) d FROM member_settlements')?.d;
+  if (lastSettle && date < String(lastSettle)) fail(`Settlement date cannot be earlier than the latest settlement (${lastSettle}), because that would change what was already paid out.`);
   const method = String(d.payment_method || '').trim();
   if (!method) fail('Choose the medium the money was paid through (cash, bank, bKash…).');
   const calc = prev.profitShare;
@@ -834,8 +1080,9 @@ const loanSchedule = (id: number) => all('SELECT no, due_date, principal, intere
 
 /** Every loan with its member and everything derived from the schedule and repayments (as of `today`). */
 function enrichLoans(where = '', params: any[] = [], today = todayISO()): Row[] {
-  const loans = all(`SELECT l.*, m.member_code, m.name AS member_name, m.name_bn AS member_name_bn, m.avatar_initials, m.phone AS member_phone, m.status AS member_status
-                     FROM personal_loans l JOIN members m ON m.id = l.member_id ${where} ORDER BY l.id`, params);
+  const loans = all(`SELECT l.*, m.member_code, m.name AS member_name, m.name_bn AS member_name_bn, m.avatar_initials, m.phone AS member_phone, m.status AS member_status,
+                            g.member_code AS guarantor_member_code, g.name AS guarantor_member_name
+                     FROM personal_loans l JOIN members m ON m.id = l.member_id LEFT JOIN members g ON g.id = l.guarantor_member_id ${where} ORDER BY l.id`, params);
   if (!loans.length) return [];
   const sched = new Map<number, Row[]>();
   for (const r of all('SELECT loan_id, no, due_date, principal, interest, total FROM loan_schedule ORDER BY loan_id, no')) {
@@ -902,7 +1149,7 @@ function getLoans(sortBy = 'newest', status = 'All', startDate?: string, endDate
   let list = enrichLoans(where.length ? 'WHERE ' + where.join(' AND ') : '', params);
   if (status && status !== 'All') list = list.filter(l => status === 'Open' ? ['Running', 'Overdue'].includes(l.derived_status) : l.derived_status === status);
   const q = String(search || '').trim().toLowerCase();
-  if (q) list = list.filter(l => [l.loan_no, l.member_name, l.member_name_bn, l.member_code, l.member_phone, l.purpose, l.guarantor, l.reference]
+  if (q) list = list.filter(l => [l.loan_no, l.member_name, l.member_name_bn, l.member_code, l.member_phone, l.purpose, l.guarantor, l.guarantor_name, l.guarantor_member_name, l.guarantor_member_code, l.reference]
     .some(v => v && String(v).toLowerCase().includes(q)));
   return list.sort(LOAN_SORT[sortBy] || LOAN_SORT.newest);
 }
@@ -922,6 +1169,8 @@ function getLoanSummary() {
     closed: ls.filter(l => l.status === 'Closed').length,
     writtenOff: ls.filter(l => l.status === 'Written off').length,
     borrowers: new Set(open.map(l => l.member_id)).size,
+    drafts: num(`SELECT COUNT(*) FROM loan_applications WHERE status = 'Draft'`),
+    draftsAmount: num(`SELECT SUM(principal) FROM loan_applications WHERE status = 'Draft'`),
     totalLent: sum(l => l.principal),
     outstanding: sum(l => l.outstanding_principal),
     principalRepaid: sum(l => l.paid_principal),
@@ -942,6 +1191,55 @@ function getLoanSummary() {
   };
 }
 
+// ---- Guarantor -----------------------------------------------------------------------------
+export interface GuarantorInfo { type: 'member' | 'outsider' | 'legacy'; member_id?: number; name: string; name_bn?: string | null; code?: string; address: string; nid: string; phone: string; relation: string }
+
+/** The guarantor of a stored loan, resolved for display and for the guarantee form. null = none recorded. */
+function guarantorInfoOf(l: Row): GuarantorInfo | null {
+  if (l.guarantor_type === 'member') {
+    const g = get('SELECT member_code, name, name_bn, phone, nid FROM members WHERE id = ?', [l.guarantor_member_id]);
+    return g ? { type: 'member', member_id: Number(l.guarantor_member_id), name: g.name, name_bn: g.name_bn, code: g.member_code, address: '', nid: g.nid || '', phone: g.phone || '', relation: l.guarantor_relation || '' } : null;
+  }
+  if (l.guarantor_type === 'outsider')
+    return { type: 'outsider', name: l.guarantor_name || '', address: l.guarantor_address || '', nid: l.guarantor_nid || '', phone: l.guarantor_phone || '', relation: l.guarantor_relation || '' };
+  if (String(l.guarantor || '').trim()) return { type: 'legacy', name: String(l.guarantor).trim(), address: '', nid: '', phone: '', relation: '' };
+  return null;
+}
+
+/**
+ * Validates the guarantor entered for a NEW loan (a guarantor is mandatory) and returns the columns to store.
+ *   member   : an active fund member other than the borrower (pick from the list)
+ *   outsider : full name, a real address, and a valid National ID that does not belong to any member
+ * Throws a readable message on the first problem.
+ */
+function guarantorFrom(d: any, borrowerId: number) {
+  const type = d?.guarantor_type;
+  const relation = String(d?.guarantor_relation || '').trim().slice(0, 60);
+  if (type === 'member') {
+    const gid = Number(d.guarantor_member_id);
+    if (!gid) fail('Choose the member who is the guarantor.');
+    if (gid === Number(borrowerId)) fail('A borrower cannot be their own guarantor.');
+    const g = get('SELECT id, member_code, name, status FROM members WHERE id = ?', [gid]);
+    if (!g) fail('The guarantor member was not found.');
+    if (g.status !== 'Active') fail(`${g.name} is not an active member, so cannot be a guarantor.`);
+    return { cols: { guarantor_type: 'member', guarantor_member_id: gid, guarantor_name: null, guarantor_address: null, guarantor_nid: null, guarantor_phone: null, guarantor_relation: relation }, display: `${g.name} (${g.member_code})` };
+  }
+  if (type === 'outsider') {
+    const name = String(d.guarantor_name || '').trim().replace(/\s+/g, ' ');
+    const address = String(d.guarantor_address || '').trim().replace(/\s+/g, ' ');
+    if (name.length < 3 || !/\p{L}{2,}/u.test(name) || name.length > 80) fail("Enter the guarantor's full name (at least 3 letters).");
+    if (address.length < 10 || !/\p{L}{2,}/u.test(address) || address.length > 250) fail("Enter the guarantor's full address (house/road, area, district — at least 10 characters).");
+    const nid = checkNid(d.guarantor_nid);
+    if (!nid.ok) fail(`Guarantor NID: ${nid.error}`);
+    const owner = get('SELECT member_code, name FROM members WHERE nid = ?', [nid.value]);
+    if (owner) fail(`This NID belongs to member ${owner.name} (${owner.member_code}). Tick "Guarantor is a fund member" and choose them instead.`);
+    const phone = String(d.guarantor_phone || '').replace(/[\s-]/g, '');
+    if (phone && !/^\+?\d{7,15}$/.test(phone)) fail("The guarantor's phone number is not valid.");
+    return { cols: { guarantor_type: 'outsider', guarantor_member_id: null, guarantor_name: name, guarantor_address: address, guarantor_nid: nid.value, guarantor_phone: phone, guarantor_relation: relation }, display: name };
+  }
+  fail('A guarantor is required. Choose a fund member, or enter an outside guarantor\'s details.');
+}
+
 /** One loan: terms, the full schedule with the state of every installment, repayments, and the borrower's other loans. */
 function getLoan(id: number) {
   const l = loadLoan(id);
@@ -957,26 +1255,34 @@ function getLoan(id: number) {
     return { ...r, paid: Math.max(0, Math.min(Number(r.total), r2(l.paid_schedule - start))), status, balance_after: r2(Number(l.principal) - cumP) };
   });
   const repayments = all('SELECT * FROM loan_repayments WHERE loan_id = ? ORDER BY paid_date DESC, id DESC', [l.id]);
-  const m = get('SELECT id, member_code, name, name_bn, avatar_initials, phone, monthly_due, status FROM members WHERE id = ?', [l.member_id]) || {};
+  const m = get('SELECT id, member_code, name, name_bn, avatar_initials, phone, nid, monthly_due, status FROM members WHERE id = ?', [l.member_id]) || {};
   return {
-    loan: l, schedule, repayments,
+    loan: l, schedule, repayments, guarantor: guarantorInfoOf(l),
     latestRepaymentId: repayments.length ? Math.max(...repayments.map(r => Number(r.id))) : null,
     member: { ...m, savings: memberSavings(l.member_id), owed: loansOwedBy(l.member_id) },
     memberLoans: enrichLoans('WHERE l.member_id = ? AND l.id != ?', [l.member_id, l.id]),
   };
 }
 
+/** A date field in the loan code: empty = the default, anything else must be a real calendar date (never silently replaced by today). */
+function loanDate(v: any, fallback: string | null, label: string): string | null {
+  if (v === undefined || v === null || v === '') return fallback;
+  const iso = toISODate(v);
+  if (!iso) fail(`${label} is not a valid date.`);
+  return iso;
+}
+
 /** Builds the terms from form input, filling the fund's default policy and the usual first-installment date. */
 function loanTermsFrom(d: any): { terms: LoanTerms; disbursed: string } {
   const st = settingsMap();
-  const disbursed = toISODate(d?.disbursed_date) || todayISO();
+  const disbursed = loanDate(d?.disbursed_date, todayISO(), 'The loan date')!;
   const method = (LOAN_METHODS as string[]).includes(d?.method) ? (d.method as LoanMethod) : (st.loan_default_method as LoanMethod);
   const rate = d?.annual_rate === undefined || d?.annual_rate === '' || d?.annual_rate === null ? Number(st.loan_default_rate) || 0 : Number(d.annual_rate);
   return {
     disbursed,
     terms: {
       principal: Number(d?.principal), method, annual_rate: method === 'free' ? 0 : rate, term_months: Number(d?.term_months),
-      first_due_date: toISODate(d?.first_due_date) || addMonthsKeepDay(disbursed, 1), round_to_taka: d?.round_to_taka !== false,
+      first_due_date: loanDate(d?.first_due_date, null, 'The first installment date') || addMonthsKeepDay(disbursed, 1), round_to_taka: d?.round_to_taka !== false,
     },
   };
 }
@@ -992,12 +1298,13 @@ function previewLoan(d: any) {
     const options = compareTerms(base, [...COMMON_TERMS, term_months]);
     const warnings: Array<{ level: 'error' | 'warn' | 'info'; text: string }> = [];
     const cash = lendableCash(disbursed);
-    if (terms.principal > cash + 0.005) warnings.push({ level: 'error', text: `The fund can lend only TK ${Math.max(0, cash)} (its cash in hand).` });
+    // a draft moves no money, so a cash shortfall only warns (it is checked again when the draft is disbursed)
+    if (terms.principal > cash + 0.005) warnings.push({ level: d?.draft ? 'warn' : 'error', text: `The fund can lend only TK ${Math.max(0, cash)} (its cash in hand).` });
     if (terms.first_due_date <= disbursed) warnings.push({ level: 'error', text: 'The first installment must be after the loan date.' });
     let member: any = null;
     const mid = Number(d?.member_id);
     if (mid) {
-      const m = get('SELECT id, member_code, name, status, monthly_due FROM members WHERE id = ?', [mid]);
+      const m = get('SELECT id, member_code, name, name_bn, nid, phone, status, monthly_due FROM members WHERE id = ?', [mid]);
       if (m) {
         const savings = memberSavings(mid), owed = loansOwedBy(mid);
         const mult = Number(settingsMap().loan_max_multiple) || 0;
@@ -1013,18 +1320,42 @@ function previewLoan(d: any) {
           warnings.push({ level: 'info', text: `The installment is more than 4× the member's monthly contribution; check it is affordable.` });
       }
     }
-    return { valid: true, terms: { ...terms, disbursed_date: disbursed }, plan, options, warnings, cash, member };
+    return { valid: true, terms: { ...terms, disbursed_date: disbursed }, plan, options, warnings, cash, member, nextLoanNo: nextLoanNo(), nextAppNo: nextAppNo(), autoReference: `DISB-${nextLoanNo()}` };
   } catch (e: any) {
     return { valid: false, error: e?.message || 'Could not calculate this loan.' };
   }
 }
 
+/** Checks a guarantor with exactly the rules used when the loan is saved, so the form can show "ready" with no surprise at the end. Never throws. */
+function previewGuarantor(d: any) {
+  if (!d?.guarantor_type) return { ok: false, error: 'Choose a guarantor.', info: null };
+  try {
+    const g = guarantorFrom(d, Number(d.member_id) || 0);
+    return { ok: true, error: '', info: guarantorInfoOf({ ...g.cols, guarantor: g.display }) };
+  } catch (e: any) { return { ok: false, error: e?.message || 'Guarantor details are not valid.', info: null }; }
+}
+
 function nextLoanNo() {
-  const last = all('SELECT loan_no FROM personal_loans').reduce((mx, r) => Math.max(mx, Number(String(r.loan_no).replace(/\D/g, '')) || 0), 0);
+  // never reuse a number that may already be printed on a paper or receipt, even if that loan was deleted
+  const last = all('SELECT loan_no FROM personal_loans').reduce((mx, r) => Math.max(mx, Number(String(r.loan_no).replace(/\D/g, '')) || 0), num(`SELECT seq FROM sqlite_sequence WHERE name = 'personal_loans'`));
   return `PL-${pad4(last + 1)}`;
 }
 
-function addLoan(d: any) {
+/** Signed consent paper required before a loan is disbursed (Admin can switch this off in the loan policy). */
+const consentRequired = () => settingsMap().loan_consent_required !== '0';
+
+/** Session may change data (everyone except a read-only Auditor). */
+export function requireWriter() {
+  const s = getSession();
+  if (!s) fail('Please sign in.');
+  if (s.user.role === 'Auditor') fail('Auditors have read-only access.');
+}
+
+/**
+ * Everything that must be true to give — or draft — a loan, except the cash check and the consent paper.
+ * Returns the cleaned values so the caller can store them.
+ */
+function prepareLoan(d: any) {
   const memberId = Number(d?.member_id);
   const m = get('SELECT * FROM members WHERE id = ?', [memberId]);
   if (!m) fail('Please choose the member who is taking the loan.');
@@ -1037,10 +1368,8 @@ function addLoan(d: any) {
   if (disbursed < String(m.join_date)) fail(`Loan date cannot be before the member joined (${m.join_date}).`);
   if (terms.first_due_date <= disbursed) fail('The first installment must be after the loan date.');
   if (daysBetween(disbursed, terms.first_due_date) > 100) fail('The first installment should fall within about three months of the loan date.');
-  const method = String(d.payment_method || '').trim();
-  if (!method) fail('Choose how the money was paid out (cash, bank, bKash…).');
-  const cash = lendableCash(disbursed);
-  if (terms.principal > cash + 0.005) fail(`The fund can lend only TK ${Math.max(0, cash)} (its cash in hand on ${disbursed} and today), so it cannot lend TK ${r2(terms.principal)}.`);
+  const payMethod = String(d.payment_method || '').trim();
+  if (!payMethod) fail('Choose how the money will be paid out (cash, bank, bKash…).');
   const mult = Number(settingsMap().loan_max_multiple) || 0;
   const limitNote = String(d.limit_note || '').trim();
   if (mult > 0) {
@@ -1048,28 +1377,219 @@ function addLoan(d: any) {
     if (terms.principal + owed > mult * savings + 0.005 && !limitNote)
       fail(`With this loan ${m.name} would owe TK ${r2(terms.principal + owed)}, above the fund limit of ${mult}× savings (TK ${r2(mult * savings)}). Write the approval reason to continue.`);
   }
+  const guar = guarantorFrom(d, memberId);
   const plan = buildPlan(terms);
-  const notes = [String(d.notes || '').trim(), limitNote ? `Over-limit approval: ${limitNote}` : ''].filter(Boolean).join(' | ');
+  return { memberId, m, terms, disbursed, plan, guar, limitNote, payMethod, rawNotes: String(d.notes || '').trim(), reference: String(d.reference || '').trim(), purpose: String(d.purpose || '').trim() };
+}
+
+interface ConsentCarry { appId: number; appNo: string; consent: { file: string; name: string; size: number; sha256: string; at: string } | null }
+
+/** Gives the loan: books the cash-out and creates the schedule, in one transaction (with `from`, also closes the draft it came from). */
+function addLoanInternal(d: any, from: ConsentCarry | null) {
+  const p = prepareLoan(d);
+  const required = consentRequired();
+  if (!from && required) fail('A signed consent paper is required before a loan is disbursed. Save the loan as a draft, print the consent paper, get it signed and upload it — the loan is then disbursed.');
+  if (from && required && !from.consent) fail('Upload the signed consent paper first; the loan is disbursed after that.');
+  const cash = lendableCash(p.disbursed);
+  if (p.terms.principal > cash + 0.005) fail(`The fund can lend only TK ${Math.max(0, cash)} (its cash in hand on ${p.disbursed} and today), so it cannot lend TK ${r2(p.terms.principal)}.`);
+  const notes = [p.rawNotes, p.limitNote ? `Over-limit approval: ${p.limitNote}` : ''].filter(Boolean).join(' | ');
+  const { terms, plan, guar, m } = p;
   const id = tx(() => {
     const no = nextLoanNo();
+    const c = guar.cols;
+    const cs = from?.consent;
     run(`INSERT INTO personal_loans (loan_no, member_id, principal, method, annual_rate, term_months, disbursed_date, first_due_date, installment, total_interest, total_payable,
-           payment_method, reference, purpose, guarantor, notes, created_by) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-      [no, memberId, r2(terms.principal), terms.method, terms.annual_rate, plan.rows.length, disbursed, terms.first_due_date, plan.installment, plan.totalInterest, plan.totalPayable,
-        method, String(d.reference || '').trim(), String(d.purpose || '').trim(), String(d.guarantor || '').trim(), notes, actor]);
+           payment_method, reference, purpose, guarantor, guarantor_type, guarantor_member_id, guarantor_name, guarantor_address, guarantor_nid, guarantor_phone, guarantor_relation,
+           application_no, consent_status, consent_file, consent_name, consent_size, consent_sha256, consent_uploaded_at, notes, created_by)
+         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+      [no, p.memberId, r2(terms.principal), terms.method, terms.annual_rate, plan.rows.length, p.disbursed, terms.first_due_date, plan.installment, plan.totalInterest, plan.totalPayable,
+        p.payMethod, p.reference || `DISB-${no}`, p.purpose, guar.display,
+        c.guarantor_type, c.guarantor_member_id, c.guarantor_name, c.guarantor_address, c.guarantor_nid, c.guarantor_phone, c.guarantor_relation,
+        from?.appNo ?? null, cs ? 'Signed' : 'Waived', cs?.file ?? null, cs?.name ?? null, cs?.size ?? null, cs?.sha256 ?? null, cs?.at ?? null, notes, actor]);
     const lid = lastId();
     for (const r of plan.rows) run('INSERT INTO loan_schedule (loan_id, no, due_date, principal, interest, total) VALUES (?,?,?,?,?,?)', [lid, r.no, r.due_date, r.principal, r.interest, r.total]);
-    audit('create', 'loan', lid, `${no} ${m.member_code} TK ${r2(terms.principal)} · ${plan.rows.length} months · ${terms.method}${terms.method === 'free' ? '' : ` ${terms.annual_rate}%`}`);
+    if (from) {
+      run(`UPDATE loan_applications SET status = 'Activated', loan_id = ?, updated_at = datetime('now','localtime') WHERE id = ? AND status = 'Draft'`, [lid, from.appId]);
+      if (db.getRowsModified() !== 1) throw new Error('This draft was already disbursed or removed.');
+    }
+    audit('create', 'loan', lid, `${no} ${m.member_code} TK ${r2(terms.principal)} · ${plan.rows.length} months · ${terms.method}${terms.method === 'free' ? '' : ` ${terms.annual_rate}%`} · guarantor ${guar.display}${c.guarantor_type === 'outsider' ? ' (outsider)' : ''}${from ? ` · disbursed from ${from.appNo} after the signed consent paper was uploaded` : ' · no consent paper required'}`);
     return lid;
   });
   mutated();
   return id;
 }
 
+/** Gives a loan directly. Allowed only when signed consent papers are switched off; otherwise use createLoanApplication. */
+function addLoan(d: any) { return addLoanInternal(d, null); }
+
+// ---- Loan drafts (applications): the loan is prepared and the consent paper printed, but NO money moves until the signed paper is uploaded ----
+function nextAppNo() {
+  const last = all('SELECT app_no FROM loan_applications').reduce((mx, r) => Math.max(mx, Number(String(r.app_no).replace(/\D/g, '')) || 0), num(`SELECT seq FROM sqlite_sequence WHERE name = 'loan_applications'`));
+  return `LA-${pad4(last + 1)}`;
+}
+
+const APP_SELECT = `SELECT a.*, m.member_code, m.name AS member_name, m.name_bn AS member_name_bn, m.avatar_initials, m.phone AS member_phone,
+  g.member_code AS guarantor_member_code, g.name AS guarantor_member_name
+  FROM loan_applications a JOIN members m ON m.id = a.member_id LEFT JOIN members g ON g.id = a.guarantor_member_id`;
+
+const withConsentFlags = (a: Row): Row => ({
+  ...a, has_consent: !!a.consent_file, consent_file_exists: !!a.consent_file && fs.existsSync(String(a.consent_file)),
+  age_days: Math.max(0, daysBetween(String(a.created_at || todayISO()).slice(0, 10), todayISO())),
+});
+
+function createLoanApplication(d: any) {
+  if (!consentRequired()) fail('Signed consent papers are switched off in the loan policy, so loans are given directly.');
+  const p = prepareLoan(d);
+  const id = tx(() => {
+    const no = nextAppNo();
+    const c = p.guar.cols;
+    run(`INSERT INTO loan_applications (app_no, member_id, principal, method, annual_rate, term_months, disbursed_date, first_due_date, installment, total_interest, total_payable,
+           payment_method, reference, purpose, notes, limit_note, guarantor, guarantor_type, guarantor_member_id, guarantor_name, guarantor_address, guarantor_nid, guarantor_phone, guarantor_relation, status, created_by)
+         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'Draft',?)`,
+      [no, p.memberId, r2(p.terms.principal), p.terms.method, p.terms.annual_rate, p.plan.rows.length, p.disbursed, p.terms.first_due_date, p.plan.installment, p.plan.totalInterest, p.plan.totalPayable,
+        p.payMethod, p.reference, p.purpose, p.rawNotes, p.limitNote, p.guar.display,
+        c.guarantor_type, c.guarantor_member_id, c.guarantor_name, c.guarantor_address, c.guarantor_nid, c.guarantor_phone, c.guarantor_relation, actor]);
+    const aid = lastId();
+    audit('create', 'loan_application', aid, `${no} ${p.m.member_code} TK ${r2(p.terms.principal)} · ${p.plan.rows.length} months · draft: waiting for the signed consent paper`);
+    return aid;
+  });
+  mutated();
+  return id;
+}
+
+function loadApplication(id: number): Row {
+  const a = get(`${APP_SELECT} WHERE a.id = ?`, [Number(id)]);
+  if (!a) fail('Loan draft not found.');
+  return a;
+}
+
+/** Edit a draft. Changing anything the signed paper states (member, amount, rate, period, dates, guarantor) cancels the uploaded paper: the new terms must be signed again. */
+function updateLoanApplication(id: number, d: any) {
+  const a = loadApplication(id);
+  if (a.status !== 'Draft') fail('Only a draft can be edited.');
+  const p = prepareLoan(d);
+  const c = p.guar.cols;
+  const changed = Number(a.member_id) !== p.memberId || Math.abs(Number(a.principal) - r2(p.terms.principal)) > 0.004 || a.method !== p.terms.method
+    || Math.abs(Number(a.annual_rate) - p.terms.annual_rate) > 0.0001 || Number(a.term_months) !== p.plan.rows.length || a.first_due_date !== p.terms.first_due_date
+    || a.disbursed_date !== p.disbursed || (a.guarantor_type || null) !== c.guarantor_type || (a.guarantor_member_id ?? null) !== c.guarantor_member_id
+    || (a.guarantor_name || null) !== c.guarantor_name || (a.guarantor_address || null) !== c.guarantor_address || (a.guarantor_nid || null) !== c.guarantor_nid;
+  const dropPaper = changed && !!a.consent_file;
+  tx(() => {
+    run(`UPDATE loan_applications SET member_id=?, principal=?, method=?, annual_rate=?, term_months=?, disbursed_date=?, first_due_date=?, installment=?, total_interest=?, total_payable=?,
+           payment_method=?, reference=?, purpose=?, notes=?, limit_note=?, guarantor=?, guarantor_type=?, guarantor_member_id=?, guarantor_name=?, guarantor_address=?, guarantor_nid=?, guarantor_phone=?, guarantor_relation=?
+           ${dropPaper ? ', consent_file=NULL, consent_name=NULL, consent_size=NULL, consent_sha256=NULL, consent_uploaded_at=NULL' : ''}, updated_at = datetime('now','localtime') WHERE id = ?`,
+      [p.memberId, r2(p.terms.principal), p.terms.method, p.terms.annual_rate, p.plan.rows.length, p.disbursed, p.terms.first_due_date, p.plan.installment, p.plan.totalInterest, p.plan.totalPayable,
+        p.payMethod, p.reference, p.purpose, p.rawNotes, p.limitNote, p.guar.display,
+        c.guarantor_type, c.guarantor_member_id, c.guarantor_name, c.guarantor_address, c.guarantor_nid, c.guarantor_phone, c.guarantor_relation, Number(id)]);
+    audit('update', 'loan_application', Number(id), `${a.app_no}: edited${changed ? ' (terms changed)' : ''}${dropPaper ? ' — the uploaded signed paper was removed; the new terms must be signed again' : ''}`);
+  });
+  if (dropPaper) removeFileQuietly(a.consent_file);
+  mutated();
+  return { consentRemoved: dropPaper };
+}
+
+function removeFileQuietly(f: any) { try { if (f) fs.unlinkSync(String(f)); } catch { /* already gone */ } }
+
+function deleteLoanApplication(id: number) {
+  const a = loadApplication(id);
+  if (a.status !== 'Draft') fail('Only a draft can be deleted.');
+  tx(() => { run('DELETE FROM loan_applications WHERE id = ?', [Number(id)]); audit('delete', 'loan_application', Number(id), `${a.app_no} TK ${a.principal} draft removed`); });
+  removeFileQuietly(a.consent_file);
+  mutated();
+}
+
+function getLoanApplications(search = '', memberId?: number, startDate?: string, endDate?: string) {
+  const where = [`a.status = 'Draft'`]; const params: any[] = [];
+  if (memberId) { where.push('a.member_id = ?'); params.push(Number(memberId)); }
+  const s = toISODate(startDate), e = toISODate(endDate);
+  if (s) { where.push('a.disbursed_date >= ?'); params.push(s); }
+  if (e) { where.push('a.disbursed_date <= ?'); params.push(e); }
+  let list = all(`${APP_SELECT} WHERE ${where.join(' AND ')} ORDER BY a.id DESC`, params).map(withConsentFlags);
+  const q = String(search || '').trim().toLowerCase();
+  if (q) list = list.filter(a => [a.app_no, a.member_name, a.member_name_bn, a.member_code, a.purpose, a.guarantor, a.guarantor_name, a.guarantor_member_name, a.guarantor_member_code]
+    .some(v => v && String(v).toLowerCase().includes(q)));
+  return list;
+}
+
+/** A draft with everything the details page needs: schedule, guarantor, checks. */
+function getLoanApplication(id: number) {
+  const a = withConsentFlags(loadApplication(id));
+  const terms = { principal: Number(a.principal), method: a.method as LoanMethod, annual_rate: Number(a.annual_rate), term_months: Number(a.term_months), first_due_date: String(a.first_due_date) };
+  const plan = buildPlan(terms);
+  const warnings: Array<{ level: 'error' | 'warn' | 'info'; text: string }> = [];
+  const today = todayISO();
+  const cash = lendableCash(today);
+  if (a.status === 'Draft') {
+    if (terms.principal > cash + 0.005) warnings.push({ level: 'warn', text: `The fund can lend only TK ${Math.max(0, cash)} right now. The loan cannot be disbursed until there is enough cash.` });
+    if (String(a.first_due_date) <= today) warnings.push({ level: 'error', text: `The first installment date (${a.first_due_date}) has passed. Edit the draft with new dates; the new paper must be signed again.` });
+  }
+  const m = get('SELECT id, member_code, name, name_bn, nid, phone, status FROM members WHERE id = ?', [a.member_id]) || {};
+  return {
+    application: a, guarantor: guarantorInfoOf(a), plan, warnings, consentRequired: consentRequired(),
+    member: { ...m, savings: memberSavings(a.member_id), owed: loansOwedBy(a.member_id) },
+  };
+}
+
+/** Disburse a draft: the member now has the loan, the money leaves the fund's cash. Needs the signed paper (unless the policy no longer requires it). */
+function activateLoanApplication(d: any) {
+  const a = loadApplication(d?.id);
+  if (a.status !== 'Draft') fail('This draft has already been disbursed or removed.');
+  const date = loanDate(d?.disbursed_date, todayISO(), 'The disbursement date')!;
+  if (date > todayISO()) fail('Disbursement date cannot be in the future.');
+  if (String(a.first_due_date) <= date) fail(`The first installment date (${a.first_due_date}) is not after the disbursement date. Edit the draft with new dates; the new paper must be signed again.`);
+  // what is disbursed must be exactly what was printed on the paper
+  const plan = buildPlan({ principal: Number(a.principal), method: a.method, annual_rate: Number(a.annual_rate), term_months: Number(a.term_months), first_due_date: String(a.first_due_date) });
+  if (Math.abs(plan.totalPayable - Number(a.total_payable)) > 0.005 || Math.abs(plan.installment - Number(a.installment)) > 0.005)
+    fail('The loan figures no longer match the consent paper. Edit the draft and get the new paper signed.');
+  if (consentRequired() && !a.consent_file) fail('Upload the signed consent paper first.');
+  if (a.consent_file && !fs.existsSync(String(a.consent_file))) fail('The uploaded consent paper file cannot be found on this computer. Upload it again.');
+  return addLoanInternal({
+    member_id: a.member_id, principal: a.principal, method: a.method, annual_rate: a.annual_rate, term_months: a.term_months, disbursed_date: date, first_due_date: a.first_due_date,
+    payment_method: a.payment_method, reference: a.reference, purpose: a.purpose, notes: a.notes, limit_note: a.limit_note,
+    guarantor_type: a.guarantor_type, guarantor_member_id: a.guarantor_member_id, guarantor_name: a.guarantor_name, guarantor_address: a.guarantor_address,
+    guarantor_nid: a.guarantor_nid, guarantor_phone: a.guarantor_phone, guarantor_relation: a.guarantor_relation,
+  }, { appId: Number(a.id), appNo: String(a.app_no), consent: a.consent_file ? { file: a.consent_file, name: a.consent_name, size: Number(a.consent_size), sha256: a.consent_sha256, at: a.consent_uploaded_at } : null });
+}
+
+/** Called by the main process after the user picked a signed-paper file and it was copied into the app's documents folder. */
+export function attachConsentDocument(kind: 'application' | 'loan', id: number, info: { file: string; name: string; size: number; sha256: string }) {
+  requireWriter();
+  if (kind === 'application') {
+    const a = loadApplication(id);
+    if (a.status !== 'Draft') fail('The loan was already disbursed; attach the paper to the loan instead.');
+    tx(() => {
+      run(`UPDATE loan_applications SET consent_file=?, consent_name=?, consent_size=?, consent_sha256=?, consent_uploaded_at=datetime('now','localtime'), updated_at=datetime('now','localtime') WHERE id=?`, [info.file, info.name, info.size, info.sha256, Number(id)]);
+      audit('upload', 'loan_application', Number(id), `${a.app_no}: signed consent paper "${info.name}" (${info.size} bytes, sha256 ${info.sha256.slice(0, 12)}…)`);
+    });
+    if (a.consent_file && a.consent_file !== info.file) removeFileQuietly(a.consent_file);
+  } else {
+    const l = get('SELECT id, loan_no, consent_file FROM personal_loans WHERE id = ?', [Number(id)]);
+    if (!l) fail('Loan not found.');
+    tx(() => {
+      run(`UPDATE personal_loans SET consent_status='Signed', consent_file=?, consent_name=?, consent_size=?, consent_sha256=?, consent_uploaded_at=datetime('now','localtime'), updated_at=datetime('now','localtime') WHERE id=?`, [info.file, info.name, info.size, info.sha256, Number(id)]);
+      audit('upload', 'loan', Number(id), `${l.loan_no}: signed consent paper "${info.name}" (${info.size} bytes, sha256 ${info.sha256.slice(0, 12)}…)`);
+    });
+    if (l.consent_file && l.consent_file !== info.file) removeFileQuietly(l.consent_file);
+  }
+  mutated();
+}
+
+/** Path of an uploaded paper (null when none or the file is gone). Used by the main process to open it. */
+export function consentDocumentPath(kind: 'application' | 'loan', id: number): { file: string; name: string } | null {
+  const r = kind === 'application' ? get('SELECT consent_file, consent_name FROM loan_applications WHERE id = ?', [Number(id)]) : get('SELECT consent_file, consent_name FROM personal_loans WHERE id = ?', [Number(id)]);
+  return r?.consent_file && fs.existsSync(String(r.consent_file)) ? { file: String(r.consent_file), name: String(r.consent_name || 'consent') } : null;
+}
+export const refForConsent = (kind: 'application' | 'loan', id: number): string => {
+  const r = kind === 'application' ? get('SELECT app_no AS n FROM loan_applications WHERE id = ?', [Number(id)]) : get('SELECT loan_no AS n FROM personal_loans WHERE id = ?', [Number(id)]);
+  if (!r) fail(kind === 'application' ? 'Loan draft not found.' : 'Loan not found.');
+  return String(r.n);
+};
+
 /** Descriptive fields only — money terms are fixed once a loan is given (delete and re-create to change them). */
 function updateLoan(id: number, d: any) {
   const l = get('SELECT id, loan_no FROM personal_loans WHERE id = ?', [Number(id)]);
   if (!l) fail('Loan not found.');
-  const f: Record<string, any> = { purpose: d?.purpose, guarantor: d?.guarantor, notes: d?.notes, reference: d?.reference };
+  const f: Record<string, any> = { purpose: d?.purpose, notes: d?.notes, reference: d?.reference };   // the guarantor is fixed once the loan is given
   const keys = Object.keys(f).filter(k => f[k] !== undefined);
   if (!keys.length) return;
   tx(() => {
@@ -1137,7 +1657,7 @@ function recordLoanRepayment(d: any) {
   const l = loadLoan(d?.loan_id);
   if (l.status !== 'Active') fail(`Loan ${l.loan_no} is ${l.status === 'Closed' ? 'already fully repaid' : 'written off'}, so no more repayments can be recorded.`);
   const today = todayISO();
-  const date = toISODate(d.paid_date) || today;
+  const date = loanDate(d.paid_date, today, 'The payment date')!;
   if (date > today) fail('Payment date cannot be in the future.');
   if (date < String(l.disbursed_date)) fail(`Payment date cannot be before the loan was given (${l.disbursed_date}).`);
   if (l.last_payment_date && date < l.last_payment_date) fail(`Payment date cannot be before the previous repayment (${l.last_payment_date}).`);
@@ -1145,17 +1665,17 @@ function recordLoanRepayment(d: any) {
   if (!method) fail('Choose how the money was received (cash, bank, bKash…).');
   const kind = d.kind === 'Closure' ? 'Closure' : 'Installment';
   const penalty = r2(Number(d.penalty) || 0);
-  if (penalty < 0) fail('Penalty cannot be negative.');
+  if (!Number.isFinite(penalty) || penalty < 0 || penalty > 1e9) fail('Penalty must be a normal amount of zero or more.');
   const note = String(d.note || '').trim();
   let q;
   if (kind === 'Closure') {
     const override = d.interest === undefined || d.interest === null || d.interest === '' ? undefined : Number(d.interest);
-    if (override !== undefined && !(override >= 0)) fail('Interest cannot be negative.');
+    if (override !== undefined && !(override >= 0 && override <= 1e9)) fail('Interest must be a normal amount of zero or more.');
     q = repaymentQuote(l, date, undefined, 'Closure', override);
     if (Math.abs(q.interest - q.calcInterest) > 0.009 && !note) fail('You changed the calculated interest — please write the reason in the note.');
   } else {
     const amt = Number(d.amount);
-    if (!(amt > 0)) fail('Enter the amount received (greater than zero).');
+    if (!(amt > 0) || !Number.isFinite(amt) || amt > 1e9) fail('Enter the amount received (greater than zero).');
     if (amt > l.remaining_payable + 0.005) fail(`This is more than the loan still needs (TK ${l.remaining_payable}). To pay it all off early use "Close loan early".`);
     q = repaymentQuote(l, date, amt, 'Installment');
   }
@@ -1166,6 +1686,8 @@ function recordLoanRepayment(d: any) {
     run(`INSERT INTO loan_repayments (loan_id, paid_date, kind, principal_paid, interest_paid, penalty_paid, total_paid, payment_method, trx_id, note, created_by)
          VALUES (?,?,?,?,?,?,?,?,?,?,?)`, [l.id, date, kind, q.principal, q.interest, penalty, total, method, String(d.trx_id || '').trim(), note, actor]);
     const rid = lastId();
+    // no transaction number typed: give the receipt its own unique one
+    if (!String(d.trx_id || '').trim()) run('UPDATE loan_repayments SET trx_id = ? WHERE id = ?', [`RCPT-${l.loan_no}-${rid}`, rid]);
     if (q.closes) run(`UPDATE personal_loans SET status = 'Closed', closed_date = ?, updated_at = datetime('now','localtime') WHERE id = ?`, [date, l.id]);
     audit(kind === 'Closure' ? 'close' : 'repayment', 'loan', l.id, `${l.loan_no} ${l.member_code} received ${total} (principal ${q.principal}, interest ${q.interest}, penalty ${penalty}) on ${date}${q.closes ? ' — loan fully repaid' : ''}`);
     return rid;
@@ -1181,6 +1703,7 @@ function deleteLoanRepayment(id: number) {
   if (r.loan_status === 'Written off') fail('This loan was written off. Cancel the write-off first (Admin).');
   if (num('SELECT MAX(id) FROM loan_repayments WHERE loan_id = ?', [r.loan_id]) !== Number(r.id)) fail('Only the most recent repayment of a loan can be removed. Remove the later ones first.');
   if (Number(r.interest_paid) > 0) assertAfterLastSettlement(String(r.paid_date), 'A repayment that included interest');
+  if (get('SELECT 1 FROM member_settlements s JOIN personal_loans l ON l.member_id = s.member_id WHERE l.id = ?', [r.loan_id])) fail('The borrower has already been settled, so this repayment cannot be removed.');
   tx(() => {
     run('DELETE FROM loan_repayments WHERE id = ?', [Number(id)]);
     if (r.loan_status === 'Closed') run(`UPDATE personal_loans SET status = 'Active', closed_date = NULL, updated_at = datetime('now','localtime') WHERE id = ?`, [r.loan_id]);
@@ -1193,7 +1716,7 @@ function deleteLoanRepayment(id: number) {
 function writeOffLoan(d: any) {
   const l = loadLoan(d?.loan_id);
   if (l.status !== 'Active') fail('Only a running loan can be written off.');
-  const date = toISODate(d.date) || todayISO();
+  const date = loanDate(d.date, todayISO(), 'The write-off date')!;
   if (date > todayISO()) fail('Write-off date cannot be in the future.');
   if (date < String(l.disbursed_date) || (l.last_payment_date && date < l.last_payment_date)) fail('Write-off date cannot be before the loan or its last repayment.');
   const reason = String(d.reason || '').trim();
@@ -1351,6 +1874,7 @@ function updateMember(id: number, d: any) {
   const cur = get('SELECT status, opening_balance FROM members WHERE id = ?', [id]);
   const settled = !!get('SELECT 1 FROM member_settlements WHERE member_id = ?', [id]);
   if (d.status !== undefined && d.status !== cur.status) {
+    if (!['Active', 'Inactive'].includes(d.status)) fail('Member status must be Active or Inactive.');
     if (d.status === 'Inactive') fail('A member cannot be made inactive directly. Use "Settle & deactivate" so the final payout is recorded first.');
     if (d.status === 'Active' && settled) fail('This member has been settled and paid out. An Admin must cancel the settlement before the member can be reactivated.');
   }
@@ -1367,7 +1891,8 @@ function updateMember(id: number, d: any) {
 function deleteMember(id: number) {
   const payments = num('SELECT COUNT(*) FROM collections WHERE member_id = ?', [id]);
   if (get('SELECT 1 FROM member_settlements WHERE member_id = ?', [id])) fail('This member has a settlement record, so the member cannot be deleted.');
-  if (get('SELECT 1 FROM personal_loans WHERE member_id = ?', [id])) fail('This member has personal loan records, so the member cannot be deleted.');
+  if (get(`SELECT 1 FROM loan_applications WHERE (member_id = ? OR guarantor_member_id = ?) AND status = 'Draft'`, [id, id])) fail('This member is named on a loan draft, so the member cannot be deleted. Delete the draft first.');
+  if (get('SELECT 1 FROM personal_loans WHERE member_id = ? OR guarantor_member_id = ?', [id, id])) fail('This member has personal loan records (as borrower or guarantor), so the member cannot be deleted.');
   if (payments > 0) fail(`This member has ${payments} payment record(s). Settle the member so they become Inactive instead, so the fund history stays correct.`);
   tx(() => {
     const m = get('SELECT member_code, name FROM members WHERE id = ?', [id]);
@@ -1829,7 +2354,9 @@ function getInvestments(sortBy = 'newest', status = 'All', startDate?: string, e
   if (s) { where.push('purchase_date >= ?'); params.push(s); }
   if (e) { where.push('purchase_date <= ?'); params.push(e); }
   if (search?.trim()) { const q = `%${search.trim()}%`; where.push('(name LIKE ? OR sector LIKE ? OR location_details LIKE ?)'); params.push(q, q, q); }
-  return all(`SELECT *, (CASE WHEN status='Sold' THEN COALESCE(sold_amount,0) ELSE current_estimated_value END) - invested_amount AS gain_loss
+  return all(`SELECT *, (CASE WHEN status='Sold' THEN COALESCE(sold_amount,0) ELSE current_estimated_value END) - invested_amount AS gain_loss,
+                     (SELECT meeting_date FROM investment_reviews r WHERE r.investment_id = investments.id ORDER BY meeting_date DESC, id DESC LIMIT 1) AS last_review_date,
+                     (SELECT decision FROM investment_reviews r WHERE r.investment_id = investments.id ORDER BY meeting_date DESC, id DESC LIMIT 1) AS last_review_decision
               FROM investments ${where.length ? 'WHERE ' + where.join(' AND ') : ''}
               ORDER BY ${INV_SORT[sortBy] || INV_SORT.newest}`, params);
 }
@@ -1891,6 +2418,54 @@ function updateInvestment(id: number, d: any) {
 function updateInvestmentValuation(id: number, value: number) {
   if (!(Number(value) >= 0)) fail('Estimated value must be a positive number.');
   updateInvestment(id, { current_estimated_value: Number(value) });
+}
+
+// ---------------------------------------------------------------------------
+// Committee review of an investment: done after the meeting, from the software
+// ---------------------------------------------------------------------------
+const REVIEW_DECISIONS = ['Hold', 'Watch', 'Sell', 'Other'];
+const getInvestmentReviews = (investmentId: number) =>
+  all('SELECT * FROM investment_reviews WHERE investment_id = ? ORDER BY meeting_date DESC, id DESC', [Number(investmentId)]);
+
+/**
+ * Records the outcome of a review meeting and, in one step: schedules the next review (or clears it), sets the status that follows from the
+ * decision, and — if the committee agreed a new estimated value — updates the value. The history is kept; the investment stops showing as "review due".
+ *   Hold  = keep as it is (status Growing)      Watch = keep but look again (status Review)
+ *   Sell  = the committee decided to sell (stays flagged until the sale is recorded)      Other = anything else (status unchanged)
+ */
+function completeInvestmentReview(d: any) {
+  const inv = get('SELECT * FROM investments WHERE id = ?', [Number(d?.investment_id)]);
+  if (!inv) fail('Investment not found.');
+  if (inv.status === 'Sold') fail('This investment has been sold, so there is nothing left to review.');
+  const meeting = toISODate(d.meeting_date);
+  if (!meeting) fail('Enter the date of the committee meeting.');
+  if (meeting > todayISO()) fail('The meeting date cannot be in the future: record the review after the meeting has taken place.');
+  if (meeting < String(inv.purchase_date).slice(0, 10)) fail('The meeting date cannot be before the investment was bought.');
+  const last = get('SELECT MAX(meeting_date) AS d FROM investment_reviews WHERE investment_id = ?', [inv.id])?.d;
+  if (last && meeting < last) fail(`A review on ${last} is already recorded. The new meeting must be on or after that date.`);
+  const decision = String(d.decision || '');
+  if (!REVIEW_DECISIONS.includes(decision)) fail('Choose what the committee decided.');
+  const notes = String(d.notes ?? '').trim();
+  if (notes.length > 2000) fail('The notes are too long (2000 characters at most).');
+  if (decision !== 'Hold' && notes.length < 3) fail('Write what the committee decided (a short note is enough).');
+  const attendees = String(d.attendees ?? '').trim().slice(0, 300);
+  const rawValue = d.new_value === undefined || d.new_value === null || d.new_value === '' ? Number(inv.current_estimated_value) : Number(d.new_value);
+  if (!Number.isFinite(rawValue) || rawValue < 0) fail('The estimated value must be zero or more.');
+  const value = r2(rawValue);
+  const next = d.next_review_date ? toISODate(d.next_review_date) : null;
+  if (d.next_review_date && !next) fail('The next review date is not a valid date.');
+  if (next && next <= meeting) fail('The next review must be after the meeting date.');
+  const statusAfter = decision === 'Hold' ? 'Growing' : decision === 'Other' ? inv.status : 'Review';
+  const id = tx(() => {
+    run(`INSERT INTO investment_reviews (investment_id, meeting_date, decision, notes, value_before, value_after, status_after, next_review_date, attendees, created_by)
+         VALUES (?,?,?,?,?,?,?,?,?,?)`, [inv.id, meeting, decision, notes, Number(inv.current_estimated_value), value, statusAfter, next, attendees, actor]);
+    const rid = lastId();
+    run(`UPDATE investments SET status = ?, review_date = ?, current_estimated_value = ?, updated_at = datetime('now','localtime') WHERE id = ?`, [statusAfter, next, value, inv.id]);
+    audit('review', 'investment', inv.id, `${inv.name}: committee review of ${meeting} — ${decision}${value !== Number(inv.current_estimated_value) ? `, value ${inv.current_estimated_value} → ${value}` : ''}${next ? `, next review ${next}` : ''}`);
+    return rid;
+  });
+  mutated();
+  return id;
 }
 
 function deleteInvestment(id: number) {
@@ -1971,7 +2546,7 @@ function deleteExpense(id: number) {
 // ---------------------------------------------------------------------------
 // Never send credential columns to the renderer.
 const USER_COLS = `id, username, full_name, full_name_bn, email, role, avatar_initials, status, created_at, phone, designation, address, bio, avatar,
-  last_login_at, updated_at, is_system, (password_hash IS NOT NULL) AS has_password`;
+  last_login_at, updated_at, is_system, permissions, (password_hash IS NOT NULL) AS has_password`;
 /** The protected iqbal_labs super-user account is visible only to itself. */
 const seesSystem = () => !!getSession()?.canUpload;
 const getUsers = () => all(`SELECT ${USER_COLS} FROM users ${seesSystem() ? '' : 'WHERE is_system = 0'} ORDER BY id`);
@@ -2013,10 +2588,23 @@ function addUser(u: any) {
         u.phone || '', u.designation || '', u.address || '', u.bio || '', u.avatar || null]);
     const nid = lastId();
     audit('create', 'user', nid, username);
+    if (u.permissions) setUserPermissionsInTx(nid, u.permissions);
     return nid;
   });
   mutated();
   return id;
+}
+
+/** Same as setUserPermissions but inside an already open transaction (used when a user is created together with their access). */
+function setUserPermissionsInTx(userId: number, perms: Partial<Record<ModuleKey, AccessLevel>>) {
+  const clean: Record<string, AccessLevel> = {};
+  for (const [k, v] of Object.entries(perms || {})) {
+    if (!(MODULES as readonly string[]).includes(k)) fail(`Unknown module "${k}".`);
+    if (v !== 'none' && v !== 'view' && v !== 'edit') fail(`Access for ${k} must be none, view or edit.`);
+    clean[k] = v as AccessLevel;
+  }
+  run('UPDATE users SET permissions = ? WHERE id = ?', [JSON.stringify(clean), userId]);
+  audit('permissions', 'user', userId, Object.entries(clean).map(([k, v]) => `${k}=${v}`).join(', '));
 }
 
 function updateUser(id: number, u: any) {
@@ -2112,14 +2700,15 @@ function login(username: string, password: string) {
   if (lockedUntil > Date.now()) fail('Too many wrong attempts. Please wait 5 minutes and try again.');
   if (!verifyPassword(String(password || ''), u.password_salt, u.password_hash)) {
     run(`UPDATE users SET failed_logins = failed_logins + 1, last_login_at = CASE WHEN failed_logins + 1 >= 5 THEN datetime('now','localtime') ELSE last_login_at END WHERE id = ?`, [u.id]);
-    mutated();
+    mutated(true);
     bad();
   }
+  if (!u.is_system && accessGate) { const locked = accessGate(u.username); if (locked) fail(locked); }   // only after the password is right, so licences of other people cannot be probed
   run(`UPDATE users SET failed_logins = 0, last_login_at = datetime('now','localtime') WHERE id = ?`, [u.id]);
   session = { id: u.id, username: u.username, role: u.role, isSystem: !!u.is_system };
   setActor(`${u.full_name} (${u.role})`, u.id);
   audit('login', 'user', u.id, u.username);
-  mutated();
+  mutated(true);
   return getSession();
 }
 
@@ -2139,17 +2728,18 @@ export function setMasterRecoveryPub(b64: string) {
 }
 
 function logout() {
-  if (session) { audit('logout', 'user', session.id, session.username); mutated(); }
+  if (session) { audit('logout', 'user', session.id, session.username); mutated(true); }
   session = null;
   setActor('System', null);
 }
 
 function getSession() {
   if (!session) return null;
+  if (!session.isSystem && accessGate && accessGate(session.username)) { session = null; setActor('System', null); return null; }   // locked by the licence
   const u = get(`SELECT ${USER_COLS}, must_change_password, is_system FROM users WHERE id = ?`, [session.id]);
   if (!u || u.status !== 'Active') { session = null; return null; }      // e.g. after a restore
   session.role = u.role;
-  return { user: u, canUpload: !!u.is_system, isAdmin: u.role === 'Admin', mustChangePassword: !!u.must_change_password && !u.is_system };
+  return { user: u, canUpload: !!u.is_system, isAdmin: u.role === 'Admin', mustChangePassword: !!u.must_change_password && !u.is_system, permissions: effectivePermissions(u) };
 }
 
 /** After a restore the database is different: drop the session if that user no longer exists. */
@@ -2189,12 +2779,91 @@ function validateNewPassword(p: string, username: string) {
 }
 
 // Permission model -----------------------------------------------------------------------
+// Access is granted per MODULE and per LEVEL (none / view / edit). A user's level for a module is, in this order:
+//   iqbal_labs (the Super User) = edit everywhere, always;  else the Super User's custom grant for that user;  else the default of the user's role.
+// Role rules that are not about a module stay as they were (Auditors never edit; write-offs, settlement cancellation and database reset need the Admin role).
+export const MODULES = ['overview', 'collections', 'members', 'expenses', 'entry', 'investments', 'returns', 'loans', 'reports', 'master', 'users', 'backup', 'settings', 'google_sync', 'drive_backup'] as const;
+export type ModuleKey = typeof MODULES[number];
+export type AccessLevel = 'none' | 'view' | 'edit';
+const LV: Record<AccessLevel, number> = { none: 0, view: 1, edit: 2 };
+export const MODULE_LABEL: Record<ModuleKey, string> = {
+  overview: 'Overview', collections: 'Collections', members: 'Members', expenses: 'Operating Expenses', entry: 'Entry Center', investments: 'Investments', returns: 'Investment Returns',
+  loans: 'Personal Loans', reports: 'Reports & Export', master: 'Master Data', users: 'Users & Roles', backup: 'Backup & Restore (this computer)', settings: 'Settings',
+  google_sync: 'Google account sync', drive_backup: 'Google Drive backup',
+};
+const allAt = (l: AccessLevel) => Object.fromEntries(MODULES.map(m => [m, l])) as Record<ModuleKey, AccessLevel>;
+const OPERATOR: Record<ModuleKey, AccessLevel> = { ...allAt('none'), overview: 'edit', collections: 'edit', members: 'edit', expenses: 'edit', entry: 'edit', investments: 'edit', returns: 'edit', loans: 'edit', reports: 'edit', backup: 'edit' };
+const ROLE_DEFAULTS: Record<string, Record<ModuleKey, AccessLevel>> = {
+  Admin: allAt('edit'),
+  Treasurer: OPERATOR,
+  Manager: OPERATOR,
+  Auditor: { ...allAt('none'), overview: 'view', collections: 'view', members: 'view', expenses: 'view', investments: 'view', returns: 'view', loans: 'view', reports: 'view', backup: 'view' },
+};
+export const defaultPermissions = (role: string): Record<ModuleKey, AccessLevel> => ({ ...(ROLE_DEFAULTS[role] || ROLE_DEFAULTS.Manager) });
+
+function parsePermissions(raw: unknown): Partial<Record<ModuleKey, AccessLevel>> | null {
+  if (!raw) return null;
+  try {
+    const o = JSON.parse(String(raw));
+    const out: Partial<Record<ModuleKey, AccessLevel>> = {};
+    for (const m of MODULES) if (o && (o[m] === 'none' || o[m] === 'view' || o[m] === 'edit')) out[m] = o[m];
+    return Object.keys(out).length ? out : null;
+  } catch { return null; }
+}
+
+/** What one user may do in every module. */
+export function effectivePermissions(u: Row): Record<ModuleKey, AccessLevel> {
+  if (u.is_system) return allAt('edit');
+  const base = defaultPermissions(String(u.role));
+  const custom = parsePermissions(u.permissions);
+  if (custom) for (const m of MODULES) if (custom[m]) base[m] = custom[m]!;
+  if (u.role === 'Auditor') for (const m of MODULES) if (base[m] === 'edit') base[m] = 'view';     // an Auditor never edits
+  return base;
+}
+
+/** Which module(s) a database operation belongs to (any one of them is enough). Reads need "view", everything else "edit". */
+const NEEDS: Record<string, ModuleKey[]> = {
+  getMembers: ['members'], getMemberHistory: ['members'], getMemberStatement: ['members'], addMember: ['members'], updateMember: ['members'], deleteMember: ['members'],
+  bulkAddMembers: ['members'], getNextMemberCode: ['members', 'entry'], previewMemberSettlement: ['members'], settleMember: ['members'], getMemberSettlements: ['members'], cancelSettlement: ['members'],
+  getCollections: ['collections'], getFineRegister: ['collections'], getFundBooks: ['collections'], recordPayment: ['collections', 'entry'], deletePayment: ['collections'], suggestLateFee: ['collections', 'entry'],
+  getInvestments: ['investments', 'returns', 'entry'], addInvestment: ['investments', 'entry'], updateInvestment: ['investments'], updateInvestmentValuation: ['investments'], getInvestmentReviews: ['investments'], completeInvestmentReview: ['investments'], deleteInvestment: ['investments'],
+  getInvestmentReturns: ['returns'], getReturnsSummary: ['returns'], addInvestmentReturn: ['returns', 'entry'], deleteInvestmentReturn: ['returns'],
+  getExpenses: ['expenses'], addExpense: ['expenses', 'entry'], updateExpense: ['expenses'], verifyExpenseReceipt: ['expenses'], deleteExpense: ['expenses'],
+  getLoans: ['loans'], getLoan: ['loans'], getLoanSummary: ['loans'], previewLoan: ['loans'], previewGuarantor: ['loans'], addLoan: ['loans'], updateLoan: ['loans'], deleteLoan: ['loans'],
+  previewLoanRepayment: ['loans'], recordLoanRepayment: ['loans'], deleteLoanRepayment: ['loans'], writeOffLoan: ['loans'], cancelLoanWriteOff: ['loans'],
+  getLoanApplications: ['loans'], getLoanApplication: ['loans'], createLoanApplication: ['loans'], updateLoanApplication: ['loans'], deleteLoanApplication: ['loans'], activateLoanApplication: ['loans'],
+  getOverviewMetrics: ['overview'], getOverviewData: ['overview'], getTransactions: ['reports'],
+  getAuditLog: ['users', 'settings'], getBackupLogs: ['backup', 'settings'], getDatabaseStats: ['backup', 'settings'],
+  addUser: ['users'], deleteUser: ['users'], setUserPassword: ['users'], getUserPermissions: ['users'],
+  addMasterItem: ['master'], updateMasterItem: ['master'], deleteMasterItem: ['master'],
+  saveAppSettings: ['settings'], resetDatabase: ['settings', 'backup'],
+};
+/** Operations every signed-in user needs just to use the app (forms, dropdowns, own profile). */
+const SHARED = new Set(['getRoleDefaults', 'logout', 'changeOwnPassword', 'setActor', 'getAllMembersLite', 'getMasterData', 'getUsers', 'getUserProfile', 'getDynamicNotifications', 'updateUser']);
+/** Read-only data a person with the "Reports" module may also read (reports are built from every part of the books). */
+const REPORT_READS = new Set(['getMembers', 'getMemberHistory', 'getMemberStatement', 'getMemberSettlements', 'getCollections', 'getExpenses', 'getInvestments', 'getInvestmentReturns', 'getReturnsSummary',
+  'getOverviewMetrics', 'getOverviewData', 'getLoans', 'getLoan', 'getLoanSummary', 'getLoanApplications']);
+
 const PUBLIC = new Set(['login', 'getSession', 'getAppSettings']);
 const UPLOAD = new Set(['bulkAddMembers']);                          // + Excel import IPC (main.ts)
-const ADMIN = new Set(['cancelSettlement', 'writeOffLoan', 'cancelLoanWriteOff', 'addUser', 'deleteUser', 'setUserPassword', 'saveAppSettings', 'resetDatabase', 'loadDemoData',
-  'addMasterItem', 'updateMasterItem', 'deleteMasterItem']);
+const ADMIN = new Set(['cancelSettlement', 'writeOffLoan', 'cancelLoanWriteOff', 'resetDatabase', 'loadDemoData']);   // critical actions: Admin role AND the module
 const READ = /^(get|suggest|preview|export)/;
-const SYSTEM_ONLY = new Set(['loadDemoData', 'checkAccountingHealth', 'deleteMember']);   // iqbal_labs only
+const SYSTEM_ONLY = new Set(['loadDemoData', 'checkAccountingHealth', 'deleteMember', 'setUserPermissions']);   // iqbal_labs only
+
+const levelOf = (s: { permissions: Record<ModuleKey, AccessLevel> }, m: ModuleKey) => LV[s.permissions[m] || 'none'];
+const labelsOf = (ms: ModuleKey[]) => ms.map(m => MODULE_LABEL[m]).join(' / ');
+
+/** Throws unless the signed-in user has at least `level` in one of `modules`. Used by the main process for file, backup and Google operations. */
+export function requireModule(modules: ModuleKey | ModuleKey[], level: 'view' | 'edit' = 'view') {
+  const s = getSession();
+  if (!s) fail('Please sign in.');
+  const ms = Array.isArray(modules) ? modules : [modules];
+  if (!ms.some(m => levelOf(s, m) >= LV[level])) fail(`You do not have ${level === 'edit' ? 'edit' : 'view'} access to ${labelsOf(ms)}. Ask the Super User to grant it.`);
+  if (level === 'edit' && s.user.role === 'Auditor') fail('Auditors have read-only access.');
+}
+export function can(modules: ModuleKey | ModuleKey[], level: 'view' | 'edit' = 'view') {
+  try { requireModule(modules, level); return true; } catch { return false; }
+}
 
 /** Throws unless the signed-in user may call `method` with `args`. Called by main.ts for every IPC call. */
 export function authorize(method: string, args: any[] = []) {
@@ -2204,22 +2873,78 @@ export function authorize(method: string, args: any[] = []) {
   if (SYSTEM_ONLY.has(method) && !s.canUpload) fail('This is available only to the iqbal_labs account.');
   if (UPLOAD.has(method) && !s.canUpload) fail('Data upload is only available to the iqbal_labs account.');
   if (ADMIN.has(method) && !s.isAdmin) fail('Only an Admin can do this.');
-  if (method === 'updateUser') {
+  const write = !READ.test(method);
+  if (s.user.role === 'Auditor' && write && !['logout', 'changeOwnPassword', 'updateUser', 'setActor'].includes(method)) fail('Auditors have read-only access.');
+  const canManageUsers = levelOf(s, 'users') >= LV.edit;
+
+  if (method === 'saveAppSettings') {
+    const keys = Object.keys(args[0] || {});
+    if (keys.length && keys.every(k => k.startsWith('loan_'))) {         // the loan policy
+      if (!s.isAdmin) fail('Only an Admin can do this.');
+      if (levelOf(s, 'loans') < LV.edit) fail(`You do not have edit access to ${MODULE_LABEL.loans}.`);
+    } else if (levelOf(s, 'settings') < LV.edit) fail(`You do not have edit access to ${MODULE_LABEL.settings}. Ask the Super User to grant it.`);
+  } else if (method === 'updateUser') {
     const targetId = Number(args[0]);
     const patch = args[1] || {};
     const target = get('SELECT is_system FROM users WHERE id = ?', [targetId]);
     if (target?.is_system && targetId !== s.user.id) fail('The iqbal_labs account is protected.');
     const privileged = ['role', 'status'].some(k => patch[k] !== undefined);
-    if (targetId !== s.user.id && !s.isAdmin) fail('You can only edit your own profile.');
-    if (privileged && (targetId === s.user.id || !s.isAdmin)) fail(targetId === s.user.id ? 'You cannot change your own role or status.' : 'Only an Admin can change roles.');
-  }
-  if (s.user.role === 'Auditor' && !READ.test(method) && !['logout', 'changeOwnPassword', 'updateUser', 'setActor'].includes(method)) {
-    fail('Auditors have read-only access.');
+    if (targetId !== s.user.id && !canManageUsers) fail('You can only edit your own profile.');
+    if (privileged && (targetId === s.user.id || !canManageUsers)) fail(targetId === s.user.id ? 'You cannot change your own role or status.' : 'You do not have access to change roles.');
+  } else if (method === 'getUserPermissions') {
+    if (Number(args[0]) !== s.user.id && levelOf(s, 'users') < LV.view) fail(`You do not have view access to ${MODULE_LABEL.users}.`);
+  } else if (method === 'addUser') {
+    if (!canManageUsers) fail(`You do not have edit access to ${MODULE_LABEL.users}. Ask the Super User to grant it.`);
+    if (args[0]?.permissions && !s.canUpload) fail('Only the iqbal_labs Super User can set a user\'s module access.');
+  } else if (!SHARED.has(method)) {
+    const needs = NEEDS[method];
+    if (needs) {
+      const req = write ? LV.edit : LV.view;
+      let ok = needs.some(m => levelOf(s, m) >= req);
+      if (!ok && !write && REPORT_READS.has(method) && levelOf(s, 'reports') >= LV.view) ok = true;
+      if (!ok) fail(`You do not have ${write ? 'edit' : 'view'} access to ${labelsOf(needs)}. Ask the Super User to grant it.`);
+    }
   }
 }
+/** Every operation the renderer may call is either mapped to a module or deliberately shared (the tests check this list stays complete). */
+export const accessCoverage = (method: string) => PUBLIC.has(method) || SHARED.has(method) || method in NEEDS || SYSTEM_ONLY.has(method) || method === 'getUserPermissions' || method === 'checkAccountingHealth' || method === 'loadDemoData';
+
 export function requireUpload() { const s = getSession(); if (!s?.canUpload) fail('Data upload is only available to the iqbal_labs account.'); }
 export function requireAdmin() { const s = getSession(); if (!s) fail('Please sign in.'); if (!s.isAdmin) fail('Only an Admin can do this.'); }
 export function requireSession() { if (!getSession()) fail('Please sign in.'); }
+
+/** The default access of every role (the permission editor starts from these). */
+function getRoleDefaults() { return Object.fromEntries(Object.keys(ROLE_DEFAULTS).map(r => [r, defaultPermissions(r)])); }
+
+/** One user's access: the role default, the Super User's custom grant (if any), and the result. */
+function getUserPermissions(userId: number) {
+  const u = get(`SELECT id, role, is_system, permissions FROM users WHERE id = ?`, [Number(userId)]);
+  if (!u || (u.is_system && !seesSystem())) fail('User not found.');
+  return { userId: u.id, role: u.role, isSystem: !!u.is_system, defaults: defaultPermissions(String(u.role)), custom: parsePermissions(u.permissions), effective: effectivePermissions(u) };
+}
+
+/** Super User only: choose which modules a user can open, and whether they can change anything there. null = back to the role default. */
+function setUserPermissions(userId: number, perms: Partial<Record<ModuleKey, AccessLevel>> | null) {
+  const u = get('SELECT id, username, role, is_system FROM users WHERE id = ?', [Number(userId)]);
+  if (!u) fail('User not found.');
+  if (u.is_system) fail('The iqbal_labs account always has full access.');
+  let json: string | null = null;
+  if (perms) {
+    const clean: Record<string, AccessLevel> = {};
+    for (const [k, v] of Object.entries(perms)) {
+      if (!(MODULES as readonly string[]).includes(k)) fail(`Unknown module "${k}".`);
+      if (v !== 'none' && v !== 'view' && v !== 'edit') fail(`Access for ${k} must be none, view or edit.`);
+      clean[k] = v as AccessLevel;
+    }
+    json = JSON.stringify(clean);
+  }
+  tx(() => {
+    run('UPDATE users SET permissions = ?, updated_at = ? WHERE id = ?', [json, new Date().toISOString().slice(0, 19).replace('T', ' '), u.id]);
+    audit('permissions', 'user', u.id, `${u.username}: ${json ? Object.entries(JSON.parse(json)).map(([k, v]) => `${k}=${v}`).join(', ') : 'back to the default of the ' + u.role + ' role'}`);
+  });
+  mutated();
+}
+
 
 function getMasterData(type?: string, activeOnly = false) {
   const where: string[] = [];
@@ -2414,6 +3139,7 @@ function getOverviewData(month?: string) {
       reviews: all(`SELECT id, name, review_date FROM investments WHERE status != 'Sold' AND (status='Review' OR (review_date IS NOT NULL AND review_date <= ?)) ORDER BY review_date`, [in30]),
       receipts: all(`SELECT id, title, amount, expense_date FROM expenses WHERE status = 'Needs receipt' ORDER BY expense_date DESC LIMIT 5`),
       receiptCount: num(`SELECT COUNT(*) FROM expenses WHERE status = 'Needs receipt'`),
+      ...(() => { const late = enrichLoans().filter(l => l.derived_status === 'Overdue'); return { loansOverdue: late.length, loansOverdueAmount: r2(late.reduce((a, l) => a + l.overdue_amount, 0)) }; })(),
       lastBackup: settingsMap().last_backup_date,
     },
     recent,
@@ -2428,9 +3154,17 @@ function getTransactions(startDate?: string, endDate?: string, type = 'All') {
   const params: any[] = [];
   if (type === 'All' || type === 'collection') {
     parts.push(`SELECT 'collection' AS type, c.payment_date AS date, m.member_code || ' ' || m.name AS party, 'Contribution ' || c.payment_month AS description,
-                c.payment_method AS method, c.trx_id AS reference, c.total_amount AS credit, 0 AS debit FROM collections c JOIN members m ON m.id=c.member_id
+                c.payment_method AS method, c.trx_id AS reference, c.contribution_amount AS credit, 0 AS debit FROM collections c JOIN members m ON m.id=c.member_id
                 WHERE c.payment_date BETWEEN ? AND ?`);
     params.push(s, e);
+  }
+  // fines are their own line: the late fee of a contribution and the penalty of a loan installment
+  if (type === 'All' || type === 'fine') {
+    parts.push(`SELECT 'fine', c.payment_date, m.member_code || ' ' || m.name, 'Late fee ' || c.payment_month, c.payment_method, c.trx_id, c.late_fee, 0
+                FROM collections c JOIN members m ON m.id = c.member_id WHERE c.late_fee > 0 AND c.payment_date BETWEEN ? AND ?`);
+    parts.push(`SELECT 'fine', r.paid_date, m.member_code || ' ' || m.name, 'Loan ' || l.loan_no || ' late penalty', r.payment_method, r.trx_id, r.penalty_paid, 0
+                FROM loan_repayments r JOIN personal_loans l ON l.id = r.loan_id JOIN members m ON m.id = l.member_id WHERE r.penalty_paid > 0 AND r.paid_date BETWEEN ? AND ?`);
+    params.push(s, e, s, e);
   }
   if (type === 'All' || type === 'expense') {
     parts.push(`SELECT 'expense', expense_date, payee, title || ' (' || category || ')', '', receipt_ref, 0, amount FROM expenses WHERE expense_date BETWEEN ? AND ?`);
@@ -2450,8 +3184,7 @@ function getTransactions(startDate?: string, endDate?: string, type = 'All') {
   if (type === 'All' || type === 'loan') {
     parts.push(`SELECT 'loan', l.disbursed_date, m.member_code || ' ' || m.name, 'Personal loan ' || l.loan_no || ' given (' || l.term_months || ' months)', l.payment_method, l.reference, 0, l.principal
                 FROM personal_loans l JOIN members m ON m.id = l.member_id WHERE l.disbursed_date BETWEEN ? AND ?`);
-    parts.push(`SELECT 'loan_repayment', r.paid_date, m.member_code || ' ' || m.name, 'Loan ' || l.loan_no || ' repayment (principal ' || r.principal_paid || ', interest ' || r.interest_paid
-                || CASE WHEN r.penalty_paid > 0 THEN ', penalty ' || r.penalty_paid ELSE '' END || ')', r.payment_method, r.trx_id, r.total_paid, 0
+    parts.push(`SELECT 'loan_repayment', r.paid_date, m.member_code || ' ' || m.name, 'Loan ' || l.loan_no || ' repayment (principal ' || r.principal_paid || ', interest ' || r.interest_paid || ')', r.payment_method, r.trx_id, r.total_paid - r.penalty_paid, 0
                 FROM loan_repayments r JOIN personal_loans l ON l.id = r.loan_id JOIN members m ON m.id = l.member_id WHERE r.paid_date BETWEEN ? AND ?`);
     params.push(s, e, s, e);
   }
@@ -2485,6 +3218,8 @@ function getDynamicNotifications() {
     const amt = r2(lateLoans.reduce((a, l) => a + l.overdue_amount, 0));
     out.push({ id: `loans_overdue_${lateLoans.length}_${amt}`, title: `${lateLoans.length} personal loan(s) overdue`, message: `TK ${amt} of loan installments is past its due date.`, type: 'warning', targetTab: 'loans', targetFilter: 'Overdue', actionLabel: 'View loans', createdAt: 'Now' });
   }
+  const draftN = num(`SELECT COUNT(*) FROM loan_applications WHERE status = 'Draft'`);
+  if (draftN > 0) out.push({ id: `loan_drafts_${draftN}`, title: `${draftN} loan draft(s) waiting for the signed consent paper`, message: 'No money has been disbursed yet. Upload the signed paper to disburse each loan.', type: 'info', targetTab: 'loans', targetFilter: 'Draft', actionLabel: 'View drafts', createdAt: 'Now' });
   const rc = num(`SELECT COUNT(*) FROM expenses WHERE status='Needs receipt'`);
   if (rc > 0) out.push({ id: `receipts_${rc}`, title: `${rc} expense(s) need a receipt`, message: 'Attach voucher references to keep the audit trail complete.', type: 'warning', targetTab: 'expenses', targetFilter: 'Needs receipt', actionLabel: 'Verify receipts', createdAt: 'Pending' });
   const last = s.last_backup_date;
@@ -2504,7 +3239,38 @@ export function logBackup(fileName: string, filePath: string, size: number, type
   run('INSERT INTO backup_logs (file_name, file_path, file_size, backup_type) VALUES (?,?,?,?)', [fileName, filePath, size, type]);
   if (type === 'Manual') run(`INSERT OR REPLACE INTO app_settings (key, value) VALUES ('last_backup_date', ?)`, [new Date().toISOString()]);
   audit('backup', 'database', null, `${type}: ${filePath}`);
-  mutated();
+  mutated(true);
+}
+
+/** For Google sync: does this computer hold any real fund data yet, or is it a fresh install? */
+export function syncHasData(): boolean {
+  return ['members', 'collections', 'expenses', 'investments', 'investment_returns', 'member_settlements', 'personal_loans', 'loan_applications'].some(t => num(`SELECT COUNT(*) FROM ${t}`) > 0);
+}
+export function syncCounts() {
+  const c = (t: string) => num(`SELECT COUNT(*) FROM ${t}`);
+  return { members: c('members'), collections: c('collections'), expenses: c('expenses'), investments: c('investments'), loans: c('personal_loans'), drafts: c('loan_applications'), users: c('users') };
+}
+
+/** The signed consent papers the database points to (their files are synced separately from the database). */
+export function consentFiles(): Array<{ table: 'loan_applications' | 'personal_loans'; id: number; file: string; name: string; sha256: string; size: number }> {
+  const rows: any[] = [];
+  for (const table of ['loan_applications', 'personal_loans'] as const) {
+    for (const r of all(`SELECT id, consent_file, consent_name, consent_sha256, consent_size FROM ${table} WHERE consent_file IS NOT NULL AND consent_file != ''`)) {
+      rows.push({ table, id: r.id, file: String(r.consent_file), name: String(r.consent_name || ''), sha256: String(r.consent_sha256 || ''), size: Number(r.consent_size) || 0 });
+    }
+  }
+  return rows;
+}
+/** After data came from another computer the stored file paths belong to that computer: point them at this computer's documents folder. */
+export function rebaseConsentFiles(dir: string) {
+  tx(() => {
+    for (const r of consentFiles()) {
+      const base = r.file.split(/[\\/]/).pop() || r.file;
+      const next = path.join(dir, base);
+      if (next !== r.file) run(`UPDATE ${r.table} SET consent_file = ? WHERE id = ?`, [next, r.id]);
+    }
+  });
+  mutated(true);
 }
 
 function getDatabaseStats() {
@@ -2520,9 +3286,9 @@ function getDatabaseStats() {
 /** Wipes business data. keepSetup keeps users, master data and settings. */
 function resetDatabase(keepSetup = true) {
   tx(() => {
-    for (const t of ['loan_repayments', 'loan_schedule', 'personal_loans', 'member_settlements', 'investment_returns', 'collections', 'members', 'investments', 'expenses']) run(`DELETE FROM ${t}`);
+    for (const t of ['loan_applications', 'loan_repayments', 'loan_schedule', 'personal_loans', 'member_settlements', 'investment_returns', 'collections', 'members', 'investments', 'expenses']) run(`DELETE FROM ${t}`);
     if (!keepSetup) { run('DELETE FROM master_data'); run('DELETE FROM users'); run('DELETE FROM app_settings'); }
-    run(`DELETE FROM sqlite_sequence WHERE name IN ('loan_repayments','personal_loans','member_settlements','investment_returns','collections','members','investments','expenses')`);
+    run(`DELETE FROM sqlite_sequence WHERE name IN ('loan_applications','loan_repayments','personal_loans','member_settlements','investment_returns','collections','members','investments','expenses')`);
     audit('reset', 'database', null, keepSetup ? 'business data cleared' : 'factory reset');
   });
   ensureDefaults();
@@ -2621,6 +3387,22 @@ function checkAccountingHealth() {
   }
   add('set_math', 'Member settlements add up', 'fail', badSet, r => r.t);
 
+  // the books balance, and the fines are accounted for
+  const books = getFundBooks();
+  add('books_balance', 'The books balance: the fund = what members are owed + the fund\'s own reserve', 'fail',
+    books.balanced ? [] : [{ t: `Reserve ${books.reserve} but fines ${books.parts.fines} + penalties ${books.parts.penalties} − expenses ${books.parts.expenses} − settlement adjustment ${books.parts.settlementAdjustment} + unshared benefit ${books.parts.unshared} = ${books.explained} (difference ${books.residual}). Some entry is counted in the cash totals but not in the members' shares, or the other way round.` }], r => r.t);
+  add('reserve_negative', 'The fund holds at least what its members are owed', 'warn',
+    books.reserve < -0.005 ? [{ t: `Members are owed ${books.owedToMembers} but the fund balance at cost is ${books.fundBalance}: ${-books.reserve} is missing. Expenses (${books.parts.expenses}) are higher than the fines and penalties collected (${r2(books.parts.fines + books.parts.penalties)}) and nothing else covers them.` }] : [], r => r.t);
+  add('set_drift', 'Settled members\' figures still match the books', 'warn',
+    books.drift.map(d => ({ t: `${d.member_code} ${d.name}: settled on ${d.stored}, but the books now give ${d.now} (an entry dated before the settlement was added or changed afterwards)` })), r => r.t);
+  const fineReg = fineRows({});
+  const fineLedger = num('SELECT COALESCE((SELECT SUM(late_fee) FROM collections WHERE late_fee > 0), 0) + COALESCE((SELECT SUM(penalty_paid) FROM loan_repayments WHERE penalty_paid > 0), 0)');
+  const fineRegTotal = fineReg.reduce((a, x) => a + x.amount, 0);
+  add('fine_register', 'The fine register adds up to the fines in the ledger', 'fail',
+    Math.abs(fineRegTotal - fineLedger) > 0.01 ? [{ t: `Fine register ${r2(fineRegTotal)} ≠ fines in payments and loan repayments ${r2(fineLedger)}` }] : [], r => r.t);
+  add('fine_on_time', 'Fines were charged only on late payments', 'warn',
+    fineReg.filter(x => x.flag === 'on_time').map(x => ({ t: `${x.member_code} ${x.name}: fine ${x.amount} on ${x.label} paid ${x.date}, by the due date ${x.due_date}` })), r => r.t);
+
   // personal loans
   const badLoans: Row[] = [];
   for (const l of all('SELECT l.*, m.member_code FROM personal_loans l LEFT JOIN members m ON m.id = l.member_id')) {
@@ -2645,6 +3427,19 @@ function checkAccountingHealth() {
          WHERE l.id IS NULL OR r.total_paid <= 0 OR r.principal_paid < 0 OR r.interest_paid < 0 OR r.penalty_paid < 0
             OR ABS(r.total_paid - (r.principal_paid + r.interest_paid + r.penalty_paid)) > 0.009 OR NOT ${iso('r.paid_date')} OR r.paid_date > ? OR r.paid_date < l.disbursed_date`, [today]),
     r => `#${r.id} ${r.loan_no ?? 'missing loan'}: ${r.total_paid} (= ${r.principal_paid} + ${r.interest_paid} + ${r.penalty_paid}) on "${r.paid_date}"`);
+  add('loan_guarantor', 'Every personal loan has complete guarantor details', 'warn',
+    all(`SELECT l.loan_no, l.guarantor_type, l.guarantor_member_id, l.guarantor_name, l.guarantor_address, l.guarantor_nid, l.guarantor, l.member_id, g.status AS gstatus
+         FROM personal_loans l LEFT JOIN members g ON g.id = l.guarantor_member_id`).filter(r =>
+      !r.guarantor_type ? true
+        : r.guarantor_type === 'member' ? (!r.guarantor_member_id || r.gstatus === null || Number(r.guarantor_member_id) === Number(r.member_id))
+          : !(r.guarantor_name && r.guarantor_address && /^\d{10}$|^\d{13}$|^\d{17}$/.test(String(r.guarantor_nid || '')))),
+    r => `${r.loan_no}: ${r.guarantor_type ? 'guarantor details are incomplete or invalid' : `no structured guarantor recorded${r.guarantor ? ` (only "${r.guarantor}")` : ''}`}`);
+  add('loan_consent', 'Signed consent papers of disbursed loans are on this computer', 'warn',
+    all(`SELECT loan_no, consent_name, consent_file FROM personal_loans WHERE consent_status = 'Signed'`).filter(r => !r.consent_file || !fs.existsSync(String(r.consent_file))),
+    r => `${r.loan_no}: the file "${r.consent_name}" cannot be found (restored on another computer, or deleted). Upload the scan again.`);
+  add('loan_drafts_old', 'No loan draft has been waiting more than 14 days', 'warn',
+    all(`SELECT app_no, principal, created_at FROM loan_applications WHERE status = 'Draft'`).filter(r => daysBetween(String(r.created_at).slice(0, 10), today) > 14),
+    r => `${r.app_no}: TK ${r.principal} draft waiting since ${String(r.created_at).slice(0, 10)} for its signed consent paper`);
   add('loan_inactive', 'Members with an unpaid loan are still active', 'warn',
     all(`SELECT m.member_code, m.name, l.loan_no FROM personal_loans l JOIN members m ON m.id = l.member_id WHERE l.status = 'Active' AND m.status != 'Active'`),
     r => `${r.member_code} ${r.name}: inactive but still owes ${r.loan_no}`);
@@ -2796,15 +3591,16 @@ export const api: Record<string, (...args: any[]) => any> = {
   getAppSettings, saveAppSettings,
   getMembers, getAllMembersLite, addMember, updateMember, deleteMember, getMemberHistory, getMemberStatement, bulkAddMembers, getNextMemberCode,
   getCollections, recordPayment, deletePayment, suggestLateFee,
-  getInvestments, addInvestment, updateInvestment, updateInvestmentValuation, deleteInvestment,
+  getInvestments, addInvestment, updateInvestment, updateInvestmentValuation, getInvestmentReviews, completeInvestmentReview, deleteInvestment,
   getInvestmentReturns, getReturnsSummary, addInvestmentReturn, deleteInvestmentReturn,
   previewMemberSettlement, settleMember, getMemberSettlements, cancelSettlement,
-  getLoans, getLoan, getLoanSummary, previewLoan, addLoan, updateLoan, deleteLoan, previewLoanRepayment, recordLoanRepayment, deleteLoanRepayment, writeOffLoan, cancelLoanWriteOff,
+  getLoans, getLoan, getLoanSummary, previewLoan, previewGuarantor, addLoan,
+  getLoanApplications, getLoanApplication, createLoanApplication, updateLoanApplication, deleteLoanApplication, activateLoanApplication, updateLoan, deleteLoan, previewLoanRepayment, recordLoanRepayment, deleteLoanRepayment, writeOffLoan, cancelLoanWriteOff,
   getExpenses, addExpense, updateExpense, verifyExpenseReceipt, deleteExpense,
   getUsers, getUserProfile, addUser, updateUser, deleteUser,
-  login, logout, getSession, changeOwnPassword, setUserPassword, checkAccountingHealth,
+  login, logout, getSession, changeOwnPassword, setUserPassword, checkAccountingHealth, getUserPermissions, setUserPermissions, getRoleDefaults,
   getMasterData, addMasterItem, updateMasterItem, deleteMasterItem,
-  getOverviewMetrics, getOverviewData, getTransactions, getAuditLog, getDynamicNotifications,
+  getOverviewMetrics, getOverviewData, getTransactions, getFineRegister, getFundBooks, getAuditLog, getDynamicNotifications,
   getBackupLogs, getDatabaseStats, resetDatabase, loadDemoData,
   // actor now comes from the signed-in session; kept as a no-op for older renderer code
   setActor: () => undefined,

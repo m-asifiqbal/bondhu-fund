@@ -18,6 +18,8 @@ import { HealthCheckCard } from '../components/HealthCheckCard';
 import { PinDialog } from '../components/modals/PinDialog';
 import { MasterRecoveryCard } from '../components/MasterRecoveryCard';
 import { ExcelDataCard } from '../components/ExcelDataCard';
+import { GoogleSyncCard } from '../components/GoogleSyncCard';
+import { DriveBackupCard } from '../components/DriveBackupCard';
 import { useApp } from '../context/AppContext';
 import {
   performBackup,
@@ -121,7 +123,7 @@ const ConfirmDialog: React.FC<{ state: ConfirmState; onClose: () => void }> = ({
 };
 
 export const BackupRestoreView: React.FC = () => {
-  const { showToast, triggerRefresh, refreshKey, t, tv, formatDate, language, toBanglaDigits, isAdmin, canUpload } = useApp();
+  const { showToast, triggerRefresh, refreshKey, t, tv, formatDate, language, toBanglaDigits, isAdmin, canUpload, can } = useApp();
   const n = useCallback((v: number | string) => (language === 'bn' ? toBanglaDigits(v) : String(v)), [language, toBanglaDigits]);
   const kb = (v: number | string) => `${n(v)} ${t('finance.backup_kb', 'KB')}`;
   const [info, setInfo] = useState<AppInfo | null>(null);
@@ -345,11 +347,15 @@ export const BackupRestoreView: React.FC = () => {
         </p>
       </div>
 
-      <ExcelDataCard />
+      {can('google_sync', 'view') && <GoogleSyncCard />}
+      {can('drive_backup', 'view') && <DriveBackupCard />}
 
-      {canUpload && <MasterRecoveryCard />}
-      {canUpload && <HealthCheckCard />}
+      {can('backup', 'view') && <ExcelDataCard />}
 
+      {canUpload && can('backup', 'view') && <MasterRecoveryCard />}
+      {canUpload && can('backup', 'view') && <HealthCheckCard />}
+
+      {can('backup', 'view') && <>
       {/* Status */}
       <div className="card-base p-6">
         <div className="flex items-start gap-4">
@@ -562,6 +568,7 @@ export const BackupRestoreView: React.FC = () => {
           </div>}
         </div>
       </div>
+      </>}
 
       {confirm && <ConfirmDialog state={confirm} onClose={() => setConfirm(null)} />}
       <PinDialog open={!!pinDlg} mode={pinDlg?.mode || 'set'} fileName={pinDlg && pinDlg.mode === 'enter' ? pinDlg.fileName : undefined}

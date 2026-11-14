@@ -1,24 +1,26 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { Landmark, AlertTriangle, Info, Check, ChevronDown, ChevronUp, CalendarClock, Sparkles } from 'lucide-react';
+import { Landmark, AlertTriangle, Info, Check, ChevronDown, ChevronUp, CalendarClock, Sparkles, ShieldCheck, FileDown } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import { Modal } from '../common/Modal';
 import { MoneyInput } from '../common/MoneyInput';
 import { DatePicker } from '../common/DatePicker';
 import { SearchableSelect, SelectOption } from '../common/SearchableSelect';
 import { SegmentedTabs } from '../common/SegmentedTabs';
-import { getAllMembersLite, previewLoan, addLoan } from '../../services/db';
-import type { LoanMethod, LoanPreview } from '../../types';
+import { getAllMembersLite, previewLoan, previewGuarantor, addLoan, getLoan, getLoanApplication, createLoanApplication, updateLoanApplication } from '../../services/db';
+import type { LoanMethod, LoanPreview, GuarantorCheck, LoanApplicationDetail } from '../../types';
 import { todayISO } from '../../utils/date';
-import { useMethodText, useMoney, useNum } from './loanUi';
+import { useMethodText, useMoney, useNum, useConsentPaper, consentFromDetail, consentFromApplication } from './loanUi';
 
 const TERM_CHIPS = [6, 12, 18, 24, 36, 48];
 
 interface Props {
   open: boolean;
   onClose: () => void;
-  /** called with the new loan id after saving */
-  onSaved: (id: number) => void;
+  /** called after saving: a draft (consent paper required) or a disbursed loan */
+  onSaved: (id: number, kind: 'loan' | 'draft') => void;
   presetMemberId?: number | null;
+  /** edit this draft instead of creating a new loan */
+  application?: LoanApplicationDetail | null;
 }
 
 type LiteMember = { id: number; member_code: string; name: string; name_bn?: string | null; status: string; monthly_due: number };
@@ -28,7 +30,7 @@ type LiteMember = { id: number; member_code: string; name: string; name_bn?: str
  * monthly installment, total interest, real yearly cost and the whole schedule are recalculated by the same engine
  * that books the loan, so what the member is shown is exactly what will be recorded.
  */
-export const LoanFormModal: React.FC<Props> = ({ open, onClose, onSaved, presetMemberId }) => {
+export const LoanFormModal: React.FC<Props> = ({ open, onClose, onSaved, presetMemberId, application }) => {
   const { t, tv, formatDate, showToast, triggerRefresh, masterData, settings, bnName } = useApp();
   const n = useNum();
   const formatCurrency = useMoney();
@@ -44,7 +46,16 @@ export const LoanFormModal: React.FC<Props> = ({ open, onClose, onSaved, presetM
   const [firstDue, setFirstDue] = useState('');
   const [payMethod, setPayMethod] = useState('');
   const [purpose, setPurpose] = useState('');
-  const [guarantor, setGuarantor] = useState('');
+  // guarantor (mandatory): a fund member, or an outsider with name, address and NID
+  const [gMember, setGMember] = useState(true);
+  const [gMemberId, setGMemberId] = useState<number | ''>('');
+  const [gName, setGName] = useState('');
+  const [gAddress, setGAddress] = useState('');
+  const [gNid, setGNid] = useState('');
+  const [gPhone, setGPhone] = useState('');
+  const [gRelation, setGRelation] = useState('');
+  const [gCheck, setGCheck] = useState<GuarantorCheck | null>(null);
+  const [gShowErr, setGShowErr] = useState(false);
   const [reference, setReference] = useState('');
   const [notes, setNotes] = useState('');
   const [limitNote, setLimitNote] = useState('');
@@ -53,18 +64,35 @@ export const LoanFormModal: React.FC<Props> = ({ open, onClose, onSaved, presetM
   const [showAll, setShowAll] = useState(false);
   const [saving, setSaving] = useState(false);
   const seq = useRef(0);
+  const gseq = useRef(0);
+  const makePaper = useConsentPaper();
+  const editing = !!application;
+  // signed consent paper required (Loan policy): the loan is saved as a draft and disbursed only after the signed paper is uploaded
+  const consent = editing || settings?.loan_consent_required !== false;
 
   // fresh form every time the dialog opens, starting from the fund's loan policy
   useEffect(() => {
     if (!open) return;
+    const a = application?.application;
+    if (a) {
+      setMemberId(a.member_id); setPrincipal(String(a.principal)); setTerm(String(a.term_months));
+      setMethod(a.method); setRate(String(a.annual_rate));
+      setLoanDate(a.disbursed_date); setFirstDue(a.first_due_date); setPayMethod(a.payment_method || ''); setPurpose(a.purpose || ''); setReference(a.reference || '');
+      setGMember(a.guarantor_type !== 'outsider'); setGMemberId(a.guarantor_member_id || ''); setGName(a.guarantor_name || ''); setGAddress(a.guarantor_address || '');
+      setGNid(a.guarantor_nid || ''); setGPhone(a.guarantor_phone || ''); setGRelation(a.guarantor_relation || ''); setGCheck(null); setGShowErr(false);
+      setNotes(a.notes || ''); setLimitNote(a.limit_note || '');
+    } else {
     setMemberId(presetMemberId || ''); setPrincipal(''); setTerm('12');
     setMethod((settings?.loan_default_method as LoanMethod) || 'reducing');
     setRate(String(settings?.loan_default_rate ?? 12));
-    setLoanDate(todayISO()); setFirstDue(''); setPayMethod(''); setPurpose(''); setGuarantor(''); setReference(''); setNotes(''); setLimitNote('');
+    setLoanDate(todayISO()); setFirstDue(''); setPayMethod(''); setPurpose(''); setReference('');
+    setGMember(true); setGMemberId(''); setGName(''); setGAddress(''); setGNid(''); setGPhone(''); setGRelation(''); setGCheck(null); setGShowErr(false);
+    setNotes(''); setLimitNote('');
+    }
     setPv(null); setShowAll(false);
     getAllMembersLite().then(l => setMembers(l as LiteMember[])).catch((e: any) => showToast(e.message, 'error'));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open]);
+  }, [open, application?.application.id]);
 
   const principalN = Number(principal);
   const termN = Number(term);
@@ -79,14 +107,33 @@ export const LoanFormModal: React.FC<Props> = ({ open, onClose, onSaved, presetM
     const id = setTimeout(() => {
       previewLoan({
         member_id: memberId === '' ? undefined : Number(memberId), principal: principalN, method, annual_rate: rate === '' ? undefined : rateN, term_months: termN,
-        disbursed_date: loanDate, first_due_date: firstDue || undefined,
+        disbursed_date: loanDate, first_due_date: firstDue || undefined, draft: consent,
       } as any)
         .then(r => { if (my === seq.current) setPv(r); })
         .catch((e: any) => { if (my === seq.current) setPv({ valid: false, error: e.message }); })
         .finally(() => { if (my === seq.current) setCalculating(false); });
     }, 180);
     return () => clearTimeout(id);
-  }, [open, memberId, principalN, termN, method, rate, rateN, loanDate, firstDue]);
+  }, [open, memberId, principalN, termN, method, rate, rateN, loanDate, firstDue, consent]);
+
+  // the guarantor is checked by the same rules that will save it
+  useEffect(() => {
+    if (!open) return;
+    const my = ++gseq.current;
+    const id = setTimeout(() => {
+      previewGuarantor({
+        member_id: memberId === '' ? undefined : Number(memberId), guarantor_type: gMember ? 'member' : 'outsider',
+        guarantor_member_id: gMember && gMemberId !== '' ? Number(gMemberId) : undefined,
+        guarantor_name: gName, guarantor_address: gAddress, guarantor_nid: gNid, guarantor_phone: gPhone, guarantor_relation: gRelation,
+      }).then(r => { if (my === gseq.current) setGCheck(r); }).catch(() => undefined);
+    }, 220);
+    return () => clearTimeout(id);
+  }, [open, memberId, gMember, gMemberId, gName, gAddress, gNid, gPhone, gRelation]);
+
+  const guarantorOptions = useMemo<SelectOption[]>(
+    () => members.filter(m => m.status === 'Active' && m.id !== memberId).map(m => ({ value: m.id, label: bnName(m.name, m.name_bn), subLabel: m.member_code })),
+    [members, memberId, bnName],
+  );
 
   const memberOptions = useMemo<SelectOption[]>(
     () => members.filter(m => m.status === 'Active').map(m => ({ value: m.id, label: bnName(m.name, m.name_bn), subLabel: m.member_code })),
@@ -103,7 +150,17 @@ export const LoanFormModal: React.FC<Props> = ({ open, onClose, onSaved, presetM
   const needsLimitNote = !!(mem && mem.limit !== null && principalN + mem.owed > mem.limit + 0.005);
   const rows = plan?.rows || [];
   const shown = showAll ? rows : rows.slice(0, 6);
-  const canSave = !saving && memberId !== '' && !!plan && errors.length === 0 && !!payMethod && (!needsLimitNote || limitNote.trim().length > 0);
+  const gOk = !!gCheck?.ok;
+  const canSave = !saving && memberId !== '' && !!plan && errors.length === 0 && !!payMethod && gOk && (!needsLimitNote || limitNote.trim().length > 0);
+  const payName = payMethod ? tv(payMethod) : '';
+  const makePaperNow = () => {
+    if (!plan || !pv?.terms || !gCheck?.info || !mem) return;
+    void makePaper({
+      ref_no: application?.application.app_no || (consent ? pv.nextAppNo : pv.nextLoanNo) || 'NEW', ref_is_draft: consent, loan_date: loanDate, principal: principalN, term_months: rows.length, method,
+      annual_rate: method === 'free' ? 0 : rateN, installment: plan.installment, total_interest: plan.totalInterest, total_payable: plan.totalPayable, first_due_date: rows[0]?.due_date || '',
+      purpose: purpose.trim(), paid_via: payName, schedule: rows, borrower: { name: mem.name, name_bn: mem.name_bn, code: mem.member_code, nid: mem.nid || '', phone: mem.phone || '' }, guarantor: gCheck.info,
+    });
+  };
   const flatPremium = plan && method === 'flat' && plan.effectiveRate - rateN >= 0.5;
 
   const submit = async (e?: React.FormEvent) => {
@@ -112,19 +169,41 @@ export const LoanFormModal: React.FC<Props> = ({ open, onClose, onSaved, presetM
       if (memberId === '') showToast(t('loan.err_member', 'Choose the member who is taking the loan.'), 'error');
       else if (!(principalN > 0)) showToast(t('loan.err_amount', 'Enter the loan amount.'), 'error');
       else if (!payMethod) showToast(t('loan.err_paid_via', 'Choose how the money is paid out (cash, bank, bKash…).'), 'error');
+      else if (!gOk) { setGShowErr(true); showToast(gCheck?.error || t('loan.err_guarantor', 'A guarantor is required: choose a member or enter the outside guarantor\'s details.'), 'error'); }
       else if (needsLimitNote && !limitNote.trim()) showToast(t('loan.err_limit_note', 'Write the approval reason: this loan is above the fund limit.'), 'error');
       return;
     }
     setSaving(true);
     try {
-      const id = await addLoan({
+      const payload = {
         member_id: Number(memberId), principal: principalN, method, annual_rate: method === 'free' ? 0 : rateN, term_months: termN,
         disbursed_date: loanDate, first_due_date: firstDue || undefined, payment_method: payMethod,
-        reference: reference.trim(), purpose: purpose.trim(), guarantor: guarantor.trim(), notes: notes.trim(), limit_note: limitNote.trim(),
-      });
-      showToast(t('loan.saved', 'Loan given. The repayment schedule has been created.'));
-      triggerRefresh();
-      onSaved(id);
+        reference: reference.trim(), purpose: purpose.trim(), notes: notes.trim(), limit_note: limitNote.trim(),
+        guarantor_type: (gMember ? 'member' : 'outsider') as 'member' | 'outsider', guarantor_member_id: gMember && gMemberId !== '' ? Number(gMemberId) : undefined,
+        guarantor_name: gName, guarantor_address: gAddress, guarantor_nid: gNid, guarantor_phone: gPhone, guarantor_relation: gRelation,
+      };
+      if (application) {
+        const r = await updateLoanApplication(application.application.id, payload);
+        showToast(r.consentRemoved ? t('loan.draft_updated_resign', 'Draft updated. The loan terms changed, so the uploaded paper was removed: print the new consent paper and get it signed again.') : t('loan.draft_updated', 'Draft updated.'));
+        triggerRefresh();
+        onSaved(application.application.id, 'draft');
+      } else if (consent) {
+        const id = await createLoanApplication(payload);
+        showToast(t('loan.draft_saved', 'Saved as a draft. No money has moved yet: print the consent paper, get it signed, then upload it to disburse the loan.'));
+        triggerRefresh();
+        // the consent paper is generated straight away from the saved draft
+        try { const det = await getLoanApplication(id); const ci = consentFromApplication(det); if (ci) await makePaper(ci); } catch { /* it can be generated again from the draft */ }
+        onSaved(id, 'draft');
+      } else {
+        const id = await addLoan(payload);
+        showToast(t('loan.saved', 'Loan given. The repayment schedule has been created.'));
+        triggerRefresh();
+        // an outside guarantor must sign: the paper is generated straight away from the saved loan
+        if (!gMember) {
+          try { const det = await getLoan(id); const ci = consentFromDetail(det); if (ci) await makePaper(ci); } catch { /* it can be downloaded again from the loan */ }
+        }
+        onSaved(id, 'loan');
+      }
     } catch (err: any) {
       showToast(err.message, 'error');
     } finally { setSaving(false); }
@@ -150,8 +229,8 @@ export const LoanFormModal: React.FC<Props> = ({ open, onClose, onSaved, presetM
       locked={saving}
       size="xl"
       icon={<Landmark size={18} />}
-      title={t('loan.add_title', 'New personal loan')}
-      subtitle={t('loan.add_sub', 'Give a loan from the fund to a member. The monthly installment is calculated automatically.')}
+      title={editing ? t('loan.edit_draft_title', 'Edit loan draft') : t('loan.add_title', 'New personal loan')}
+      subtitle={editing ? `${application!.application.app_no} · ${t('loan.edit_draft_sub', 'Changing the amount, period, rate, dates or guarantor means the paper must be signed again.')}` : t('loan.add_sub', 'Give a loan from the fund to a member. The monthly installment is calculated automatically.')}
       footer={
         <div className="flex items-center justify-between gap-3">
           <p className="text-[11px] text-slate-500 dark:text-slate-400 hidden sm:block">
@@ -160,7 +239,7 @@ export const LoanFormModal: React.FC<Props> = ({ open, onClose, onSaved, presetM
           <div className="flex items-center gap-2 ml-auto">
             <button type="button" onClick={onClose} disabled={saving} className="btn btn-cancel">{t('common.cancel', 'Cancel')}</button>
             <button type="submit" form="loan-form" disabled={!canSave} className="btn btn-primary">
-              {saving ? t('common.saving', 'Saving…') : t('loan.give', 'Give loan')}
+              {saving ? t('common.saving', 'Saving…') : editing ? t('common.save', 'Save') : consent ? t('loan.save_draft', 'Save as draft') : t('loan.give', 'Give loan')}
             </button>
           </div>
         </div>
@@ -240,23 +319,84 @@ export const LoanFormModal: React.FC<Props> = ({ open, onClose, onSaved, presetM
               onChange={v => setPayMethod(v == null ? '' : String(v))} placeholder={t('loan.paid_via_ph', 'Cash, bank, bKash…')} />
             <div>
               <label className="form-label">{t('loan.reference', 'Reference / transaction no.')}</label>
-              <input type="text" value={reference} onChange={e => setReference(e.target.value)} className="form-input" />
+              <input type="text" value={reference} onChange={e => setReference(e.target.value)} className="form-input"
+                placeholder={pv?.autoReference ? t('loan.auto_ref', 'Auto: {ref}').replace('{ref}', pv.autoReference) : t('loan.auto_ref_ph', 'Auto-generated if left blank')} />
+              <p className="mt-1 text-[10px] text-slate-500 dark:text-slate-400">{t('loan.auto_ref_hint', 'Leave blank and a unique reference is created. Type one to use your own (e.g. a bank transaction ID).')}</p>
             </div>
             <div>
               <label className="form-label">{t('loan.purpose', 'Purpose of the loan')}</label>
               <input type="text" value={purpose} onChange={e => setPurpose(e.target.value)} className="form-input" placeholder={t('loan.purpose_ph', 'e.g. shop stock, medical, education')} />
             </div>
+          </div>
+
+          {/* guarantor — mandatory */}
+          <div className={`rounded-2xl border p-4 space-y-3 ${gShowErr && !gOk ? 'border-rose-300 dark:border-rose-800' : 'border-slate-200 dark:border-slate-800'} bg-slate-50/60 dark:bg-[#121f26]`}>
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div className="flex items-center gap-2 text-[13px] font-black text-slate-900 dark:text-white"><ShieldCheck size={16} className="text-emerald-700 dark:text-emerald-400" />{t('loan.guarantor', 'Guarantor')} <span className="text-rose-500">*</span></div>
+              <label className="flex items-center gap-2 cursor-pointer select-none text-[12px] font-bold text-slate-700 dark:text-slate-200">
+                <input type="checkbox" checked={gMember} onChange={e => setGMember(e.target.checked)} className="w-4 h-4 accent-[#0f4a3c]" />
+                {t('loan.g_is_member', 'Guarantor is a fund member')}
+              </label>
+            </div>
+            {gMember ? (
+              <SearchableSelect
+                label={t('loan.g_pick_member', 'Guarantor (search by name or code)')} required options={guarantorOptions} value={gMemberId === '' ? null : gMemberId}
+                onChange={v => setGMemberId(v == null || v === '' ? '' : Number(v))} placeholder={t('loan.g_pick_ph', 'Choose a member…')}
+              />
+            ) : (
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div className="sm:col-span-2">
+                  <label className="form-label">{t('loan.g_name', 'Full name')} <span className="text-rose-500">*</span></label>
+                  <input type="text" value={gName} onChange={e => setGName(e.target.value)} className="form-input" placeholder={t('loan.g_name_ph', 'As on the National ID')} maxLength={80} />
+                </div>
+                <div className="sm:col-span-2">
+                  <label className="form-label">{t('loan.g_address', 'Full address')} <span className="text-rose-500">*</span></label>
+                  <input type="text" value={gAddress} onChange={e => setGAddress(e.target.value)} className="form-input" placeholder={t('loan.g_address_ph', 'House / road, area, upazila, district')} maxLength={250} />
+                </div>
+                <div>
+                  <label className="form-label">{t('loan.g_nid', 'National ID (NID)')} <span className="text-rose-500">*</span></label>
+                  <input type="text" inputMode="numeric" value={gNid} onChange={e => setGNid(e.target.value)} className="form-input tabular-nums" placeholder={t('loan.g_nid_ph', '10, 13 or 17 digits')} maxLength={25} />
+                </div>
+                <div>
+                  <label className="form-label">{t('loan.g_phone', 'Phone (optional)')}</label>
+                  <input type="text" inputMode="tel" value={gPhone} onChange={e => setGPhone(e.target.value)} className="form-input tabular-nums" maxLength={20} />
+                </div>
+              </div>
+            )}
             <div>
-              <label className="form-label">{t('loan.guarantor', 'Guarantor (optional)')}</label>
-              <input type="text" value={guarantor} onChange={e => setGuarantor(e.target.value)} className="form-input" />
+              <label className="form-label">{t('loan.g_relation', 'Relationship to the borrower (optional)')}</label>
+              <input type="text" value={gRelation} onChange={e => setGRelation(e.target.value)} className="form-input" placeholder={t('loan.g_relation_ph', 'e.g. brother, colleague, neighbour')} maxLength={60} />
+            </div>
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <p className={`text-[11px] font-semibold flex items-start gap-1.5 min-w-0 ${gOk ? 'text-emerald-800 dark:text-emerald-400' : gShowErr ? 'text-rose-600 dark:text-rose-400' : 'text-slate-500 dark:text-slate-400'}`}>
+                {gOk ? <Check size={13} className="shrink-0 mt-0.5" /> : <Info size={13} className="shrink-0 mt-0.5" />}
+                <span>{gOk
+                  ? (gMember ? t('loan.g_ok_member', 'Guarantor selected.') : t('loan.g_ok_out', 'Details complete. The guarantee form will be created automatically when you save the loan.'))
+                  : (gShowErr || gName || gAddress || gNid || gMemberId !== '' ? (gCheck?.error || '') : gMember ? t('loan.g_hint_member', 'Choose the member who guarantees this loan.') : t('loan.g_hint_out', 'An outside guarantor needs a full name, a valid address and a National ID.'))}</span>
+              </p>
+              <button type="button" onClick={makePaperNow} disabled={!gOk || !plan || !mem || !payMethod} className="btn btn-outline btn-sm shrink-0"
+                title={!gOk || !plan || !payMethod ? t('loan.g_form_need', 'Fill in the loan and guarantor details first') : undefined}>
+                <FileDown size={13} /><span>{t('loan.paper_btn', 'Generate consent paper (PDF)')}</span>
+              </button>
             </div>
           </div>
+
           {needsLimitNote && (
             <div>
               <label className="form-label text-amber-700 dark:text-amber-400">{t('loan.limit_note', 'Approval reason (loan is above the fund limit)')} <span className="text-rose-500">*</span></label>
               <input type="text" value={limitNote} onChange={e => setLimitNote(e.target.value)} className="form-input border-amber-400" placeholder={t('loan.limit_note_ph', 'e.g. Committee approved on 12 May')} />
             </div>
           )}
+          <div className={`rounded-2xl border p-4 flex gap-3 text-[11px] leading-relaxed ${consent ? 'border-amber-300 dark:border-amber-800 bg-amber-50/70 dark:bg-amber-950/30 text-amber-900 dark:text-amber-200' : 'border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-[#121f26] text-slate-600 dark:text-slate-300'}`}>
+            <Info size={16} className="shrink-0 mt-0.5" />
+            <div>
+              <div className="font-black text-[12px] mb-0.5">{consent ? t('loan.consent_on_title', 'Signed consent paper required') : t('loan.consent_off_title', 'No signed paper required')}</div>
+              {consent
+                ? t('loan.consent_on_body', 'Fill in everything above, then press "Generate consent paper". Print it, get the borrower and the guarantor to sign, and upload the signed copy from the loan\'s page. The loan stays a DRAFT — no money leaves the fund — until the signed paper is uploaded.')
+                : t('loan.consent_off_body', 'Signed consent papers are switched off in the Loan policy, so this loan is disbursed as soon as you save it. You can still generate the standard consent paper above.')}
+              {editing && application!.application.has_consent && <div className="mt-1.5 font-bold">{t('loan.edit_paper_warn', 'A signed paper is already uploaded. If you change the amount, period, rate, dates or guarantor, it is removed and the new paper must be signed.')}</div>}
+            </div>
+          </div>
           <div>
             <label className="form-label">{t('common.notes', 'Notes')}</label>
             <input type="text" value={notes} onChange={e => setNotes(e.target.value)} className="form-input" />

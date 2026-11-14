@@ -9,3 +9,7 @@ release/
 *.p12
 *.key
 .bondhu-signing/
+
+# Google OAuth client credentials (never commit)
+config/google.json
+config/supabase.json

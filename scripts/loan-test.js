@@ -6,14 +6,17 @@ const fs = require('fs');
 const path = require('path');
 const os = require('os');
 const proj = path.resolve(__dirname, '..');
-const store = require(path.join(proj, 'dist-electron', 'database.js'));
-const L = require(path.join(proj, 'dist-electron', 'loans.js'));
+const store = require(path.join(proj, process.env.BF_DIST || 'dist-electron', 'database.js'));
+const L = require(path.join(proj, process.env.BF_DIST || 'dist-electron', 'loans.js'));
 const wasm = fs.readFileSync(path.join(proj, 'node_modules', 'sql.js', 'dist', 'sql-wasm.wasm'));
 const A = store.api;
 let fails = 0;
 const ok = (c, m) => { console.log(`${c ? 'PASS' : 'FAIL'}  ${m}`); if (!c) fails++; };
 const near = (a, b, m, tol = 0.005) => ok(Math.abs(a - b) <= tol, `${m}: ${a} ≈ ${b}`);
 const throws = (fn, re, m) => { try { fn(); ok(false, `${m} (no error)`); } catch (e) { ok(re.test(e.message), `${m} -> "${e.message}"`); } };
+// every loan needs a guarantor: most tests use an outside one (members who guarantee a running loan cannot be settled)
+const OUTSIDER = { guarantor_type: 'outsider', guarantor_name: 'Rahim Uddin', guarantor_address: 'House 12, Road 5, Mirpur 10, Dhaka', guarantor_nid: '1234567890' };
+const addLoanG = d => A.addLoan({ ...OUTSIDER, ...d });
 const sum = (rows, k) => Math.round(rows.reduce((a, r) => a + r[k], 0) * 100) / 100;
 
 // ---------------------------------------------------------------------------------------------------------------
@@ -68,12 +71,20 @@ const sum = (rows, k) => Math.round(rows.reduce((a, r) => a + r[k], 0) * 100) / 
   const t = L.buildPlan({ principal: 500, method: 'reducing', annual_rate: 24, term_months: 60, first_due_date: '2025-03-01' });
   ok(t.rows.every(r => r.principal > 0 && r.total > 0), 'tiny long loan: every installment is positive');
   near(sum(t.rows, 'principal'), 500, 'tiny long loan: principal adds up');
+  // whole-taka rounding must never leave empty trailing installments (audit): 100 over 36 months = 3 a month, repaid in 34
+  const sm = L.buildPlan({ principal: 100, method: 'free', annual_rate: 0, term_months: 36, first_due_date: '2025-03-01' });
+  ok(sm.rows.length === 34 && sm.rows.every(r => r.total > 0) && Math.abs(sum(sm.rows, 'principal') - 100) < 0.005, `100 over 36 months: ${sm.rows.length} real installments, no empty rows, principal adds up`);
+  const sf = L.buildPlan({ principal: 250, method: 'flat', annual_rate: 12, term_months: 120, first_due_date: '2025-03-01' });
+  ok(sf.rows.every(r => r.principal > 0 && r.total > 0) && Math.abs(sum(sf.rows, 'principal') - 250) < 0.005, `250 flat over 120 months: ${sf.rows.length} installments, every row positive`);
   // Zero-rate reducing falls back to equal principal
   const zr = L.buildPlan({ principal: 1200, method: 'reducing', annual_rate: 0, term_months: 12, first_due_date: '2025-03-01' });
   ok(zr.totalInterest === 0 && zr.installment === 100, 'reducing at 0 % = equal principal');
 
   // Validation
   ok(L.validateTerms({ principal: 0, method: 'flat', annual_rate: 5, term_months: 6, first_due_date: '2025-03-01' }), 'zero amount invalid');
+  ok(L.validateTerms({ principal: 0.01, method: 'free', annual_rate: 0, term_months: 60, first_due_date: '2025-03-01' }), 'a one-paisa loan over 60 months is refused (zero installments)');
+  ok(L.validateTerms({ principal: 30, method: 'free', annual_rate: 0, term_months: 60, first_due_date: '2025-03-01' }), 'an amount smaller than the number of months is refused');
+  ok(!L.validateTerms({ principal: 60, method: 'free', annual_rate: 0, term_months: 60, first_due_date: '2025-03-01' }), 'TK 1 a month is the smallest allowed');
   ok(L.validateTerms({ principal: 100, method: 'flat', annual_rate: 5, term_months: 0, first_due_date: '2025-03-01' }), 'zero term invalid');
   ok(L.validateTerms({ principal: 100, method: 'flat', annual_rate: 5, term_months: 121, first_due_date: '2025-03-01' }), 'term over 120 invalid');
   ok(L.validateTerms({ principal: 100, method: 'flat', annual_rate: 101, term_months: 6, first_due_date: '2025-03-01' }), 'rate over 100 invalid');
@@ -111,7 +122,7 @@ const sum = (rows, k) => Math.round(rows.reduce((a, r) => a + r[k], 0) * 100) / 
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'bondhu-loan-'));
   await store.openDatabase(path.join(dir, 't.db'), wasm);
   A.resetDatabase(true);
-  A.saveAppSettings({ loan_default_rate: 12, loan_default_method: 'reducing', loan_max_multiple: 0, loan_late_fee: 0 });
+  A.saveAppSettings({ loan_default_rate: 12, loan_default_method: 'reducing', loan_max_multiple: 0, loan_late_fee: 0, loan_consent_required: false });   // the older tests give loans directly
 
   let nid = 1990123400000;
   const mk = (name, opening) => A.addMember({ name, nid: String(++nid), opening_balance: opening, join_date: '2025-01-01', monthly_due: 500 });
@@ -121,17 +132,17 @@ const sum = (rows, k) => Math.round(rows.reduce((a, r) => a + r[k], 0) * 100) / 
 
   // ---- validation ----
   const base = { member_id: m1, principal: 12000, method: 'reducing', annual_rate: 12, term_months: 12, disbursed_date: '2025-02-01', payment_method: 'Cash' };
-  throws(() => A.addLoan({ ...base, member_id: 999 }), /choose the member/, 'unknown member rejected');
-  throws(() => A.addLoan({ ...base, principal: 0 }), /greater than zero/, 'zero amount rejected');
-  throws(() => A.addLoan({ ...base, term_months: 0 }), /term/, 'zero term rejected');
-  throws(() => A.addLoan({ ...base, term_months: 121 }), /term/, 'term over 120 rejected');
-  throws(() => A.addLoan({ ...base, annual_rate: 150 }), /rate/, 'rate over 100 rejected');
-  throws(() => A.addLoan({ ...base, disbursed_date: '2099-01-01' }), /future/, 'future loan date rejected');
-  throws(() => A.addLoan({ ...base, disbursed_date: '2024-06-01' }), /before the member joined/, 'loan before joining rejected');
-  throws(() => A.addLoan({ ...base, payment_method: '' }), /how the money was paid/, 'payment medium required');
-  throws(() => A.addLoan({ ...base, first_due_date: '2025-01-15' }), /after the loan date/, 'first installment before loan date rejected');
-  throws(() => A.addLoan({ ...base, first_due_date: '2025-08-01' }), /three months/, 'first installment too far away rejected');
-  throws(() => A.addLoan({ ...base, principal: 1000000 }), /cannot lend/, 'cannot lend more cash than the fund holds');
+  throws(() => addLoanG({ ...base, member_id: 999 }), /choose the member/, 'unknown member rejected');
+  throws(() => addLoanG({ ...base, principal: 0 }), /greater than zero/, 'zero amount rejected');
+  throws(() => addLoanG({ ...base, term_months: 0 }), /term/, 'zero term rejected');
+  throws(() => addLoanG({ ...base, term_months: 121 }), /term/, 'term over 120 rejected');
+  throws(() => addLoanG({ ...base, annual_rate: 150 }), /rate/, 'rate over 100 rejected');
+  throws(() => addLoanG({ ...base, disbursed_date: '2099-01-01' }), /future/, 'future loan date rejected');
+  throws(() => addLoanG({ ...base, disbursed_date: '2024-06-01' }), /before the member joined/, 'loan before joining rejected');
+  throws(() => addLoanG({ ...base, payment_method: '' }), /how the money will be paid/, 'payment medium required');
+  throws(() => addLoanG({ ...base, first_due_date: '2025-01-15' }), /after the loan date/, 'first installment before loan date rejected');
+  throws(() => addLoanG({ ...base, first_due_date: '2025-08-01' }), /three months/, 'first installment too far away rejected');
+  throws(() => addLoanG({ ...base, principal: 1000000 }), /cannot lend/, 'cannot lend more cash than the fund holds');
   ok(A.getLoans().length === 0, 'rejected loans left no trace');
   const pv = A.previewLoan(base);
   ok(pv.valid && pv.plan.rows.length === 12 && pv.options.some(o => o.term === 24), 'preview returns schedule and the other terms');
@@ -139,7 +150,7 @@ const sum = (rows, k) => Math.round(rows.reduce((a, r) => a + r[k], 0) * 100) / 
   ok(A.previewLoan({ ...base, principal: 1000000 }).warnings.some(w => w.level === 'error'), 'preview warns when cash is short');
 
   // ---- loan 1: 12,000 at 12 % for 12 months → EMI 1,066.19 → 1,066 ----
-  const l1 = A.addLoan({ ...base, purpose: 'Shop stock' });
+  const l1 = addLoanG({ ...base, purpose: 'Shop stock' });
   let d1 = A.getLoan(l1);
   ok(d1.loan.loan_no === 'PL-0001' && d1.loan.installment === 1066, `loan 1 is PL-0001 with installment ${d1.loan.installment}`);
   near(d1.schedule[0].interest, 120, 'inst 1 interest = 12,000 × 1 %'); near(d1.schedule[0].principal, 946, 'inst 1 principal = 1,066 − 120');
@@ -150,7 +161,7 @@ const sum = (rows, k) => Math.round(rows.reduce((a, r) => a + r[k], 0) * 100) / 
   near(pos.cash, 28000, 'LENDING moves 12,000 out of cash (cash 28,000)');
   near(A.getLoanSummary().outstanding, 12000, 'summary: outstanding 12,000');
   // on 2025-01-15 the fund still had 40,000, but 12,000 has been lent since: a back-dated 30,000 loan would overdraw today's cash
-  throws(() => A.addLoan({ member_id: m2, principal: 30000, method: 'free', term_months: 10, disbursed_date: '2025-01-15', payment_method: 'Cash' }), /can lend only TK 28000/, 'a back-dated loan cannot overdraw cash lent or spent since');
+  throws(() => addLoanG({ member_id: m2, principal: 30000, method: 'free', term_months: 10, disbursed_date: '2025-01-15', payment_method: 'Cash' }), /can lend only TK 28000/, 'a back-dated loan cannot overdraw cash lent or spent since');
   ok(A.previewLoan({ member_id: m2, principal: 30000, method: 'free', term_months: 10, disbursed_date: '2025-01-15' }).warnings.some(w => w.level === 'error'), 'preview shows the same cash warning');
 
   // ---- repayments ----
@@ -199,7 +210,7 @@ const sum = (rows, k) => Math.round(rows.reduce((a, r) => a + r[k], 0) * 100) / 
   ok(loan1Interest > 120 && loan1Interest < 700, `interest earned on loan 1 = ${loan1Interest}`);
 
   // ---- loan 2: flat, written off ----
-  const l2 = A.addLoan({ member_id: m2, principal: 5000, method: 'flat', annual_rate: 12, term_months: 5, disbursed_date: '2025-07-01', payment_method: 'Bank transfer' });
+  const l2 = addLoanG({ member_id: m2, principal: 5000, method: 'flat', annual_rate: 12, term_months: 5, disbursed_date: '2025-07-01', payment_method: 'Bank transfer' });
   near(A.getLoan(l2).loan.total_interest, 250, 'loan 2 flat interest = 5,000 × 12 % × 5/12 = 250');
   near(cashBook().cash, 40000 + loan1Interest - 5000, 'loan 2 lent 5,000 from cash');
   throws(() => A.writeOffLoan({ loan_id: l2, date: '2025-09-01', reason: '' }), /reason/, 'write-off needs a reason');
@@ -215,7 +226,7 @@ const sum = (rows, k) => Math.round(rows.reduce((a, r) => a + r[k], 0) * 100) / 
 
 
   // ---- loan 3 (flat, 12 % × 3 months on 3,000 = 90 interest, 1,030 a month) ----
-  const l3 = A.addLoan({ member_id: m1, principal: 3000, method: 'flat', annual_rate: 12, term_months: 3, disbursed_date: '2025-09-10', payment_method: 'Cash', guarantor: 'Saver Three' });
+  const l3 = addLoanG({ member_id: m1, principal: 3000, method: 'flat', annual_rate: 12, term_months: 3, disbursed_date: '2025-09-10', payment_method: 'Cash', guarantor: 'Saver Three' });
   near(A.getLoan(l3).loan.installment, 1030, 'loan 3 installment 1,030');
   throws(() => A.settleMember({ member_id: m1, settlement_date: '2025-10-01', payment_method: 'Cash' }), /still owes personal loan PL-0003/, 'a member with an unpaid loan cannot be settled');
   throws(() => A.deleteMember(m1), /personal loan records/, 'a member with loans cannot be deleted');
@@ -226,8 +237,11 @@ const sum = (rows, k) => Math.round(rows.reduce((a, r) => a + r[k], 0) * 100) / 
   near(l2i, 50, 'loan 2 interest received 50');
   const pv3 = A.previewMemberSettlement(m3, '2025-10-01');
   near(pv3.principal, 20000, 'Saver Three principal 20,000');
-  near(pv3.profitShare, Math.round(0.5 * (loan1Interest + l2i - 4000) * 100) / 100, 'Saver Three shares 50 % of loan interest and of the written-off loss');
-  ok(pv3.lines.some(x => x.label === 'PL-0002' && x.amount === -4000), 'the write-off appears as a −4,000 event in the settlement lines');
+  // loan 2 (Borrower Two, savings 10,000) was written off for 4,000: the borrower's own savings absorb it, so Saver Three bears none of it
+  near(pv3.profitShare, Math.round(0.5 * (loan1Interest + l2i) * 100) / 100, 'Saver Three shares 50 % of the loan interest, and none of the loss of a defaulter whose own savings cover it');
+  ok(!pv3.lines.some(x => x.label === 'PL-0002' && x.amount < 0), 'the covered write-off does not appear in the settlement lines of the other member');
+  const pb2 = A.previewMemberSettlement(m2, '2025-10-01');
+  ok(pb2.lines.some(x => x.label === 'PL-0002' && x.amount === -4000 && Math.abs(x.share + 4000) < 0.01), 'the defaulter bears the whole 4,000 write-off in their own settlement');
   const beforeSettle = cashBook();
   A.settleMember({ member_id: m3, settlement_date: '2025-10-01', payment_method: 'Cash' });
   near(beforeSettle.fund - cashBook().fund, pv3.suggestedPayout, 'settlement pays out principal + share from the fund');
@@ -256,8 +270,8 @@ const sum = (rows, k) => Math.round(rows.reduce((a, r) => a + r[k], 0) * 100) / 
 
   // ---- policy limit ----
   A.saveAppSettings({ loan_max_multiple: 1 });
-  throws(() => A.addLoan({ member_id: m2, principal: 11000, method: 'free', term_months: 11, disbursed_date: '2025-12-01', payment_method: 'Cash' }), /fund limit/, 'a loan above the limit needs an approval reason');
-  const lim = A.addLoan({ member_id: m2, principal: 11000, method: 'free', term_months: 11, disbursed_date: '2025-12-01', payment_method: 'Cash', limit_note: 'Committee approved 2025-11-30' });
+  throws(() => addLoanG({ member_id: m2, principal: 11000, method: 'free', term_months: 11, disbursed_date: '2025-12-01', payment_method: 'Cash' }), /fund limit/, 'a loan above the limit needs an approval reason');
+  const lim = addLoanG({ member_id: m2, principal: 11000, method: 'free', term_months: 11, disbursed_date: '2025-12-01', payment_method: 'Cash', limit_note: 'Committee approved 2025-11-30' });
   ok(/Over-limit approval/.test(A.getLoan(lim).loan.notes), 'the approval reason is stored on the loan');
   const cashWith = cashBook().cash;
   A.deleteLoan(lim);
@@ -275,7 +289,7 @@ const sum = (rows, k) => Math.round(rows.reduce((a, r) => a + r[k], 0) * 100) / 
   ok(A.getLoans('newest', 'All', undefined, undefined, 'shop stock').length === 1, 'search by purpose');
   ok(A.getLoans('newest', 'All', undefined, undefined, '', m1).length === 2, 'member filter: Borrower One has two loans');
   ok(A.getLoans('newest', 'All', '2025-09-01', '2025-12-31').length === 1, 'date filter on the loan date');
-  const l5 = A.addLoan({ member_id: m2, principal: 2400, method: 'reducing', annual_rate: 18, term_months: 6, disbursed_date: '2025-10-05', first_due_date: '2025-11-05', payment_method: 'Bank transfer' });
+  const l5 = addLoanG({ member_id: m2, principal: 2400, method: 'reducing', annual_rate: 18, term_months: 6, disbursed_date: '2025-10-05', first_due_date: '2025-11-05', payment_method: 'Bank transfer' });
   ok(A.getLoans('newest', 'Overdue').length === 1 && A.getLoans('newest', 'Overdue')[0].id === l5, 'unpaid past installments make a loan Overdue');
   const ov = A.getLoan(l5).loan;
   ok(ov.overdue_count === 6 && ov.days_overdue > 0, `loan 5 is overdue on all ${ov.overdue_count} installments (${ov.days_overdue} days)`);
@@ -301,7 +315,7 @@ const sum = (rows, k) => Math.round(rows.reduce((a, r) => a + r[k], 0) * 100) / 
   ok(h.checks.find(c => c.id === 'reconcile').status === 'pass', 'health check: cash book reconciles with loans included');
   ok(h.checks.find(c => c.id === 'loan_overdue').status === 'warn', 'health check: warns about the overdue loan');
   const st = A.getDatabaseStats();
-  ok(st.loans === 4 && st.schemaVersion === 5, `stats: ${st.loans} loans, schema v${st.schemaVersion}`);
+  ok(st.loans === 4 && st.schemaVersion === 9, `stats: ${st.loans} loans, schema v${st.schemaVersion}`);
 
   // ---- backup round trip keeps loans ----
   const bytes = store.exportBytes();
@@ -309,6 +323,71 @@ const sum = (rows, k) => Math.round(rows.reduce((a, r) => a + r[k], 0) * 100) / 
   ok(A.getLoans().length === 0 && A.getDatabaseStats().loanRepayments === 0, 'reset clears loans and repayments');
   store.replaceWith(bytes);
   ok(A.getLoans().length === 4 && A.getLoan(l1).schedule.length === 12, 'restoring a backup brings the loans back with their schedules');
+
+  // ---- guarantor rules (a guarantor is mandatory) ----
+  const nidOfM1 = A.getMembers('', 'All', 1, 20).members.find(x => x.id === m1).nid;
+  const gb = { member_id: m2, principal: 1000, method: 'free', term_months: 4, disbursed_date: '2025-12-02', payment_method: 'Cash' };
+  throws(() => A.addLoan({ ...gb }), /guarantor is required/, 'a loan without a guarantor is refused');
+  throws(() => A.addLoan({ ...gb, guarantor_type: 'member' }), /Choose the member who is the guarantor/, 'member guarantor must be chosen');
+  throws(() => A.addLoan({ ...gb, guarantor_type: 'member', guarantor_member_id: m2 }), /own guarantor/, 'a borrower cannot guarantee their own loan');
+  throws(() => A.addLoan({ ...gb, guarantor_type: 'member', guarantor_member_id: m3 }), /not an active member/, 'a settled (inactive) member cannot be a guarantor');
+  throws(() => A.addLoan({ ...gb, guarantor_type: 'member', guarantor_member_id: 9999 }), /not found/, 'unknown guarantor member refused');
+  throws(() => A.addLoan({ ...gb, ...OUTSIDER, guarantor_name: 'Al' }), /full name/, 'outsider needs a full name');
+  throws(() => A.addLoan({ ...gb, ...OUTSIDER, guarantor_name: '12345 678' }), /full name/, 'outsider name needs letters');
+  throws(() => A.addLoan({ ...gb, ...OUTSIDER, guarantor_address: 'Dhaka' }), /full address/, 'outsider needs a full address');
+  throws(() => A.addLoan({ ...gb, ...OUTSIDER, guarantor_nid: '' }), /NID/, 'outsider NID is required');
+  throws(() => A.addLoan({ ...gb, ...OUTSIDER, guarantor_nid: '12345' }), /10, 13 or 17/, 'outsider NID length is checked');
+  throws(() => A.addLoan({ ...gb, ...OUTSIDER, guarantor_nid: '12345abcde' }), /digits only/, 'outsider NID must be digits');
+  throws(() => A.addLoan({ ...gb, ...OUTSIDER, guarantor_nid: nidOfM1 }), /belongs to member/, 'an outsider NID that belongs to a member is refused (use the member option)');
+  throws(() => A.addLoan({ ...gb, ...OUTSIDER, guarantor_phone: 'abc' }), /phone/, 'a bad guarantor phone is refused');
+  throws(() => A.addLoan({ ...gb, guarantor_type: 'friend' }), /guarantor is required/, 'unknown guarantor type refused');
+  ok(!A.previewGuarantor({ ...gb, ...OUTSIDER, guarantor_address: 'x' }).ok && A.previewGuarantor({ ...gb, ...OUTSIDER }).ok, 'previewGuarantor applies the same rules');
+  ok(!A.previewGuarantor({}).ok, 'previewGuarantor: nothing chosen is not ok');
+  const gl = A.addLoan({ ...gb, guarantor_type: 'member', guarantor_member_id: m1, guarantor_relation: 'Cousin', reference: 'BANK-777' });
+  const gd = A.getLoan(gl);
+  ok(gd.guarantor.type === 'member' && gd.guarantor.code === 'BF-0001' && gd.guarantor.nid === nidOfM1 && gd.guarantor.relation === 'Cousin', 'member guarantor is stored and resolved (code, NID, relation)');
+  ok(A.getLoans('newest', 'All', undefined, undefined, 'BF-0001').some(x => x.id === gl), 'a loan can be found by its guarantor member code');
+  ok(gd.loan.reference === 'BANK-777', 'a reference typed by the user is kept');
+  throws(() => A.settleMember({ member_id: m1, settlement_date: '2026-01-01', payment_method: 'Cash' }), /guarantor of running loan/, 'a member guaranteeing a running loan cannot be settled');
+  throws(() => A.deleteMember(m1), /loan records/, 'a guarantor member cannot be deleted');
+  const ol = addLoanG({ member_id: m2, principal: 1000, method: 'free', term_months: 4, disbursed_date: '2025-12-02', payment_method: 'Cash', guarantor_phone: '017 1100-0000', guarantor_relation: 'Neighbour' });
+  const od = A.getLoan(ol);
+  ok(od.guarantor.type === 'outsider' && od.guarantor.nid === '1234567890' && od.guarantor.phone === '01711000000' && od.guarantor.address.includes('Mirpur'), 'outsider guarantor is stored (name, address, NID, phone)');
+  ok(od.loan.guarantor === 'Rahim Uddin', 'the guarantor name is kept on the loan for search and lists');
+  // auto reference numbers
+  ok(/^DISB-PL-\d{4}$/.test(od.loan.reference) && od.loan.reference === `DISB-${od.loan.loan_no}`, `disbursement reference is generated automatically (${od.loan.reference})`);
+  ok(A.previewLoan({ member_id: m2, principal: 1000, method: 'free', term_months: 4, disbursed_date: '2025-12-02' }).autoReference === `DISB-${A.previewLoan({ member_id: m2, principal: 1000, method: 'free', term_months: 4 }).nextLoanNo}`, 'the form can show the next automatic reference');
+  A.recordLoanRepayment({ loan_id: ol, paid_date: '2025-12-20', amount: 250, payment_method: 'Cash' });
+  A.recordLoanRepayment({ loan_id: ol, paid_date: '2025-12-21', amount: 250, payment_method: 'Cash', trx_id: 'TX-OWN-1' });
+  const reps = A.getLoan(ol).repayments;
+  ok(/^RCPT-PL-\d{4}-\d+$/.test(reps[1].trx_id), `repayment receipt number is generated automatically (${reps[1].trx_id})`);
+  ok(reps[0].trx_id === 'TX-OWN-1', 'a transaction number typed by the user is kept');
+  ok(new Set(reps.map(r => r.trx_id)).size === 2, 'receipt numbers are unique');
+  ok(A.getTransactions(undefined, undefined, 'loan').some(r => r.reference === reps[1].trx_id), 'the automatic receipt number shows in the ledger');
+  ok(A.checkAccountingHealth().checks.find(c => c.id === 'loan_guarantor').status === 'pass', 'health check: every loan has complete guarantor details');
+  A.deleteLoanRepayment(reps[0].id); A.deleteLoanRepayment(reps[1].id); A.deleteLoan(ol); A.deleteLoan(gl);
+
+  // ---- a schema-5 database (loans with only a free-text guarantor) upgrades and keeps its loans ----
+  {
+    const initSql = require(path.join(proj, 'node_modules', 'sql.js'));
+    const S = await initSql({ wasmBinary: wasm });
+    const v5 = new S.Database(store.exportBytes());
+    v5.run('DROP TABLE loan_repayments'); v5.run('DROP TABLE loan_schedule'); v5.run('DROP TABLE personal_loans');
+    v5.run(`CREATE TABLE personal_loans (id INTEGER PRIMARY KEY AUTOINCREMENT, loan_no TEXT NOT NULL UNIQUE, member_id INTEGER NOT NULL REFERENCES members(id), principal REAL NOT NULL CHECK (principal > 0),
+      method TEXT NOT NULL, annual_rate REAL NOT NULL DEFAULT 0, term_months INTEGER NOT NULL, disbursed_date TEXT NOT NULL, first_due_date TEXT NOT NULL, installment REAL NOT NULL, total_interest REAL NOT NULL,
+      total_payable REAL NOT NULL, payment_method TEXT, reference TEXT, purpose TEXT, guarantor TEXT, notes TEXT, status TEXT NOT NULL DEFAULT 'Active', closed_date TEXT, written_off_amount REAL NOT NULL DEFAULT 0,
+      written_off_date TEXT, written_off_reason TEXT, created_by TEXT, created_at TEXT, updated_at TEXT)`);
+    v5.run(`INSERT INTO personal_loans (loan_no, member_id, principal, method, annual_rate, term_months, disbursed_date, first_due_date, installment, total_interest, total_payable, payment_method, guarantor)
+            VALUES ('PL-0001', ${m1}, 1000, 'free', 0, 2, '2025-01-05', '2025-02-05', 500, 0, 1000, 'Cash', 'Old Friend')`);
+    v5.run('PRAGMA user_version = 5');
+    const v5bytes = Buffer.from(v5.export()); v5.close();
+    store.replaceWith(v5bytes);
+    const legacy = A.getLoans();
+    ok(legacy.length === 1 && A.getDatabaseStats().schemaVersion === 9, 'a schema-5 database upgrades to the current schema and keeps its loan');
+    ok(A.getLoan(legacy[0].id).guarantor.type === 'legacy' && A.getLoan(legacy[0].id).guarantor.name === 'Old Friend', 'an older loan shows its free-text guarantor as "legacy"');
+    ok(A.checkAccountingHealth().checks.find(c => c.id === 'loan_guarantor').status === 'warn', 'health check warns about the loan with no structured guarantor');
+    ok(A.getLoans('newest', 'All', undefined, undefined, 'old friend').length === 1, 'the old guarantor name is still searchable');
+  }
 
   // ---- a database from the previous app version (schema 4, no loan tables) upgrades cleanly ----
   const initSqlJs = require(path.join(proj, 'node_modules', 'sql.js'));
@@ -318,9 +397,11 @@ const sum = (rows, k) => Math.round(rows.reduce((a, r) => a + r[k], 0) * 100) / 
   old.run("DELETE FROM app_settings WHERE key LIKE 'loan_%'"); old.run('PRAGMA user_version = 4');
   const oldBytes = Buffer.from(old.export()); old.close();
   store.replaceWith(oldBytes);
-  ok(A.getLoans().length === 0 && A.getDatabaseStats().schemaVersion === 5, 'a schema-4 database gains the loan tables and moves to schema 5');
+  ok(A.getLoans().length === 0 && A.getDatabaseStats().schemaVersion === 9, 'a schema-4 database gains the loan tables and moves to the current schema');
   ok(A.getAppSettings().loan_default_rate === 12 && A.getAppSettings().loan_default_method === 'reducing', 'loan policy defaults appear after the upgrade');
-  const lx = A.addLoan({ member_id: m1, principal: 1000, method: 'free', term_months: 4, disbursed_date: '2025-01-05', payment_method: 'Cash' });
+  ok(A.getAppSettings().loan_consent_required === true, 'after the upgrade the signed consent paper is required by default');
+  A.saveAppSettings({ loan_consent_required: false });
+  const lx = addLoanG({ member_id: m1, principal: 1000, method: 'free', term_months: 4, disbursed_date: '2025-01-05', payment_method: 'Cash' });
   ok(A.getLoan(lx).schedule.length === 4, 'loans work on the upgraded database');
   throws(() => store.replaceWith(Buffer.from(new SQL.Database().export())), /not a Bondhu Fund backup/, 'an unrelated database file is still refused');
 
@@ -343,12 +424,150 @@ const sum = (rows, k) => Math.round(rows.reduce((a, r) => a + r[k], 0) * 100) / 
     for (const m of ['addLoan', 'recordLoanRepayment', 'deleteLoan', 'deleteLoanRepayment', 'updateLoan', 'getLoans']) store.authorize(m, [loanId]);
     ok(true, 'a Treasurer can give loans and record repayments');
     for (const m of ['writeOffLoan', 'cancelLoanWriteOff', 'saveAppSettings'])
-      throws(() => store.authorize(m, [loanId]), /Only an Admin/, `a Treasurer cannot ${m}`);
+      throws(() => store.authorize(m, [loanId]), /Only an Admin|edit access to Settings/, `a Treasurer cannot ${m}`);
     A.logout();
     A.login('admin', adminPw);
     store.authorize('writeOffLoan', [{ loan_id: loanId }]); store.authorize('cancelLoanWriteOff', [loanId]); store.authorize('saveAppSettings', [{}]);
     ok(true, 'an Admin can write off loans and change the loan policy');
     A.logout();
+  }
+
+  // ---- a defaulter's loss is netted against their own savings first (audit finding) ----
+  {
+    A.resetDatabase(true); A.saveAppSettings({ loan_max_multiple: 0 });
+    const x = A.addMember({ name: 'Defaulter', nid: '1990999900001', opening_balance: 50000, join_date: '2025-01-01', monthly_due: 500 });
+    const y = A.addMember({ name: 'Honest', nid: '1990999900002', opening_balance: 50000, join_date: '2025-01-01', monthly_due: 500 });
+    const big = addLoanG({ member_id: x, principal: 50000, method: 'free', term_months: 10, disbursed_date: '2025-02-01', payment_method: 'Cash' });
+    A.writeOffLoan({ loan_id: big, date: '2025-06-01', reason: 'Absconded' });
+    const px = A.previewMemberSettlement(x, '2025-07-01'), py = A.previewMemberSettlement(y, '2025-07-01');
+    near(px.principal + px.profitShare, 0, 'defaulter owes 50,000 and has 50,000 saved: payout is 0');
+    near(py.principal + py.profitShare, 50000, 'the honest member loses nothing when the savings of the defaulter cover the loan');
+    near(px.principal + px.profitShare + py.principal + py.profitShare, A.getOverviewMetrics('2030-01').fund_balance_at_cost, 'payouts add up to the fund balance (50,000)');
+    // a loan bigger than the borrower's savings: the borrower loses everything, the rest is shared by the others
+    A.resetDatabase(true);
+    const x2 = A.addMember({ name: 'Defaulter Two', nid: '1990999900011', opening_balance: 10000, join_date: '2025-01-01', monthly_due: 500 });
+    const y2 = A.addMember({ name: 'Honest Two', nid: '1990999900012', opening_balance: 30000, join_date: '2025-01-01', monthly_due: 500 });
+    const z2 = A.addMember({ name: 'Honest Three', nid: '1990999900013', opening_balance: 10000, join_date: '2025-01-01', monthly_due: 500 });
+    const l9 = addLoanG({ member_id: x2, principal: 20000, method: 'free', term_months: 10, disbursed_date: '2025-02-01', payment_method: 'Cash' });
+    A.writeOffLoan({ loan_id: l9, date: '2025-06-01', reason: 'Cannot pay' });
+    const a2 = A.previewMemberSettlement(x2, '2025-07-01'), b2 = A.previewMemberSettlement(y2, '2025-07-01'), c2 = A.previewMemberSettlement(z2, '2025-07-01');
+    near(a2.principal + a2.profitShare, 0, 'savings of 10,000 are used up against a 20,000 loan');
+    near(b2.principal + b2.profitShare, 30000 - 7500, 'the other 10,000 of loss is shared by savings (30,000 / 40,000 = 7,500)');
+    near(c2.principal + c2.profitShare, 10000 - 2500, 'Honest Three bears 2,500');
+    near(a2.principal + a2.profitShare + b2.principal + b2.profitShare + c2.principal + c2.profitShare, A.getOverviewMetrics('2030-01').fund_balance_at_cost, 'payouts add up to the fund balance (30,000)');
+    A.settleMember({ member_id: y2, settlement_date: '2025-07-01', payment_method: 'Cash' });
+    throws(() => A.settleMember({ member_id: z2, settlement_date: '2025-06-30', payment_method: 'Cash' }), /earlier than the latest settlement/, 'a settlement cannot be dated before an earlier payout');
+
+    // ---- input validation hardening (audit) ----
+    const okBase = { member_id: z2, principal: 1000, method: 'free', term_months: 4, payment_method: 'Cash' };
+    throws(() => addLoanG({ ...okBase, disbursed_date: '2025-99-99' }), /not a valid date/, 'an impossible loan date is refused, not replaced by today');
+    throws(() => addLoanG({ ...okBase, disbursed_date: '2025-12-01', first_due_date: '2025-02-30' }), /not a valid date/, 'an impossible first-installment date is refused');
+    ok(store.toISODate('2025-02-30') === null && store.toISODate('2025-02-28') === '2025-02-28' && store.toISODate('2024-02-29') === '2024-02-29', 'toISODate accepts only real calendar dates');
+    throws(() => A.updateMember(z2, { status: 'Suspended' }), /Active or Inactive/, 'a member cannot be given an invented status');
+    const l10 = addLoanG({ ...okBase, disbursed_date: '2025-12-01' });
+    throws(() => A.recordLoanRepayment({ loan_id: l10, paid_date: '2025-13-40', amount: 250, payment_method: 'Cash' }), /not a valid date/, 'an impossible repayment date is refused');
+    throws(() => A.recordLoanRepayment({ loan_id: l10, paid_date: '2025-12-20', amount: 250, penalty: Infinity, payment_method: 'Cash' }), /normal amount/, 'an infinite penalty is refused');
+    throws(() => A.recordLoanRepayment({ loan_id: l10, paid_date: '2025-12-20', amount: 1e12, payment_method: 'Cash' }), /amount received|more than the loan/, 'an absurd repayment amount is refused');
+    throws(() => addLoanG({ ...okBase, principal: 0.01, term_months: 60, disbursed_date: '2025-12-01' }), /too small|at least TK 1/, 'a one-paisa loan over 60 months is refused');
+  }
+
+  // ---- loan drafts and the signed consent paper ----
+  {
+    A.resetDatabase(true);
+    A.saveAppSettings({ loan_max_multiple: 0, loan_consent_required: true });
+    ok(A.getAppSettings().loan_consent_required === true, 'signed consent paper is required by default policy once switched on');
+    const bo = A.addMember({ name: 'Draft Borrower', nid: '1990888800001', opening_balance: 50000, join_date: '2025-01-01', monthly_due: 500 });
+    const gu = A.addMember({ name: 'Draft Guarantor', nid: '1990888800002', opening_balance: 20000, join_date: '2025-01-01', monthly_due: 500 });
+    const dbase = { member_id: bo, principal: 12000, method: 'reducing', annual_rate: 12, term_months: 12, disbursed_date: '2025-02-01', first_due_date: '2025-03-01', payment_method: 'Cash', purpose: 'Shop', guarantor_type: 'member', guarantor_member_id: gu };
+    const before = A.getOverviewMetrics('2030-01');
+    throws(() => A.addLoan({ ...dbase, first_due_date: undefined }), /signed consent paper is required/, 'with consent required a loan cannot be given directly: it must be a draft');
+    const dr = A.createLoanApplication(dbase);
+    const dd = A.getLoanApplication(dr);
+    ok(dd.application.app_no === 'LA-0001' && dd.application.status === 'Draft' && !dd.application.has_consent, 'a draft is created as LA-0001 with no signed paper');
+    near(dd.application.installment, 1066, 'the draft stores the installment printed on the paper');
+    ok(dd.guarantor.type === 'member' && dd.guarantor.code === 'BF-0002', 'the draft keeps its guarantor');
+    const after = A.getOverviewMetrics('2030-01');
+    near(after.cash_in_hand, before.cash_in_hand, 'A DRAFT MOVES NO MONEY: cash in hand is unchanged');
+    near(after.fund_balance_at_cost, before.fund_balance_at_cost, 'A DRAFT MOVES NO MONEY: fund balance is unchanged');
+    ok(A.getLoans().length === 0 && A.getLoanSummary().totalLent === 0 && A.getLoanSummary().drafts === 1 && A.getLoanSummary().draftsAmount === 12000, 'the draft is not a loan: no loans, nothing lent, one draft of 12,000');
+    ok(A.getTransactions(undefined, undefined, 'All').length === 0, 'a draft does not appear in the ledger');
+    ok(A.checkAccountingHealth().checks.filter(c => c.status === 'fail').length === 0, 'health check: no failures with a draft present');
+    ok(A.getDynamicNotifications().some(n => n.targetTab === 'loans' && n.targetFilter === 'Draft'), 'a notification reminds that a draft is waiting for its signed paper');
+    ok(A.getLoanApplications('draft borrower').length === 1 && A.getLoanApplications('zzz').length === 0 && A.getLoanApplications('', bo).length === 1 && A.getLoanApplications('', gu).length === 0, 'drafts can be searched and filtered by member');
+    ok(A.getLoanApplications('BF-0002').length === 1, 'a draft can be found by its guarantor');
+    const today = store.todayISO();
+    throws(() => A.activateLoanApplication({ id: dr, disbursed_date: today }), /first installment date/, 'a draft whose first installment date is not after the disbursement date cannot be disbursed');
+    throws(() => A.deleteMember(gu), /loan draft/, 'a member named on a draft cannot be deleted');
+    throws(() => A.createLoanApplication({ ...dbase, guarantor_type: undefined }), /guarantor is required/, 'a draft also needs a guarantor');
+    throws(() => A.createLoanApplication({ ...dbase, term_months: 0 }), /term/, 'a draft is validated like a loan');
+    const okDraft = A.createLoanApplication({ ...dbase, disbursed_date: today, first_due_date: undefined });   // first installment = one month after today
+    throws(() => A.activateLoanApplication({ id: okDraft, disbursed_date: today }), /Upload the signed consent paper first/, 'NO MONEY WITHOUT THE SIGNED PAPER: a draft without the uploaded paper cannot be disbursed');
+    ok(A.getLoans().length === 0, 'the refused disbursement created no loan');
+
+    // upload needs a signed-in writer; the owner password is only ever passed through the environment
+    const adminPw = process.env.BONDHU_ADMIN_PASSWORD;
+    if (!adminPw) console.log('SKIP  upload / disbursement flow (set BONDHU_ADMIN_PASSWORD to run it)');
+    else {
+      A.login('admin', adminPw);
+      const mkfile = (name) => { const f = path.join(dir, name); fs.writeFileSync(f, Buffer.concat([Buffer.from('%PDF-1.4 signed scan '), Buffer.alloc(2000, 7)])); return { file: f, name, size: fs.statSync(f).size, sha256: 'a'.repeat(64) }; };
+      const paper1 = mkfile('signed-1.pdf');
+      store.attachConsentDocument('application', okDraft, paper1);
+      ok(A.getLoanApplication(okDraft).application.has_consent && A.getLoanApplication(okDraft).application.consent_file_exists, 'the signed paper is attached to the draft');
+      // editing without changing the signed terms keeps the paper; changing them removes it
+      let r = A.updateLoanApplication(okDraft, { ...dbase, disbursed_date: today, first_due_date: undefined, purpose: 'Shop stock' });
+      ok(!r.consentRemoved && A.getLoanApplication(okDraft).application.has_consent, 'editing only the purpose keeps the uploaded paper');
+      r = A.updateLoanApplication(okDraft, { ...dbase, disbursed_date: today, first_due_date: undefined, principal: 15000 });
+      ok(r.consentRemoved && !A.getLoanApplication(okDraft).application.has_consent && !fs.existsSync(paper1.file), 'changing the amount removes the uploaded paper (it must be signed again) and deletes the old file');
+      near(A.getLoanApplication(okDraft).application.installment, 1333, 'the draft installment was recalculated for 15,000 (1,332.73 → 1,333)');
+      throws(() => A.activateLoanApplication({ id: okDraft, disbursed_date: today }), /Upload the signed consent paper first/, 'after the change the new paper is needed again');
+      const paper2 = mkfile('signed-2.pdf');
+      store.attachConsentDocument('application', okDraft, paper2);
+      const cashBefore = A.getOverviewMetrics('2030-01').cash_in_hand;
+      throws(() => A.activateLoanApplication({ id: okDraft, disbursed_date: '2099-01-01' }), /future/, 'cannot disburse in the future');
+      const loanId = A.activateLoanApplication({ id: okDraft, disbursed_date: today });
+      const lo = A.getLoan(loanId);
+      ok(lo.loan.status === 'Active' && lo.loan.consent_status === 'Signed' && lo.loan.application_no === 'LA-0002' && lo.loan.consent_name === 'signed-2.pdf', 'uploading the signed paper and disbursing creates the loan with the paper linked (draft LA-0002)');
+      ok(lo.loan.principal === 15000 && lo.schedule.length === 12 && lo.guarantor.code === 'BF-0002', 'the loan has exactly the terms of the draft');
+      near(cashBefore - A.getOverviewMetrics('2030-01').cash_in_hand, 15000, 'ONLY NOW does money leave the fund: cash falls by 15,000');
+      ok(A.getLoanApplications().length === 1 && A.getLoanApplications()[0].app_no === 'LA-0001' && A.getLoanSummary().drafts === 1, 'the disbursed draft is closed; only the other draft (LA-0001) is still waiting');
+      throws(() => A.activateLoanApplication({ id: okDraft, disbursed_date: today }), /already been disbursed/, 'a draft cannot be disbursed twice');
+      throws(() => A.deleteLoanApplication(okDraft), /Only a draft/, 'a disbursed draft cannot be deleted');
+      ok(A.checkAccountingHealth().checks.find(c => c.id === 'loan_consent').status === 'pass', 'health check: the signed paper is on file');
+      fs.unlinkSync(paper2.file);
+      ok(A.checkAccountingHealth().checks.find(c => c.id === 'loan_consent').status === 'warn', 'health check warns when the signed paper file goes missing');
+      // attach / replace on a disbursed loan
+      const paper3 = mkfile('signed-3.pdf');
+      store.attachConsentDocument('loan', loanId, paper3);
+      ok(A.getLoan(loanId).loan.consent_name === 'signed-3.pdf' && store.consentDocumentPath('loan', loanId).name === 'signed-3.pdf', 'a signed paper can be replaced on a disbursed loan');
+      // a draft can be deleted; its file goes with it
+      const dd2 = A.createLoanApplication({ ...dbase, disbursed_date: today, first_due_date: undefined, principal: 5000 });
+      const paper4 = mkfile('signed-4.pdf'); store.attachConsentDocument('application', dd2, paper4);
+      A.deleteLoanApplication(dd2);
+      ok(A.getLoanApplications().length === 1 && !fs.existsSync(paper4.file), 'deleting a draft removes it and its uploaded file');
+      const dd3 = A.createLoanApplication({ ...dbase, disbursed_date: today, first_due_date: undefined, principal: 1000, term_months: 2 });
+      ok(A.getLoanApplication(dd3).application.app_no === 'LA-0004', 'the number of a deleted draft (LA-0003) is never reused');
+      A.deleteLoanApplication(dd3);
+      // auditors may not upload
+      const aud = A.addUser({ username: 'consent_aud', full_name: 'Consent Auditor', role: 'Auditor', email: '' });
+      A.setUserPassword(aud, 'Audit0rpass2'); A.logout(); A.login('consent_aud', 'Audit0rpass2');
+      throws(() => store.attachConsentDocument('loan', loanId, mkfile('x.pdf')), /read-only/, 'an Auditor cannot upload a signed paper');
+      for (const m of ['createLoanApplication', 'updateLoanApplication', 'deleteLoanApplication', 'activateLoanApplication']) throws(() => store.authorize(m, [1]), /read-only/, `an Auditor cannot ${m}`);
+      for (const m of ['getLoanApplications', 'getLoanApplication']) store.authorize(m, [1]);
+      A.logout();
+    }
+
+    // ---- switching the requirement off ----
+    A.saveAppSettings({ loan_consent_required: false });
+    throws(() => A.createLoanApplication({ ...dbase, disbursed_date: today, first_due_date: undefined }), /switched off/, 'with the requirement off new drafts are not created');
+    const direct = A.addLoan({ ...dbase, principal: 3000, term_months: 6, disbursed_date: today, first_due_date: undefined });
+    ok(A.getLoan(direct).loan.consent_status === 'Waived' && !A.getLoan(direct).loan.application_no, 'with the requirement off a loan is disbursed at once and marked "Waived"');
+    const leftover = A.getLoanApplications();
+    ok(leftover.length === 1 && leftover[0].app_no === 'LA-0001', 'the older draft is still waiting');
+    A.saveAppSettings({ loan_consent_required: true });
+    const dw = A.createLoanApplication({ ...dbase, principal: 2000, term_months: 4, disbursed_date: today, first_due_date: undefined });
+    A.saveAppSettings({ loan_consent_required: false });
+    const wl = A.activateLoanApplication({ id: dw, disbursed_date: today });
+    ok(A.getLoan(wl).loan.consent_status === 'Waived' && A.getLoan(wl).loan.application_no === 'LA-0005', 'a draft waiting when the requirement is switched off can be disbursed without a paper (marked Waived)');
   }
 
   console.log(fails ? `\n${fails} FAILURE(S)` : '\nALL LOAN TESTS PASSED');

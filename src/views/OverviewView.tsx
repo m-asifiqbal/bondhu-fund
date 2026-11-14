@@ -373,7 +373,7 @@ export const OverviewView: React.FC = () => {
     );
   }
 
-  const attentionCount = k.overdue + data.attention.reviews.length + data.attention.receiptCount + (data.attention.lastBackup === 'Never' ? 1 : 0);
+  const attentionCount = k.overdue + (data.attention.loansOverdue > 0 ? 1 : 0) + data.attention.reviews.length + data.attention.receiptCount + (data.attention.lastBackup === 'Never' ? 1 : 0);
 
   return (
     <div className="p-4 sm:p-6 lg:p-8 space-y-8 max-w-[1600px] mx-auto">
@@ -412,7 +412,7 @@ export const OverviewView: React.FC = () => {
         <Kpi accent="rose" icon={<Receipt size={16} />} label={tr('expenses')} value={money(k.monthExpenses)} delta={pct(k.monthExpenses, k.prevMonthExpenses)} deltaLabel={tr('vsLast')} invertDelta digits={digits}
           onClick={() => setActiveTab('expenses')} />
         {/* Late fees: this month + year to date */}
-        <button onClick={() => goCollections('All')} className="card-base accent-amber p-4 text-left flex flex-col gap-3 min-w-0 sm:col-span-2 hover:shadow-md hover:-translate-y-0.5 cursor-pointer">
+        <button onClick={() => setActiveTab('fines')} className="card-base accent-amber p-4 text-left flex flex-col gap-3 min-w-0 sm:col-span-2 hover:shadow-md hover:-translate-y-0.5 cursor-pointer">
           <div className="flex items-center justify-between gap-2">
             <span className="text-[11px] font-bold text-slate-500 dark:text-slate-400 truncate">{tr('lateFees')}</span>
             <span className="w-7 h-7 shrink-0 rounded-lg bg-amber-50 dark:bg-amber-950/50 text-amber-600 dark:text-amber-400 flex items-center justify-center"><Timer size={16} /></span>
@@ -585,6 +585,7 @@ export const OverviewView: React.FC = () => {
           </h3>
           <ul className="space-y-2">
             {k.overdue > 0 && <Attention tone="critical" icon={<AlertTriangle size={14} />} title={`${digits(k.overdue)} ${language === 'bn' ? 'জন সদস্যের বকেয়া মেয়াদোত্তীর্ণ' : 'members overdue this month'}`} sub={money(k.outstanding)} onClick={() => goCollections('Overdue')} />}
+            {data.attention.loansOverdue > 0 && <Attention tone="critical" icon={<AlertTriangle size={14} />} title={`${digits(data.attention.loansOverdue)} ${language === 'bn' ? 'টি ব্যক্তিগত ঋণের কিস্তি বকেয়া' : 'personal loan(s) overdue'}`} sub={money(data.attention.loansOverdueAmount)} onClick={() => setActiveTab('loans')} />}
             {data.attention.reviews.map(r => <Attention key={r.id} tone="warning" icon={<Building2 size={14} />} title={`${r.name}`} sub={`${language === 'bn' ? 'রিভিউ' : 'Review'} ${formatDate(r.review_date)}`} onClick={() => setActiveTab('investments')} />)}
             {data.attention.receiptCount > 0 && <Attention tone="warning" icon={<FileWarning size={14} />} title={`${digits(data.attention.receiptCount)} ${language === 'bn' ? 'টি খরচের রসিদ প্রয়োজন' : 'expenses need a receipt'}`} sub={data.attention.receipts.slice(0, 2).map(r => r.title).join(', ')} onClick={() => setActiveTab('expenses')} />}
             {(data.attention.lastBackup === 'Never' || Date.now() - Date.parse(data.attention.lastBackup) > 7 * 864e5) &&

@@ -1,13 +1,13 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { Landmark, HandCoins, Ban, Trash2, Undo2, Lock, FileText } from 'lucide-react';
+import { Landmark, HandCoins, Ban, Trash2, Undo2, Lock, FileText, ShieldCheck, FileDown, FileCheck2, Upload, ExternalLink } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import { Modal } from '../common/Modal';
 import { DatePicker } from '../common/DatePicker';
 import { SegmentedTabs } from '../common/SegmentedTabs';
-import { getLoan, deleteLoan, deleteLoanRepayment, writeOffLoan, cancelLoanWriteOff } from '../../services/db';
+import { getLoan, deleteLoan, deleteLoanRepayment, writeOffLoan, cancelLoanWriteOff, uploadLoanConsent, openLoanConsent } from '../../services/db';
 import type { LoanDetail } from '../../types';
 import { todayISO } from '../../utils/date';
-import { LoanStatusBadge, InstallmentBadge, ProgressBar, useMoney, useNum, useRateText } from './loanUi';
+import { LoanStatusBadge, InstallmentBadge, ProgressBar, useMoney, useNum, useRateText, useConsentPaper, consentFromDetail } from './loanUi';
 import { LoanRepaymentModal } from './LoanRepaymentModal';
 
 type Tab = 'schedule' | 'history' | 'member';
@@ -26,6 +26,7 @@ export const LoanDetailModal: React.FC<Props> = ({ loanId, onClose, onOpenLoan, 
   const n = useNum();
   const formatCurrency = useMoney();
   const rateText = useRateText();
+  const makePaper = useConsentPaper();
   const readOnly = session?.user.role === 'Auditor';
   const [d, setD] = useState<LoanDetail | null>(null);
   const [tab, setTab] = useState<Tab>('schedule');
@@ -46,6 +47,16 @@ export const LoanDetailModal: React.FC<Props> = ({ loanId, onClose, onOpenLoan, 
   const loan = d?.loan;
   const open = loan?.status === 'Active';
   const changed = () => { triggerRefresh(); onChanged(); };
+
+  const uploadPaper = async () => {
+    if (!loanId) return;
+    setBusy(true);
+    try {
+      const r = await uploadLoanConsent('loan', loanId);
+      if (!r.canceled) { showToast(t('loan.paper_uploaded', 'Signed paper uploaded: {name}').replace('{name}', r.name || '')); triggerRefresh(); onChanged(); load(); }
+    } catch (e: any) { showToast(e.message, 'error'); } finally { setBusy(false); }
+  };
+  const openPaper = async () => { if (loanId) { try { await openLoanConsent('loan', loanId); } catch (e: any) { showToast(e.message, 'error'); } } };
 
   const run = async (fn: () => Promise<unknown>, ok: string, after?: () => void) => {
     setBusy(true);
@@ -129,7 +140,6 @@ export const LoanDetailModal: React.FC<Props> = ({ loanId, onClose, onOpenLoan, 
                 [t('loan.total_interest', 'Total interest'), formatCurrency(loan.total_interest)],
                 [t('loan.total_payable', 'Total to repay'), formatCurrency(loan.total_payable)],
                 [t('loan.purpose_short', 'Purpose'), loan.purpose || '—'],
-                [t('loan.guarantor_short', 'Guarantor'), loan.guarantor || '—'],
                 [t('loan.ref_short', 'Reference'), loan.reference || '—'],
                 [t('loan.savings', 'Savings in fund'), formatCurrency(d.member.savings)],
               ].map(([k, v]) => (
@@ -137,6 +147,51 @@ export const LoanDetailModal: React.FC<Props> = ({ loanId, onClose, onOpenLoan, 
               ))}
               {loan.notes && <div className="col-span-full"><div className="text-[10px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">{t('common.notes', 'Notes')}</div><div className="font-medium text-slate-700 dark:text-slate-200 mt-0.5">{loan.notes}</div></div>}
               {loan.status === 'Written off' && <div className="col-span-full text-amber-800 dark:text-amber-300 font-semibold flex gap-1.5"><Ban size={13} className="mt-0.5 shrink-0" />{t('loan.wo_reason', 'Write-off reason')}: {loan.written_off_reason}</div>}
+            </div>
+
+            {/* guarantor */}
+            <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-[#142026] p-4 flex flex-wrap items-start justify-between gap-4">
+              <div className="min-w-0 space-y-1">
+                <div className="flex items-center gap-2 text-[12px] font-black text-slate-900 dark:text-white">
+                  <ShieldCheck size={15} className="text-emerald-700 dark:text-emerald-400" />{t('loan.guarantor', 'Guarantor')}
+                  {d.guarantor && <span className="px-2 py-0.5 rounded-full text-[10px] font-bold border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300">
+                    {d.guarantor.type === 'member' ? t('loan.g_type_member', 'Fund member') : d.guarantor.type === 'outsider' ? t('loan.g_type_out', 'Outside person') : t('loan.g_type_legacy', 'Name only (older loan)')}</span>}
+                </div>
+                {d.guarantor ? (
+                  <div className="text-[12px] text-slate-700 dark:text-slate-200 leading-relaxed">
+                    <span className="font-bold">{bnName(d.guarantor.name, d.guarantor.name_bn)}</span>{d.guarantor.code ? <span className="text-slate-500 dark:text-slate-400"> · {d.guarantor.code}</span> : null}
+                    {d.guarantor.nid ? <div className="text-slate-600 dark:text-slate-300">{t('loan.g_nid', 'National ID (NID)')}: <span className="tabular-nums font-semibold">{d.guarantor.nid}</span></div> : null}
+                    {d.guarantor.address ? <div className="text-slate-600 dark:text-slate-300">{t('loan.g_address', 'Full address')}: {d.guarantor.address}</div> : null}
+                    {d.guarantor.phone ? <div className="text-slate-600 dark:text-slate-300">{t('loan.g_phone_short', 'Phone')}: <span className="tabular-nums">{d.guarantor.phone}</span></div> : null}
+                    {d.guarantor.relation ? <div className="text-slate-600 dark:text-slate-300">{t('loan.g_relation_short', 'Relationship')}: {d.guarantor.relation}</div> : null}
+                  </div>
+                ) : <div className="text-[12px] text-amber-700 dark:text-amber-400 font-semibold">{t('loan.g_none', 'No guarantor was recorded for this loan.')}</div>}
+              </div>
+              {d.guarantor && (
+                <button type="button" onClick={() => { const ci = consentFromDetail(d); if (ci) void makePaper(ci); }} className="btn btn-outline btn-sm shrink-0">
+                  <FileDown size={13} /><span>{t('loan.paper_btn', 'Generate consent paper (PDF)')}</span>
+                </button>
+              )}
+            </div>
+
+            {/* signed consent paper */}
+            <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-[#142026] p-4 flex flex-wrap items-center justify-between gap-3">
+              <div className="min-w-0 flex items-start gap-2.5">
+                <FileCheck2 size={17} className={`shrink-0 mt-0.5 ${loan.consent_status === 'Signed' ? 'text-emerald-600 dark:text-emerald-400' : 'text-slate-400'}`} />
+                <div className="text-[12px]">
+                  <div className="font-black text-slate-900 dark:text-white">{t('loan.signed_paper', 'Signed consent paper')}</div>
+                  <div className="text-slate-600 dark:text-slate-300 mt-0.5">
+                    {loan.consent_status === 'Signed'
+                      ? t('loan.paper_on_file_date', '{name} · uploaded {date}').replace('{name}', loan.consent_name || '').replace('{date}', formatDate(String(loan.consent_uploaded_at || '').slice(0, 10)))
+                      : loan.consent_status === 'Waived' ? t('loan.paper_waived', 'Not required: this loan was disbursed while signed papers were switched off.') : t('loan.paper_none', 'No signed paper on file (loan made before this feature).')}
+                    {loan.application_no ? <span className="text-slate-400"> · {t('loan.from_draft', 'from draft {no}').replace('{no}', loan.application_no)}</span> : null}
+                  </div>
+                </div>
+              </div>
+              <div className="flex flex-wrap gap-2 shrink-0">
+                {loan.consent_status === 'Signed' && <button type="button" onClick={openPaper} className="btn btn-outline btn-sm"><ExternalLink size={13} />{t('loan.open_paper', 'Open')}</button>}
+                {!readOnly && <button type="button" onClick={uploadPaper} disabled={busy} className="btn btn-green-outline btn-sm"><Upload size={13} />{loan.consent_status === 'Signed' ? t('loan.replace_paper', 'Replace') : t('loan.upload_paper', 'Upload signed paper')}</button>}
+              </div>
             </div>
 
             <SegmentedTabs<Tab>
@@ -273,7 +328,7 @@ export const LoanDetailModal: React.FC<Props> = ({ loanId, onClose, onOpenLoan, 
         {loan && (
           <div className="space-y-3 text-xs">
             <p className="text-slate-600 dark:text-slate-300 leading-relaxed">
-              {t('loan.writeoff_body', 'The borrower cannot pay. The unpaid principal ({amt}) becomes a loss to the fund, shared by the members. Interest not yet received is simply never counted.').replace('{amt}', formatCurrency(loan.outstanding_principal))}
+              {t('loan.writeoff_body', 'The borrower cannot pay. The unpaid principal ({amt}) becomes a loss. The borrower\'s own savings in the fund absorb it first; only what their savings cannot cover is shared by the other members. Interest not yet received is simply never counted.').replace('{amt}', formatCurrency(loan.outstanding_principal))}
             </p>
             <DatePicker label={t('common.date', 'Date')} required max={todayISO()} min={loan.last_payment_date || loan.disbursed_date} value={woDate} onChange={setWoDate} />
             <div>

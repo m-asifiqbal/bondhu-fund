@@ -16,6 +16,7 @@ export const LoanPolicyModal: React.FC<{ open: boolean; onClose: () => void }> =
   const [method, setMethod] = useState<LoanMethod>('reducing');
   const [mult, setMult] = useState('0');
   const [fee, setFee] = useState('0');
+  const [consent, setConsent] = useState(true);
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
@@ -24,6 +25,7 @@ export const LoanPolicyModal: React.FC<{ open: boolean; onClose: () => void }> =
     setMethod((settings?.loan_default_method as LoanMethod) || 'reducing');
     setMult(String(settings?.loan_max_multiple ?? 0));
     setFee(String(settings?.loan_late_fee ?? 0));
+    setConsent(settings?.loan_consent_required !== false);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
 
@@ -32,7 +34,7 @@ export const LoanPolicyModal: React.FC<{ open: boolean; onClose: () => void }> =
     if (saving) return;
     setSaving(true);
     try {
-      await saveAppSettings({ loan_default_rate: Number(rate) || 0, loan_default_method: method, loan_max_multiple: Number(mult) || 0, loan_late_fee: Number(fee) || 0 });
+      await saveAppSettings({ loan_default_rate: Number(rate) || 0, loan_default_method: method, loan_max_multiple: Number(mult) || 0, loan_late_fee: Number(fee) || 0, loan_consent_required: consent });
       showToast(t('loan.policy_saved', 'Loan policy saved.'));
       triggerRefresh();
       onClose();
@@ -52,6 +54,15 @@ export const LoanPolicyModal: React.FC<{ open: boolean; onClose: () => void }> =
       }
     >
       <form id="loan-policy-form" onSubmit={save} className="space-y-4 text-xs">
+        <label className={`flex items-start gap-3 rounded-2xl border p-4 cursor-pointer select-none ${consent ? 'border-emerald-300 dark:border-emerald-800 bg-emerald-50/60 dark:bg-emerald-950/20' : 'border-slate-200 dark:border-slate-800'}`}>
+          <input type="checkbox" checked={consent} onChange={e => setConsent(e.target.checked)} className="w-4 h-4 mt-0.5 accent-[#0f4a3c]" />
+          <span>
+            <span className="block text-[13px] font-black text-slate-900 dark:text-white">{t('loan.policy_consent', 'Require a signed consent paper before a loan is disbursed')}</span>
+            <span className="block mt-1 text-[11px] text-slate-600 dark:text-slate-300 leading-relaxed">{consent
+              ? t('loan.policy_consent_on', 'A new loan is saved as a draft. The consent paper is generated, signed by the borrower and guarantor, and uploaded; only then is the loan disbursed.')
+              : t('loan.policy_consent_off', 'Loans are disbursed as soon as they are saved. The consent paper can still be generated and printed, but no upload is required. Drafts already waiting can be disbursed.')}</span>
+          </span>
+        </label>
         <div>
           <label className="form-label">{t('loan.policy_method', 'Default interest method')}</label>
           <SegmentedTabs<LoanMethod> size="sm" value={method} onChange={setMethod}

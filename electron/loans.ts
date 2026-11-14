@@ -58,6 +58,8 @@ export function addMonthsKeepDay(iso: string, n: number, anchorDay?: number): st
 export function validateTerms(t: LoanTerms): string | null {
   if (!(Number(t.principal) > 0)) return 'Loan amount must be greater than zero.';
   if (Number(t.principal) > 1e9) return 'Loan amount is too large.';
+  if (Number(t.principal) < 1) return 'Loan amount must be at least TK 1.';
+  if (Number.isInteger(Number(t.term_months)) && Number(t.principal) < Number(t.term_months)) return 'The loan amount is too small for that many months (each installment must be at least TK 1).';
   if (!LOAN_METHODS.includes(t.method)) return 'Choose an interest method.';
   if (!Number.isInteger(Number(t.term_months)) || t.term_months < 1 || t.term_months > 120) return 'Loan term must be a whole number of months from 1 to 120.';
   if (t.method !== 'free') {
@@ -107,6 +109,12 @@ export function buildPlan(t: LoanTerms): LoanPlan {
     }
   }
 
+  // whole-taka rounding can repay the principal before the last month (e.g. 100 over 36 months at 3 a month): no empty tail rows, the term simply ends sooner
+  if (rows.length > 1) {
+    let li = rows.length - 1;
+    while (li > 0 && rows[li].principal <= 0) li--;
+    if (li < rows.length - 1) return buildPlan({ ...t, term_months: li + 1 });
+  }
   const totalInterest = r2(rows.reduce((a, x) => a + x.interest, 0));
   const totalPayable = r2(P + totalInterest);
   return {

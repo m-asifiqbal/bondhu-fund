@@ -1,16 +1,21 @@
-import { app, BrowserWindow, ipcMain, dialog, shell, Menu, net } from 'electron';
+import { app, BrowserWindow, ipcMain, dialog, shell, Menu, net, safeStorage } from 'electron';
 import * as path from 'path';
 import * as fs from 'fs';
+import * as crypto from 'crypto';
 import * as store from './database';
+import { setupGoogle } from './google-main';
+import { setupLicense } from './license-main';
 import { buildTemplate, parseWorkbook, buildMembersExport, type ParsedWorkbook } from './excel';
 import { buildStatementsXlsx, buildStatementsHtml, type StatementsData } from './statements';
 import { encryptBackup, decryptBackup, decryptBackupWithMaster, deriveMasterKeys, hasMasterRecovery, isEncryptedBackup, validatePin } from './backup-crypto';
-import { buildTableXlsx, buildTableHtml, buildVoucherHtml, renderPdf, type ExportDoc, type VoucherData, type Lang } from './exporter';
+import { buildTableXlsx, buildTableHtml, buildVoucherHtml, buildConsentPaperHtml, renderPdf, type ExportDoc, type VoucherData, type ConsentPaperData, type Lang } from './exporter';
 
 /** Parsed import files waiting for confirmation (token → workbook). Kept in memory only. */
 const pendingImports = new Map<string, { parsed: ParsedWorkbook; fileName: string }>();
 
 let mainWindow: BrowserWindow | null = null;
+let googleAuto: { startAuto(): void } | null = null;
+let licenseAuto: { start(): void } | null = null;
 let dataDir = '';
 let dbFile = '';
 let backupsDir = '';
@@ -143,7 +148,8 @@ async function start() {
   // Start loading the database and the window at the same time (they used to run one after the other).
   dbReady = store.openDatabase(dbFile, readWasm(), fallbacks);
   registerIpc();
-  Menu.setApplicationMenu(null);
+  // Windows: no menu bar. macOS: the standard app / edit / window menus, which is where Cmd+C, Cmd+V, Cmd+A, Cmd+Z and Cmd+Q come from.
+  Menu.setApplicationMenu(process.platform === 'darwin' ? Menu.buildFromTemplate([{ role: 'appMenu' }, { role: 'editMenu' }, { role: 'windowMenu' }]) : null);
   createWindow();
   try {
     await dbReady;
@@ -154,6 +160,8 @@ async function start() {
   }
   // Daily snapshot after the window is up, so it never delays startup.
   setTimeout(dailyAutoBackup, 5000);
+  googleAuto?.startAuto();
+  licenseAuto?.start();
 }
 
 // Interface scale. 0.93 → 0.9765 (+5%): all text, tables and controls are 5% larger. Summary cards (.kpi-zoom) and the sign-in form compensate in CSS.
@@ -305,6 +313,7 @@ function registerIpc() {
   }));
 
   ipcMain.handle('db:backup', (_e, pin: string) => wrap(async () => {
+    store.requireModule('backup', 'edit');
     store.requireSession();
     validatePin(pin);                                             // refuse before opening any dialog
     const res = await dialog.showSaveDialog(mainWindow!, {
@@ -336,6 +345,7 @@ function registerIpc() {
   let pinFails = 0, pinLockedUntil = 0;
 
   ipcMain.handle('db:restore', () => wrap(async () => {
+    store.requireModule('backup', 'edit');
     store.requireAdmin();
     const res = await dialog.showOpenDialog(mainWindow!, {
       title: 'Choose a Bondhu Fund backup to restore',
@@ -352,6 +362,7 @@ function registerIpc() {
   }));
 
   ipcMain.handle('db:restore-pin', (_e, pin: string) => wrap(() => {
+    store.requireModule(['backup', 'drive_backup'], 'edit');
     store.requireAdmin();
     if (!pendingRestore) throw new Error('Choose the backup file again.');
     if (Date.now() < pinLockedUntil) throw new Error(`Too many wrong PINs. Try again in ${Math.ceil((pinLockedUntil - Date.now()) / 1000)} seconds.`);
@@ -384,6 +395,7 @@ function registerIpc() {
 
   /** Super User: open the picked encrypted backup when its owner forgot the PIN. */
   ipcMain.handle('db:restore-master', (_e, password: string, masterPin: string) => wrap(() => {
+    store.requireModule(['backup', 'drive_backup'], 'edit');
     requireSystem();
     store.requireAdmin();
     if (!pendingRestore) throw new Error('Choose the backup file again.');
@@ -405,15 +417,18 @@ function registerIpc() {
   ipcMain.handle('db:restore-cancel', () => { pendingRestore = null; return { ok: true, data: null }; });
 
   ipcMain.handle('db:restore-snapshot', (_e, fileName: string) => wrap(() => {
+    store.requireModule('backup', 'edit');
     store.requireAdmin();
     const file = path.join(backupsDir, path.basename(String(fileName))); // basename: no path traversal
     if (!fs.existsSync(file)) throw new Error('Snapshot not found.');
     return restoreFrom(file);
   }));
 
-  ipcMain.handle('db:snapshots', () => wrap(() => { store.requireSession(); return listBackups(); }));
-  ipcMain.handle('db:snapshot-now', () => wrap(() => { store.requireSession(); return path.basename(snapshot('Manual')); }));
-  ipcMain.handle('app:open-backups-folder', () => wrap(() => shell.openPath(backupsDir)));
+  ipcMain.handle('db:snapshots', () => wrap(() => {
+    store.requireModule('backup', 'view'); store.requireSession(); return listBackups(); }));
+  ipcMain.handle('db:snapshot-now', () => wrap(() => {
+    store.requireModule('backup', 'edit'); store.requireSession(); return path.basename(snapshot('Manual')); }));
+  ipcMain.handle('app:open-backups-folder', () => wrap(() => { store.requireModule('backup', 'view'); return shell.openPath(backupsDir); }));
 
   /** Native "Save as" for reports (CSV / HTML / JSON text). */
   ipcMain.handle('file:save-text', (_e, defaultName: string, content: string, filters?: Electron.FileFilter[]) => wrap(async () => {
@@ -485,6 +500,7 @@ function registerIpc() {
   }));
 
   ipcMain.handle('members:export-xlsx', () => wrap(async () => {
+    store.requireModule(['members', 'reports'], 'view');
     store.requireSession();
     const res = await dialog.showSaveDialog(mainWindow!, {
       title: 'Export members to Excel',
@@ -515,6 +531,7 @@ function registerIpc() {
 
   /** Member statement(s) as PDF or Excel. memberId = one member; null = every member. */
   ipcMain.handle('members:export-statements', (_e, memberId: number | null, format: 'pdf' | 'xlsx', lang?: Lang) => wrap(async () => {
+    store.requireModule(['members', 'reports'], 'view');
     store.requireSession();
     const data = store.getStatementsData(memberId ? [Number(memberId)] : undefined) as unknown as StatementsData;
     if (!data.statements.length) throw new Error('There are no members to export.');
@@ -554,6 +571,61 @@ function registerIpc() {
     shell.openPath(file);
     return { canceled: false, filePath: file };
   }));
+
+  /** Loan consent & guarantee paper (PDF): loan terms, schedule, guarantor, conditions and signature boxes. */
+  ipcMain.handle('export:consent', (_e, v: ConsentPaperData) => wrap(async () => {
+    store.requireSession();
+    if (!v || !v.ref_no || !v.guarantor || !v.borrower || !Array.isArray(v.schedule)) throw new Error('The consent paper needs the loan and guarantor details.');
+    const file = await pickFile('Save consent paper', `Consent_Paper_${safeName(v.ref_no)}_${safeName(v.borrower.name || 'borrower')}.pdf`, 'pdf');
+    if (!file) return { canceled: true };
+    fs.writeFileSync(file, await renderPdf(buildConsentPaperHtml(v, operator(v.lang)), false));
+    shell.openPath(file);
+    return { canceled: false, filePath: file };
+  }));
+
+  /** The signed paper: the user picks the scan/photo, it is verified, copied into the app's documents folder and attached to the draft (or loan). */
+  const docsDir = () => { const d = path.join(app.getPath('userData'), 'loan-documents'); fs.mkdirSync(d, { recursive: true }); return d; };
+  ipcMain.handle('loan:upload-consent', (_e, kind: 'application' | 'loan', id: number) => wrap(async () => {
+    store.requireModule('loans', 'edit');
+    store.requireWriter();
+    if (kind !== 'application' && kind !== 'loan') throw new Error('Unknown document target.');
+    const ref = store.refForConsent(kind, Number(id));
+    const res = await dialog.showOpenDialog(mainWindow!, { title: 'Choose the signed consent paper (scan or photo)', properties: ['openFile'],
+      filters: [{ name: 'Signed paper (PDF or photo)', extensions: ['pdf', 'jpg', 'jpeg', 'png'] }] });
+    if (res.canceled || !res.filePaths[0]) return { canceled: true };
+    const src = res.filePaths[0];
+    const size = fs.statSync(src).size;
+    if (size < 1024) throw new Error('This file is too small to be a signed paper.');
+    if (size > 15 * 1024 * 1024) throw new Error('The file is larger than 15 MB. Save the scan as a PDF or at a lower resolution.');
+    const buf = fs.readFileSync(src);
+    const ext = buf.slice(0, 4).toString('latin1') === '%PDF' ? 'pdf' : buf[0] === 0xff && buf[1] === 0xd8 && buf[2] === 0xff ? 'jpg' : buf.slice(0, 4).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47])) ? 'png' : '';
+    if (!ext) throw new Error('The signed paper must be a PDF, JPG or PNG file.');
+    const dest = path.join(docsDir(), `${safeName(ref)}_consent_${Date.now()}.${ext}`);
+    fs.writeFileSync(dest, buf);
+    try {
+      store.attachConsentDocument(kind, Number(id), { file: dest, name: path.basename(src), size: buf.length, sha256: crypto.createHash('sha256').update(buf).digest('hex') });
+    } catch (e) { try { fs.unlinkSync(dest); } catch { /* ignore */ } throw e; }
+    return { canceled: false, name: path.basename(src) };
+  }));
+  ipcMain.handle('loan:open-consent', (_e, kind: 'application' | 'loan', id: number) => wrap(async () => {
+    store.requireModule('loans', 'view');
+    store.requireSession();
+    const p = store.consentDocumentPath(kind === 'loan' ? 'loan' : 'application', Number(id));
+    if (!p) throw new Error('The signed paper file was not found on this computer. Upload it again.');
+    const err = await shell.openPath(p.file);
+    if (err) throw new Error(err);
+    return true;
+  }));
+
+  // Google account sync and Google Drive backup
+  googleAuto = setupGoogle({
+    app, shell, net, safeStorage, ipcMain, wrap, snapshot, docsDir,
+    restoreBytes: (bytes, name, origin) => restoreBytes(bytes, name, origin),
+    setPendingRestore: (bytes, name) => { pendingRestore = { file: name, bytes }; },
+  });
+
+  // Software licence (activation PIN, monthly payments, remote lock) and the iqbal_labs control panel
+  licenseAuto = setupLicense({ app, net, safeStorage, ipcMain, wrap, broadcast: ch => BrowserWindow.getAllWindows().forEach(w => { if (!w.isDestroyed()) w.webContents.send(ch); }) });
 
   ipcMain.handle('file:save-pdf', (_e, defaultName: string, landscape?: boolean) => wrap(async () => {
     const res = await dialog.showSaveDialog(mainWindow!, {

@@ -25,6 +25,7 @@ const TAB_KEYS: Record<NavTab, [string, string]> = {
   overview: ['nav.overview', 'Overview'],
   members: ['nav.members', 'Members'],
   collections: ['nav.collections', 'Collections'],
+  fines: ['nav.fines', 'Fines'],
   investments: ['nav.investments', 'Investments'],
   returns: ['nav.returns', 'Investment Returns'],
   loans: ['nav.loans', 'Personal Loans'],
@@ -33,6 +34,7 @@ const TAB_KEYS: Record<NavTab, [string, string]> = {
   master: ['nav.master', 'Master Data'],
   users: ['nav.users', 'Users & Roles'],
   backup: ['nav.backup', 'Backup & Restore'],
+  license: ['nav.license', 'License Control'],
   reports: ['nav.reports', 'Reports & Export'],
   settings: ['nav.settings', 'Settings'],
   profile: ['nav.profile', 'My profile'],
@@ -45,6 +47,7 @@ export const TopBar: React.FC = () => {
     activeTab,
     setActiveTab,
     setOpenRecordModal,
+    can,
     showToast,
     triggerRefresh,
     notifications,
@@ -316,7 +319,7 @@ export const TopBar: React.FC = () => {
           <span className="hidden 2xl:inline">{t('topbar.backup', 'Backup')}</span>
         </button>
 
-        {/* Record payment */}
+        {can('collections', 'edit') || can('entry', 'edit') ? (
         <button
           onClick={() => setOpenRecordModal(true)}
           className="btn btn-primary !h-9 !px-4 !text-xs"
@@ -324,6 +327,7 @@ export const TopBar: React.FC = () => {
           <Plus size={15} strokeWidth={2.5} />
           <span>{t('topbar.record_payment', 'Record payment')}</span>
         </button>
+        ) : null}
 
         {/* Profile */}
         <div className="relative" ref={profileRef}>

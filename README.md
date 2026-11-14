@@ -372,6 +372,8 @@ npm run electron:dev     # Vite dev server + Electron, with hot reload for the U
 | `npm run build:all` | Production build of the renderer (`dist/`) and main process (`dist-electron/`) |
 | `npm start` | Run the production build locally |
 | `npm run dist` | Build `release/BondhuFund-Setup-x.y.z.exe` and `release/BondhuFund-Portable-x.y.z.exe` |
+| `npm run dist:mac` | **On a Mac only:** build `release/BondhuFund-macOS-x.y.z-arm64.dmg` (and `.zip`) for Apple silicon |
+| `npm run test:license` `test:review` `test:fines` `test:fuzz` | Licence control, committee reviews, fines, and the randomised "the books always balance" stress test (plus `test:access`, `test:gsync`, `test:loans`) |
 
 ### Tech stack
 Electron 35 · React 18 · TypeScript 5 · Vite 5 · Tailwind CSS 3 · Apache ECharts 5 (Overview) · Recharts 2 (Investments) · lucide-react icons · sql.js (SQLite WASM) · electron-builder 26 (NSIS + portable) · @fontsource Inter & Noto Sans Bengali.
@@ -459,6 +461,28 @@ npm run electron:dev                     # try it in both English and বাং�
   Pass an old `.db` to also test migration.
 - **`npm run screenshots`** is also a smoke test of the main screens: it signs in, loads demo data, and logs any console errors.
 - **Manual checklist before a release:** see [docs/RELEASE.md](docs/RELEASE.md).
+
+---
+
+## 🍎 Running on a Mac (Apple silicon, e.g. M5)
+
+The program is plain Electron with a built-in database, so it runs unchanged on macOS. A Mac installer can only be built **on a Mac**:
+
+```bash
+xcode-select --install          # once: command-line tools
+brew install node               # once: Node 20 or newer
+git clone https://github.com/m-asifiqbal/bondhu-fund.git && cd bondhu-fund
+cp /path/to/config/supabase.json config/   # only for License Control (git-ignored; see docs/license_setup.md)
+npm install
+npm run dist:mac                # → release/BondhuFund-macOS-x.y.z-arm64.dmg
+```
+Open the `.dmg` and drag *Bondhu Fund* to Applications. Notes:
+- An app built on your own Mac normally opens at once. If macOS says it is "damaged" or from an unidentified developer, run
+  `xattr -cr "/Applications/Bondhu Fund.app"` and `codesign --force --deep --sign - "/Applications/Bondhu Fund.app"`.
+  Distributing it to other Macs without warnings needs an Apple Developer ID certificate and notarisation.
+- The first Google sign-in or Drive sync makes macOS ask about the "Bondhu Fund Safe Storage" Keychain item: choose *Allow*.
+- Data is kept in `~/Library/Application Support/Bondhu Fund`. To move data between Windows and Mac use an encrypted backup (Backup & Restore) or Google sync: the files are identical on both systems.
+- The licence panel, loans, fines, committee reviews and everything else work the same. This Mac build has not yet been tested on real hardware by the author: please report problems.
 
 ---
 

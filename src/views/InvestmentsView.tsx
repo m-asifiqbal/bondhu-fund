@@ -22,6 +22,7 @@ import {
   Wallet,
   LineChart,
   CheckCircle2,
+  ClipboardCheck,
 } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 import {
@@ -37,6 +38,7 @@ import { Investment, InvestmentStatus } from '../types';
 import { SearchableSelect, SelectOption } from '../components/common/SearchableSelect';
 import { DatePicker } from '../components/common/DatePicker';
 import { Modal } from '../components/common/Modal';
+import { ReviewModal } from '../components/investments/ReviewModal';
 import { todayISO, daysBetween } from '../utils/date';
 
 const SectorChart = React.lazy(() => import('./InvestmentsSectorChart'));
@@ -116,6 +118,9 @@ export const InvestmentsView: React.FC = () => {
   const [formOpen, setFormOpen] = useState(false);
   const [editing, setEditing] = useState<Investment | null>(null);
   const [form, setForm] = useState<FormState>(emptyForm());
+
+  // Committee review
+  const [reviewInv, setReviewInv] = useState<Investment | null>(null);
 
   // Valuation
   const [valuationInv, setValuationInv] = useState<Investment | null>(null);
@@ -521,10 +526,10 @@ export const InvestmentsView: React.FC = () => {
                     <span className="font-bold">{i.name}</span> — {when}
                   </p>
                   <button
-                    onClick={() => openValuation(i)}
-                    className="btn btn-outline btn-sm"
+                    onClick={() => setReviewInv(i)}
+                    className="btn btn-primary btn-sm"
                   >
-                    {t('finance.inv_open_review', 'Open review')}
+                    <ClipboardCheck size={13} />{t('review.complete', 'Complete review')}
                   </button>
                 </div>
               );
@@ -796,6 +801,9 @@ export const InvestmentsView: React.FC = () => {
                               {t('finance.inv_review_short', 'Review')}: {formatDate(inv.review_date)}
                             </span>
                           )}
+                          {!isSold && inv.last_review_date && (
+                            <span className="block text-[10px] text-slate-400">{t('review.last', 'Reviewed {d}').replace('{d}', formatDate(inv.last_review_date))}</span>
+                          )}
                         </td>
                         <td className="py-3 px-2.5 text-right font-bold text-slate-900 dark:text-white whitespace-nowrap">{formatCurrency(inv.invested_amount)}</td>
                         <td className="py-3 px-2.5 text-right font-bold text-slate-900 dark:text-white whitespace-nowrap">
@@ -821,6 +829,14 @@ export const InvestmentsView: React.FC = () => {
                           <div className="flex items-center justify-end gap-1">
                             {!isSold && (
                               <>
+                                <button
+                                  onClick={() => setReviewInv(inv)}
+                                  className={`btn btn-sm ${reviewSoon || inv.status === 'Review' ? 'btn-primary' : 'btn-outline'}`}
+                                  title={t('review.title', 'Complete committee review')}
+                                >
+                                  <ClipboardCheck size={12} />
+                                  <span>{t('review.short', 'Review')}</span>
+                                </button>
                                 <button
                                   onClick={() => openValuation(inv)}
                                   className="btn btn-green-outline btn-sm"
@@ -1038,6 +1054,13 @@ export const InvestmentsView: React.FC = () => {
           </form>
         )}
       </Modal>
+
+      <ReviewModal inv={reviewInv} onClose={() => setReviewInv(null)} onDone={(inv, decision) => {
+        setReviewInv(null);
+        triggerRefresh();
+        showToast(t('review.saved', 'Committee review recorded.'));
+        if (decision === 'Sell') openSell(inv);        // the committee decided to sell: go straight to recording the sale
+      }} />
 
       {/* Mark as sold modal */}
       <Modal

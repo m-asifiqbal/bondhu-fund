@@ -477,3 +477,6 @@ html:not(.dark) main .tbl-filter { background-color: #ecf5f0; border-color: #bcd
 /* The sidebar list scrolls with the wheel but shows no scrollbar: a 9px bar squeezed the highlight off-centre in the narrow rail. */
 .nav-scroll { scrollbar-width: none; }
 .nav-scroll::-webkit-scrollbar { display: none; width: 0; height: 0; }
+
+/* Pages the user may only view: the main "create" buttons are hidden (the main process refuses changes anyway) */
+main.view-only .btn-primary, main.view-only .btn-danger-outline { display: none !important; }

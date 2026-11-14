@@ -195,7 +195,7 @@ export const LoanRepaymentModal: React.FC<Props> = ({ loan, kind, onClose, onDon
           <SearchableSelect label={t('loan.received_via', 'Received through')} required options={methodOptions} value={method || null} onChange={v => setMethod(v == null ? '' : String(v))} placeholder={t('loan.paid_via_ph', 'Cash, bank, bKash…')} />
           <div>
             <label className="form-label">{t('loan.trx', 'Transaction no.')}</label>
-            <input type="text" value={trx} onChange={e => setTrx(e.target.value)} className="form-input" />
+            <input type="text" value={trx} onChange={e => setTrx(e.target.value)} className="form-input" placeholder={t('loan.auto_rcpt_ph', 'Auto-generated if left blank')} />
           </div>
         </div>
         <div>

@@ -158,11 +158,12 @@ async function fiscal(p: ReportParams): Promise<ReportData> {
     allMembers(),
   ]);
   const months = Array.from({ length: 12 }, (_, i) => addMonths(startKey, i));
-  const byMonth = new Map(months.map(m => [m, { month: m, collections: 0, sales: 0, expenses: 0, investments: 0, loans: 0, repaid: 0, net: 0, cumulative: 0 }]));
+  const byMonth = new Map(months.map(m => [m, { month: m, collections: 0, fines: 0, sales: 0, expenses: 0, investments: 0, loans: 0, repaid: 0, net: 0, cumulative: 0 }]));
   for (const t of txs) {
     const b = byMonth.get(String(t.date).slice(0, 7));
     if (!b) continue;
     if (t.type === 'collection') b.collections += Number(t.credit) || 0;
+    else if (t.type === 'fine') b.fines += Number(t.credit) || 0;
     else if (t.type === 'sale') b.sales += Number(t.credit) || 0;
     else if (t.type === 'expense') b.expenses += Number(t.debit) || 0;
     else if (t.type === 'investment') b.investments += Number(t.debit) || 0;
@@ -172,7 +173,7 @@ async function fiscal(p: ReportParams): Promise<ReportData> {
   let cum = 0;
   const rows = months.map(m => {
     const b = byMonth.get(m)!;
-    b.net = b.collections + b.sales + b.repaid - b.expenses - b.investments - b.loans;
+    b.net = b.collections + b.fines + b.sales + b.repaid - b.expenses - b.investments - b.loans;
     cum += b.net;
     b.cumulative = cum;
     return b;
@@ -204,6 +205,7 @@ async function fiscal(p: ReportParams): Promise<ReportData> {
     columns: [
       { key: 'month', label: 'Month', bn: 'মাস', kind: 'month', default: true },
       { key: 'collections', label: 'Collections', bn: 'সংগ্রহ', kind: 'money', default: true, total: true },
+      { key: 'fines', label: 'Fines', bn: 'জরিমানা', kind: 'money', default: true, total: true },
       { key: 'sales', label: 'Investment sales', bn: 'বিনিয়োগ বিক্রয়', kind: 'money', default: true, total: true },
       { key: 'expenses', label: 'Expenses', bn: 'খরচ', kind: 'money', default: true, total: true },
       { key: 'investments', label: 'Investments', bn: 'বিনিয়োগ', kind: 'money', default: true, total: true },
@@ -231,6 +233,7 @@ async function fiscal(p: ReportParams): Promise<ReportData> {
     }],
     summary: [
       { label: 'Collections', bn: 'সংগ্রহ', value: tot('collections'), kind: 'money', tone: 'good' },
+      { label: 'Fines', bn: 'জরিমানা', value: tot('fines'), kind: 'money', tone: 'good' },
       { label: 'Investment sales', bn: 'বিনিয়োগ বিক্রয়', value: tot('sales'), kind: 'money' },
       { label: 'Expenses', bn: 'খরচ', value: tot('expenses'), kind: 'money', tone: 'bad' },
       { label: 'New investments', bn: 'নতুন বিনিয়োগ', value: tot('investments'), kind: 'money' },

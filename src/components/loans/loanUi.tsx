@@ -1,6 +1,8 @@
 import React from 'react';
 import { useApp } from '../../context/AppContext';
-import type { LoanMethod, LoanStatus } from '../../types';
+import type { LoanMethod, LoanStatus, GuarantorInfo, LoanDetail, LoanApplicationDetail } from '../../types';
+import { exportConsentPaper } from '../../services/db';
+import { todayISO } from '../../utils/date';
 
 /** Digits in the chosen language (Bangla digits in bn). */
 export const useNum = () => {
@@ -86,4 +88,44 @@ export const useRateText = () => {
   const m = useMethodText();
   return (method: LoanMethod, rate: number) =>
     method === 'free' ? m.label('free') : `${n(+rate.toFixed(2))}% ${t('loan.per_year', 'a year')} · ${m.label(method)}`;
+};
+
+/** Everything the printable consent paper needs, in plain values. */
+export interface ConsentInput {
+  ref_no: string; ref_is_draft: boolean; loan_date: string; principal: number; term_months: number; method: LoanMethod; annual_rate: number;
+  installment: number; total_interest: number; total_payable: number; first_due_date: string; purpose?: string; paid_via?: string;
+  schedule: Array<{ no: number; due_date: string; principal: number; interest: number; total: number }>;
+  borrower: { name: string; name_bn?: string | null; code?: string; nid?: string; phone?: string };
+  guarantor: GuarantorInfo;
+}
+
+/** A saved loan → the paper input (the database is the single source of truth for a saved loan). */
+export const consentFromDetail = (d: LoanDetail): ConsentInput | null => d.guarantor ? ({
+  ref_no: d.loan.loan_no, ref_is_draft: false, loan_date: d.loan.disbursed_date, principal: d.loan.principal, term_months: d.loan.term_months, method: d.loan.method, annual_rate: d.loan.annual_rate,
+  installment: d.loan.installment, total_interest: d.loan.total_interest, total_payable: d.loan.total_payable, first_due_date: d.loan.first_due_date, purpose: d.loan.purpose || '', paid_via: d.loan.payment_method || '',
+  schedule: d.schedule, borrower: { name: d.member.name, name_bn: d.member.name_bn, code: d.member.member_code, nid: d.member.nid || '', phone: d.member.phone || '' }, guarantor: d.guarantor,
+}) : null;
+
+/** A draft → the paper input. */
+export const consentFromApplication = (d: LoanApplicationDetail): ConsentInput | null => d.guarantor ? ({
+  ref_no: d.application.app_no, ref_is_draft: true, loan_date: d.application.disbursed_date, principal: d.application.principal, term_months: d.application.term_months, method: d.application.method, annual_rate: d.application.annual_rate,
+  installment: d.application.installment, total_interest: d.application.total_interest, total_payable: d.application.total_payable, first_due_date: d.application.first_due_date, purpose: d.application.purpose || '', paid_via: d.application.payment_method || '',
+  schedule: d.plan.rows, borrower: { name: d.member.name, name_bn: d.member.name_bn, code: d.member.member_code, nid: d.member.nid || '', phone: d.member.phone || '' }, guarantor: d.guarantor,
+}) : null;
+
+/** Generates the loan consent & guarantee paper as a PDF (Save dialog, then opens it) in the current language. */
+export const useConsentPaper = () => {
+  const { t, language, orgName, settings, showToast, tv } = useApp();
+  const mt = useMethodText();
+  return async (x: ConsentInput) => {
+    try {
+      const r = await exportConsentPaper({
+        orgName, lang: language === 'bn' ? 'bn' : 'en', generatedOn: todayISO(), currency: language === 'bn' ? '৳' : settings?.currency_symbol || 'TK',
+        ref_no: x.ref_no, ref_is_draft: x.ref_is_draft, loan_date: x.loan_date, principal: x.principal, term_months: x.term_months, method: x.method, method_label: mt.label(x.method), annual_rate: x.annual_rate,
+        installment: x.installment, total_interest: x.total_interest, total_payable: x.total_payable, first_due_date: x.first_due_date, purpose: x.purpose, paid_via: tv(x.paid_via || ''),
+        late_fee: settings?.loan_late_fee || 0, schedule: x.schedule, borrower: x.borrower, guarantor: x.guarantor,
+      });
+      if (!r.canceled) showToast(t('loan.paper_saved', 'Consent paper saved and opened. Print it, get the borrower and guarantor to sign, then upload the signed copy.'));
+    } catch (e: any) { showToast(e.message, 'error'); }
+  };
 };

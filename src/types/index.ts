@@ -8,6 +8,7 @@ export type NavTab =
   | 'overview'
   | 'members'
   | 'collections'
+  | 'fines'
   | 'investments'
   | 'returns'
   | 'loans'
@@ -16,6 +17,7 @@ export type NavTab =
   | 'master'
   | 'users'
   | 'backup'
+  | 'license'
   | 'reports'
   | 'settings'
   | 'profile';
@@ -90,7 +92,15 @@ export interface Investment {
   location_details?: string;
   sold_date?: string | null;
   sold_amount?: number | null;
+  last_review_date?: string | null;
+  last_review_decision?: ReviewDecision | null;
   created_at?: string;
+}
+
+export type ReviewDecision = 'Hold' | 'Watch' | 'Sell' | 'Other';
+export interface InvestmentReview {
+  id: number; investment_id: number; meeting_date: string; decision: ReviewDecision; notes: string | null;
+  value_before: number; value_after: number; status_after: string | null; next_review_date: string | null; attendees: string | null; created_by: string | null; created_at: string;
 }
 
 export interface Expense {
@@ -128,6 +138,8 @@ export interface AppUser {
   has_password?: number;
   /** 1 for the protected iqbal_labs account */
   is_system?: number;
+  /** the Super User's custom module access (JSON); null = the role's default */
+  permissions?: string | null;
 }
 
 export interface MasterCategory {
@@ -168,6 +180,8 @@ export interface AppSettings {
   loan_default_method?: LoanMethod;
   loan_max_multiple?: number;
   loan_late_fee?: number;
+  /** 1 = a loan stays a draft until its signed consent paper is uploaded */
+  loan_consent_required?: boolean;
 }
 
 export interface OverviewMetrics {
@@ -205,7 +219,7 @@ export interface MemberStatement {
 }
 
 export interface LedgerRow {
-  type: 'collection' | 'expense' | 'investment' | 'sale' | 'return' | 'settlement' | 'loan' | 'loan_repayment';
+  type: 'collection' | 'fine' | 'expense' | 'investment' | 'sale' | 'return' | 'settlement' | 'loan' | 'loan_repayment';
   date: string; party: string; description: string; method: string; reference: string; credit: number; debit: number;
 }
 
@@ -253,6 +267,7 @@ export interface OverviewData {
     reviews: Array<{ id: number; name: string; review_date: string | null }>;
     receipts: Array<{ id: number; title: string; amount: number; expense_date: string }>;
     receiptCount: number;
+    loansOverdue: number; loansOverdueAmount: number;
     lastBackup: string;
   };
   recent: Array<{ kind: 'collection' | 'expense' | 'investment' | 'member' | 'return' | 'settlement' | 'loan' | 'repayment'; id: number; title: string; sub: string; amount: number; date: string; created_at: string }>;
@@ -295,7 +310,11 @@ export interface ImportPreview {
 }
 export interface ImportResult { created: number; updated: number; skipped: number; errors: number; paymentsAdded: number; amount: number }
 // Sign-in -----------------------------------------------------------------------------------
+import type { ModuleKey, AccessLevel } from '../utils/access';
+export interface UserAccess { userId: number; role: UserRole; isSystem: boolean; defaults: Record<ModuleKey, AccessLevel>; custom: Partial<Record<ModuleKey, AccessLevel>> | null; effective: Record<ModuleKey, AccessLevel> }
 export interface SessionInfo {
+  /** what this user may do in every module (decided by role and by the Super User) */
+  permissions: Record<ModuleKey, AccessLevel>;
   user: AppUser & { is_system?: number; must_change_password?: number };
   /** only the protected iqbal_labs account */
   canUpload: boolean;
@@ -344,6 +363,9 @@ export interface Loan {
   principal: number; method: LoanMethod; annual_rate: number; term_months: number;
   disbursed_date: string; first_due_date: string; installment: number; total_interest: number; total_payable: number;
   payment_method?: string | null; reference?: string | null; purpose?: string | null; guarantor?: string | null; notes?: string | null;
+  guarantor_type?: 'member' | 'outsider' | null; guarantor_member_id?: number | null; guarantor_name?: string | null; guarantor_address?: string | null;
+  guarantor_nid?: string | null; guarantor_phone?: string | null; guarantor_relation?: string | null; guarantor_member_code?: string | null; guarantor_member_name?: string | null;
+  application_no?: string | null; consent_status?: 'Signed' | 'Waived' | null; consent_name?: string | null; consent_size?: number | null; consent_uploaded_at?: string | null;
   status: 'Active' | 'Closed' | 'Written off'; closed_date?: string | null;
   written_off_amount: number; written_off_date?: string | null; written_off_reason?: string | null;
   paid_principal: number; paid_interest: number; paid_penalty: number; total_paid: number; paid_schedule: number;
@@ -359,6 +381,7 @@ export interface LoanSummary {
   totalLent: number; outstanding: number; principalRepaid: number; interestEarned: number; penaltyEarned: number; interestExpected: number; totalCollected: number;
   overdueAmount: number; overduePrincipal: number; dueNext30: number; writtenOffAmount: number; onTrackPct: number;
   cashInHand: number; fundBalance: number; lentPctOfFund: number; avgRate: number;
+  drafts: number; draftsAmount: number;
 }
 export interface LoanPlanRow { no: number; due_date: string; principal: number; interest: number; total: number; balance: number }
 export interface LoanTermOption { term: number; installment: number; totalInterest: number; totalPayable: number; effectiveRate: number }
@@ -368,8 +391,8 @@ export interface LoanPreview {
   plan?: { rows: LoanPlanRow[]; installment: number; lastInstallment: number; totalInterest: number; totalPayable: number; effectiveRate: number };
   options?: LoanTermOption[];
   warnings?: Array<{ level: 'error' | 'warn' | 'info'; text: string }>;
-  cash?: number;
-  member?: { id: number; member_code: string; name: string; status: string; monthly_due: number; savings: number; owed: number; limit: number | null; multiple: number; available: number | null; overdueLoans: number } | null;
+  cash?: number; nextLoanNo?: string; nextAppNo?: string; autoReference?: string;
+  member?: { id: number; member_code: string; name: string; name_bn?: string | null; nid?: string | null; phone?: string | null; status: string; monthly_due: number; savings: number; owed: number; limit: number | null; multiple: number; available: number | null; overdueLoans: number } | null;
 }
 export interface LoanInstallment { no: number; due_date: string; principal: number; interest: number; total: number; paid: number; status: 'Paid' | 'Partial' | 'Due' | 'Overdue' | 'Waived' | 'Written off'; balance_after: number }
 export interface LoanRepayment {
@@ -377,9 +400,11 @@ export interface LoanRepayment {
   principal_paid: number; interest_paid: number; penalty_paid: number; total_paid: number;
   payment_method?: string | null; trx_id?: string | null; note?: string | null; created_by?: string | null;
 }
+export interface GuarantorInfo { type: 'member' | 'outsider' | 'legacy'; member_id?: number; name: string; name_bn?: string | null; code?: string; address: string; nid: string; phone: string; relation: string }
+export interface GuarantorCheck { ok: boolean; error: string; info: GuarantorInfo | null }
 export interface LoanDetail {
-  loan: Loan; schedule: LoanInstallment[]; repayments: LoanRepayment[]; latestRepaymentId: number | null;
-  member: { id: number; member_code: string; name: string; name_bn?: string | null; avatar_initials?: string; phone?: string; monthly_due: number; status: string; savings: number; owed: number };
+  loan: Loan; guarantor: GuarantorInfo | null; schedule: LoanInstallment[]; repayments: LoanRepayment[]; latestRepaymentId: number | null;
+  member: { id: number; member_code: string; name: string; name_bn?: string | null; avatar_initials?: string; phone?: string; monthly_due: number; status: string; savings: number; owed: number; nid?: string };
   memberLoans: Loan[];
 }
 export interface LoanRepaymentQuote {
@@ -390,5 +415,79 @@ export interface LoanRepaymentQuote {
 }
 export interface LoanInput {
   member_id: number; principal: number; method: LoanMethod; annual_rate: number; term_months: number;
-  disbursed_date: string; first_due_date?: string; payment_method: string; reference?: string; purpose?: string; guarantor?: string; notes?: string; limit_note?: string;
+  disbursed_date: string; first_due_date?: string; payment_method: string; reference?: string; purpose?: string; notes?: string; limit_note?: string;
+  /** a guarantor is mandatory: a fund member, or an outsider with name, address and NID */
+  guarantor_type: 'member' | 'outsider'; guarantor_member_id?: number; guarantor_name?: string; guarantor_address?: string; guarantor_nid?: string; guarantor_phone?: string; guarantor_relation?: string;
+}
+
+/** A loan draft: terms and guarantor are fixed and printed on the consent paper; no money has moved yet. */
+export interface LoanApplication {
+  id: number; app_no: string; member_id: number; member_code: string; member_name: string; member_name_bn?: string | null; avatar_initials?: string; member_phone?: string | null;
+  principal: number; method: LoanMethod; annual_rate: number; term_months: number; disbursed_date: string; first_due_date: string;
+  installment: number; total_interest: number; total_payable: number; payment_method?: string | null; reference?: string | null; purpose?: string | null; notes?: string | null; limit_note?: string | null;
+  guarantor?: string | null; guarantor_type?: 'member' | 'outsider' | null; guarantor_member_id?: number | null; guarantor_name?: string | null; guarantor_address?: string | null; guarantor_nid?: string | null;
+  guarantor_phone?: string | null; guarantor_relation?: string | null; guarantor_member_code?: string | null; guarantor_member_name?: string | null;
+  consent_file?: string | null; consent_name?: string | null; consent_size?: number | null; consent_uploaded_at?: string | null;
+  status: 'Draft' | 'Activated'; loan_id?: number | null; created_at: string; has_consent: boolean; consent_file_exists: boolean; age_days: number;
+}
+export interface LoanApplicationDetail {
+  application: LoanApplication; guarantor: GuarantorInfo | null; consentRequired: boolean;
+  plan: { rows: LoanPlanRow[]; installment: number; lastInstallment: number; totalInterest: number; totalPayable: number; effectiveRate: number };
+  warnings: Array<{ level: 'error' | 'warn' | 'info'; text: string }>;
+  member: { id: number; member_code: string; name: string; name_bn?: string | null; nid?: string | null; phone?: string | null; status: string; savings: number; owed: number };
+}
+
+// Google account sync & Drive backup ----------------------------------------------------------
+export interface GoogleStatus {
+  configured: boolean; clientSource: 'app' | 'build' | null; canConfigure: boolean; secureStorage: boolean;
+  account: { email: string; name: string; picture: string } | null; device: string; hasPin: boolean;
+  sync: { lastSyncAt: string | null; lastRev: number; dirty: boolean; dirtyAt: string | null; auto: boolean; encrypt: boolean; lastResult: string | null };
+}
+export type SyncOutcome = 'up-to-date' | 'pushed' | 'pulled' | 'conflict' | 'needs-pin' | 'nothing' | 'wrong-pin';
+export interface SyncCounts { members?: number; collections?: number; expenses?: number; investments?: number; loans?: number; drafts?: number; users?: number }
+export interface SyncResult {
+  status: SyncOutcome; message: string; revision?: number; replaced?: boolean;
+  conflict?: { local: { dirtyAt: string | null; counts: SyncCounts }; remote: { at: string; deviceName: string; revision: number; counts: SyncCounts } };
+}
+export interface RemoteCheck { remote: { revision: number; at: string; deviceName: string; counts: SyncCounts; encrypted: boolean; mine: boolean } | null; remoteNewer: boolean; localDirty: boolean }
+export interface DriveBackupItem { id: string; name: string; size: number; at: string; device: string; encrypted: boolean }
+
+// Software licence (activation PIN, monthly payments, remote lock) ---------------------------------
+export type LockReason = 'none' | 'not_activated' | 'suspended' | 'revoked' | 'expired' | 'needs_check' | 'invalid' | 'not_registered' | 'not_allowed';
+export interface LicenseView {
+  enforced: boolean; configured: boolean; locked: boolean; reason: LockReason; message: string;
+  scope: 'user' | 'computer' | null; username: string;
+  customer: string; paidUntil: string | null; daysLeft: number | null; status: 'active' | 'suspended' | 'revoked' | null;
+  installId: string; lastCheckAt: number | null; lastError: string | null;
+}
+export interface LicenseRecord {
+  id: string; customer: string; username: string | null; contact: string | null; notes: string | null; pin: string; pin_display: string; status: 'active' | 'suspended' | 'revoked';
+  paid_until: string | null; monthly_fee: number; message: string | null; max_devices: number; max_users: number | null; restrict_users: boolean; created_at: string;
+  devices: LicenseDevice[]; users: LicenseUser[];
+}
+export interface LicenseDevice { id: string; license_id: string; install_id: string; device_name: string | null; app_version: string | null; last_user: string | null; first_seen: string; last_seen: string }
+export interface LicenseUser { id: string; license_id: string; username: string; note: string | null; first_seen: string; last_seen: string | null }
+export interface LicensePayment { id: string; license_id: string; amount: number; months: number; days: number; paid_on: string; method: string | null; note: string | null; period_from: string | null; period_to: string | null; created_at: string }
+export interface LicenseAdminState { configured: boolean; enforced: boolean; url: string; account: string | null }
+
+// Fines ---------------------------------------------------------------------------------------------
+export interface FineRow {
+  key: string; source: 'contribution' | 'loan'; id: number; date: string; month: string; due_date: string | null; days_late: number | null; amount: number; base: number;
+  method: string | null; trx_id: string; note: string; member_id: number; member_code: string; name: string; name_bn: string | null; label: string; flag: 'ok' | 'on_time';
+}
+export interface FundBooks {
+  fundBalance: number; cashInHand: number; owedToMembers: number; members: number; reserve: number;
+  parts: { fines: number; penalties: number; expenses: number; settlementAdjustment: number; unshared: number };
+  explained: number; residual: number; balanced: boolean; drift: Array<{ member_code: string; name: string; stored: number; now: number }>;
+}
+export interface FineRegister {
+  filters: { start_date: string | null; end_date: string | null; member_id: number | null; source: string };
+  rows: FineRow[];
+  totals: { total: number; contribution: number; loan: number; count: number; members: number; onTime: number; average: number };
+  overall: { contribution: number; loan: number; total: number; thisMonth: number; thisYear: number; count: number; rate: number; dueDay: number };
+  byMonth: Array<{ month: string; contribution: number; loan: number; total: number; count: number }>;
+  byMember: Array<{ member_id: number; member_code: string; name: string; name_bn: string | null; count: number; total: number; last_date: string }>;
+  lateNoFine: { count: number; potential: number; rows: Array<{ id: number; date: string; month: string; due_date: string; days_late: number; amount: number; member_id: number; member_code: string; name: string; name_bn: string | null }> };
+  overdueNow: { count: number; potential: number; rows: Array<{ member_id: number; member_code: string; name: string; name_bn: string | null; months: number; owed: number; fine_if_paid_today: number }> };
+  books: FundBooks;
 }

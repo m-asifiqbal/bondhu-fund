@@ -22,12 +22,14 @@ import {
   KeyRound,
   Coins,
   HandCoins,
+  Gavel,
   LogOut,
 } from 'lucide-react';
 import { Modal } from '../common/Modal';
 import { ChangePasswordPrompt } from '../../views/LoginScreen';
 import { useApp } from '../../context/AppContext';
 import { AppUser, NavTab } from '../../types';
+import { TAB_MODULE } from '../../utils/access';
 
 const COLLAPSE_KEY = 'bondhu_sidebar_collapsed';
 const NARROW_QUERY = '(max-width: 1279px)';
@@ -151,7 +153,7 @@ interface NavSection {
 }
 
 export const Sidebar: React.FC = () => {
-  const { activeTab, setActiveTab, currentUser, t, tv, settings, orgName, isAdmin, bnName } = useApp();
+  const { activeTab, setActiveTab, currentUser, t, tv, settings, orgName, can, canUpload, bnName } = useApp();
   const [showUserMenu, setShowUserMenu] = useState(false);
   // Collapsible icon rail: below 1280px it auto-collapses; on wide screens the user's choice is remembered.
   const [isNarrow, setIsNarrow] = useState(() => !!window.matchMedia && window.matchMedia(NARROW_QUERY).matches);
@@ -190,6 +192,7 @@ export const Sidebar: React.FC = () => {
       items: [
         { id: 'overview', label: t('nav.overview', 'Overview'), icon: LayoutDashboard },
         { id: 'collections', label: t('nav.collections', 'Collections'), icon: Banknote },
+        { id: 'fines', label: t('nav.fines', 'Fines'), icon: Gavel },
         { id: 'members', label: t('nav.members', 'Members'), icon: Users },
         { id: 'expenses', label: t('nav.expenses', 'Operating Expenses'), icon: Receipt },
         { id: 'entry', label: t('nav.entry', 'Entry Center'), icon: PlusCircle },
@@ -209,13 +212,14 @@ export const Sidebar: React.FC = () => {
       key: 'admin',
       title: t('shell.section_admin', 'Administration'),
       items: [
-        // Master Data, Users and Settings are Admin-only (also enforced by the main process)
-        ...(isAdmin ? [{ id: 'master', label: t('nav.master', 'Master Data'), icon: Database }, { id: 'users', label: t('nav.users', 'Users & Roles'), icon: UserCheck }] : []),
+        // who sees what is decided by the Super User's module access (and enforced again by the main process)
+        { id: 'master', label: t('nav.master', 'Master Data'), icon: Database }, { id: 'users', label: t('nav.users', 'Users & Roles'), icon: UserCheck },
         { id: 'backup', label: t('nav.backup', 'Backup & Restore'), icon: HardDriveDownload },
-        ...(isAdmin ? [{ id: 'settings', label: t('nav.settings', 'Settings'), icon: Settings }] : []),
+        ...(canUpload ? [{ id: 'license', label: t('nav.license', 'License Control'), icon: KeyRound }] : []),
+        { id: 'settings', label: t('nav.settings', 'Settings'), icon: Settings },
       ],
     },
-  ] as NavSection[], [t, isAdmin]);
+  ].map(sec => ({ ...sec, items: sec.items.filter(i => { const m = TAB_MODULE[i.id]; return !m || can(m, 'view'); }) })).filter(sec => sec.items.length > 0) as NavSection[], [t, can, canUpload]);
 
   const logo = settings?.org_logo;
 

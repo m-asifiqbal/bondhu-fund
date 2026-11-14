@@ -2,7 +2,7 @@ import React, { useMemo } from 'react';
 import type { CellKind, ColumnDef } from './reportBuilders';
 
 const STATUS_EN: Record<string, string> = {
-  collection: 'Collection', expense: 'Expense', investment: 'Investment', sale: 'Sale',
+  collection: 'Collection', fine: 'Fine', expense: 'Expense', investment: 'Investment', sale: 'Sale',
   return: 'Investment return', settlement: 'Member settlement', loan: 'Loan given', loan_repayment: 'Loan repayment',
   Running: 'Running', Closed: 'Repaid', 'Written off': 'Written off',
 };
@@ -11,6 +11,7 @@ const STATUS_TONE: Record<string, string> = {
   Paid: 'bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-950/50 dark:text-emerald-300 dark:border-emerald-800',
   Verified: 'bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-950/50 dark:text-emerald-300 dark:border-emerald-800',
   collection: 'bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-950/50 dark:text-emerald-300 dark:border-emerald-800',
+  fine: 'bg-orange-50 text-orange-700 border-orange-200 dark:bg-orange-950/50 dark:text-orange-300 dark:border-orange-800',
   sale: 'bg-teal-50 text-teal-700 border-teal-200 dark:bg-teal-950/50 dark:text-teal-300 dark:border-teal-800',
   Growing: 'bg-teal-50 text-teal-700 border-teal-200 dark:bg-teal-950/50 dark:text-teal-300 dark:border-teal-800',
   Active: 'bg-teal-50 text-teal-700 border-teal-200 dark:bg-teal-950/50 dark:text-teal-300 dark:border-teal-800',

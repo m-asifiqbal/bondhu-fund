@@ -1,5 +1,6 @@
 import React, { createContext, useContext, useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { Copy, Check, AlertCircle, CheckCircle2, Info, X } from 'lucide-react';
+import { levelRank, type ModuleKey } from '../utils/access';
 import { AppUser, AppNotification, NavTab, AppSettings, MasterCategory, SessionInfo } from '../types';
 export type { NavTab };
 import { getUsers, getDynamicNotifications, getAppSettings, getMasterData, login as apiLogin, logout as apiLogout, getSession } from '../services/db';
@@ -66,6 +67,8 @@ interface AppContextType {
   /** Only the protected iqbal_labs account may upload data (Excel/bulk import). */
   canUpload: boolean;
   isAdmin: boolean;
+  /** may the signed-in user open (view) or change (edit) this module? Any one of several modules is enough. */
+  can: (modules: ModuleKey | ModuleKey[], level?: 'view' | 'edit') => boolean;
   signIn: (username: string, password: string) => Promise<void>;
   signOut: () => Promise<void>;
 }
@@ -78,7 +81,7 @@ const VALUE_KEYS: Record<string, string> = {
   Verified: 'status.verified', 'Needs receipt': 'status.needs_receipt', Growing: 'status.growing', Review: 'status.review', Sold: 'status.sold',
   Admin: 'role.admin', Treasurer: 'role.treasurer', Auditor: 'role.auditor', Manager: 'role.manager', Member: 'role.member',
   Manual: 'backup.manual', Automatic: 'backup.automatic', 'Pre-Restore': 'backup.pre_restore', Restored: 'backup.restored',
-  collection: 'ledger.collection', expense: 'ledger.expense', investment: 'ledger.investment', sale: 'ledger.sale',
+  collection: 'ledger.collection', fine: 'ledger.fine', expense: 'ledger.expense', investment: 'ledger.investment', sale: 'ledger.sale',
   return: 'ledger.return', settlement: 'ledger.settlement', loan: 'ledger.loan', loan_repayment: 'ledger.loan_repayment',
   Running: 'loan.s_running', Closed: 'loan.s_closed', 'Written off': 'loan.s_written_off',
 };
@@ -89,6 +92,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [session, setSession] = useState<SessionInfo | null>(null);
   const [sessionChecked, setSessionChecked] = useState(false);
   const currentUser: AppUser | null = session?.user ?? null;
+  const can = useCallback((modules: ModuleKey | ModuleKey[], level: 'view' | 'edit' = 'view') => {
+    const need = level === 'edit' ? 2 : 1;
+    return (Array.isArray(modules) ? modules : [modules]).some(m => levelRank(session?.permissions?.[m]) >= need);
+  }, [session]);
   const [users, setUsers] = useState<AppUser[]>([]);
   const [refreshKey, setRefreshKey] = useState(0);
   const [toasts, setToasts] = useState<ToastInfo[]>([]);
@@ -246,8 +253,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     memberFilterStatus, setMemberFilterStatus, selectedMemberIdForPayment, setSelectedMemberIdForPayment,
     isDarkMode, toggleDarkMode, language, setLanguage, toggleLanguage, t, formatCurrency, toBanglaDigits, formatDate, formatMonth,
     tv, bnName, settings, orgName, masterData, openProfile, profileUserId,
-    session, sessionChecked, canUpload: !!session?.canUpload, isAdmin: !!session?.isAdmin, signIn, signOut,
-  }), [session, sessionChecked, signIn, signOut, activeTab, selectedMonth, currentUser, setCurrentUser, users, refreshKey, triggerRefresh, showToast, openRecordModal,
+    session, sessionChecked, canUpload: !!session?.canUpload, isAdmin: !!session?.isAdmin, can, signIn, signOut,
+  }), [session, sessionChecked, can, signIn, signOut, activeTab, selectedMonth, currentUser, setCurrentUser, users, refreshKey, triggerRefresh, showToast, openRecordModal,
     entryCenterInitialTab, notificationsWithRead, unreadNotificationCount, markNotificationRead, markAllNotificationsRead,
     memberFilterStatus, selectedMemberIdForPayment, isDarkMode, toggleDarkMode, language, setLanguage, toggleLanguage, t,
     formatCurrency, toBanglaDigits, formatDate, formatMonth, tv, bnName, settings, orgName, masterData, openProfile, profileUserId]);

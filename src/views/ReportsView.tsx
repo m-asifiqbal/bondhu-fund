@@ -128,6 +128,7 @@ export const ReportsView: React.FC = () => {
 
   const ledgerOptions = useMemo<SelectOption[]>(() => [
     { value: 'collection', label: t('reports.collections_only', 'Collections only') },
+    { value: 'fine', label: t('reports.fines_only', 'Fines only') },
     { value: 'expense', label: t('reports.expenses_only', 'Expenses only') },
     { value: 'investment', label: t('reports.investments_only', 'Investments only') },
     { value: 'return', label: t('reports.returns_only', 'Investment profit / loss only') },

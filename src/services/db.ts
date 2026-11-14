@@ -10,7 +10,7 @@ import type {
   Member, CollectionRecord, Investment, Expense, AppUser, MasterCategory, BackupRecord,
   OverviewMetrics, AppSettings, AppNotification, OverviewData, MemberStats, CollectionStats,
   LedgerRow, AuditEntry, InvestmentReturn, ReturnsSummary, SettlementPreview, MemberSettlement, SnapshotFile, AppInfo, MemberStatement, UserProfile, ImportOptions, ImportPreview, ImportResult, SessionInfo, HealthReport,
-  Loan, LoanDetail, LoanSummary, LoanPreview, LoanInput, LoanRepaymentQuote,
+  InvestmentReview, ReviewDecision, FineRegister, FundBooks, UserAccess, LicenseView, LicenseRecord, LicensePayment, LicenseUser, LicenseAdminState, GoogleStatus, SyncResult, RemoteCheck, DriveBackupItem, Loan, LoanDetail, LoanSummary, LoanPreview, LoanInput, LoanRepaymentQuote, GuarantorCheck, LoanApplication, LoanApplicationDetail,
 } from '../types';
 
 type Result<T> = { ok: true; data: T } | { ok: false; error: string };
@@ -41,6 +41,12 @@ interface ElectronAPI {
   exportStatements: (memberId: number | null, format: 'pdf' | 'xlsx', lang?: string) => Promise<Result<{ canceled: boolean; filePath?: string; count?: number }>>;
   exportTable: (doc: unknown, format: 'pdf' | 'xlsx', fileName: string) => Promise<Result<{ canceled: boolean; filePath?: string }>>;
   exportVoucher: (v: unknown) => Promise<Result<{ canceled: boolean; filePath?: string }>>;
+  googleCall: (method: string, args: unknown[]) => Promise<Result<any>>;
+  licenseCall: (method: string, args: unknown[]) => Promise<Result<any>>;
+  onLicenseChanged: (cb: () => void) => () => void;
+  exportConsentPaper: (v: unknown) => Promise<Result<{ canceled: boolean; filePath?: string }>>;
+  uploadLoanConsent: (kind: 'application' | 'loan', id: number) => Promise<Result<{ canceled: boolean; name?: string }>>;
+  openLoanConsent: (kind: 'application' | 'loan', id: number) => Promise<Result<boolean>>;
 }
 
 declare global {
@@ -97,6 +103,14 @@ export const getInvestments = (sortBy = 'newest', status = 'All', startDate?: st
 export const addInvestment = (d: Partial<Investment>) => call<number>('addInvestment', d);
 export const updateInvestment = (id: number, d: Partial<Investment>) => call<void>('updateInvestment', id, d);
 export const updateInvestmentValuation = (id: number, value: number) => call<void>('updateInvestmentValuation', id, value);
+/** The Fines page: every late fee and loan penalty, the totals, who is late without a fine, who is overdue, and where the money sits. */
+export const getFineRegister = (f: { start_date?: string; end_date?: string; member_id?: number | string; source?: string; search?: string; sort_by?: string } = {}) => call<FineRegister>('getFineRegister', f);
+/** The books-balance proof: fund balance = what members are owed + the fund's own reserve. */
+export const getFundBooks = () => call<FundBooks>('getFundBooks');
+/** The history of committee reviews of one investment (newest first). */
+export const getInvestmentReviews = (id: number) => call<InvestmentReview[]>('getInvestmentReviews', id);
+/** After a committee meeting: record the decision and the notes; the review stops showing as due and the next one is scheduled. */
+export const completeInvestmentReview = (d: { investment_id: number; meeting_date: string; decision: ReviewDecision; notes?: string; attendees?: string; new_value?: number; next_review_date?: string }) => call<number>('completeInvestmentReview', d);
 export const deleteInvestment = (id: number) => call<void>('deleteInvestment', id);
 
 // Expenses -------------------------------------------------------------------
@@ -110,7 +124,12 @@ export const deleteExpense = (id: number) => call<void>('deleteExpense', id);
 // Users & master data ----------------------------------------------------------
 export const getUsers = () => call<AppUser[]>('getUsers');
 export const getUserProfile = (id: number) => call<UserProfile>('getUserProfile', id);
-export const addUser = (u: Partial<AppUser>) => call<number>('addUser', u);
+export const addUser = (u: Omit<Partial<AppUser>, 'permissions'> & { permissions?: Partial<Record<ModuleKey, AccessLevel>> }) => call<number>('addUser', u);
+/** Default, custom and effective module access of one user. */
+export const getUserPermissions = (id: number) => call<UserAccess>('getUserPermissions', id);
+export const getRoleDefaults = () => call<Record<string, Record<ModuleKey, AccessLevel>>>('getRoleDefaults');
+/** iqbal_labs only. null = back to the role default. */
+export const setUserPermissions = (id: number, perms: Partial<Record<ModuleKey, AccessLevel>> | null) => call<void>('setUserPermissions', id, perms);
 export const updateUser = (id: number, u: Partial<AppUser>) => call<void>('updateUser', id, u);
 export const deleteUser = (id: number) => call<void>('deleteUser', id);
 export const getMasterData = (type?: MasterCategory['type'], activeOnly = false) => call<MasterCategory[]>('getMasterData', type, activeOnly);
@@ -231,7 +250,13 @@ export const exportMembersToExcel = () => unwrap(bridge().exportMembersXlsx());
 export const exportStatements = (memberId: number | null, format: 'pdf' | 'xlsx', lang?: string) => unwrap(bridge().exportStatements(memberId, format, lang));
 /** Styled PDF / Excel of any list or report (see utils/exportDoc.ts). */
 export const exportTable = (doc: unknown, format: 'pdf' | 'xlsx', fileName: string) => unwrap(bridge().exportTable(doc, format, fileName));
+import type { ModuleKey, AccessLevel } from '../utils/access';
 export const exportVoucher = (v: unknown) => unwrap(bridge().exportVoucher(v));
+/** Loan consent & guarantee paper as a PDF (Save dialog, then opens it). */
+export const exportConsentPaper = (v: unknown) => unwrap(bridge().exportConsentPaper(v));
+/** Pick the signed paper (PDF/JPG/PNG) and attach it to a loan draft ('application') or a loan. */
+export const uploadLoanConsent = (kind: 'application' | 'loan', id: number) => unwrap(bridge().uploadLoanConsent(kind, id));
+export const openLoanConsent = (kind: 'application' | 'loan', id: number) => unwrap(bridge().openLoanConsent(kind, id));
 // Sign-in & health --------------------------------------------------------------------------
 export const login = (username: string, password: string) => call<SessionInfo>('login', username, password);
 export const logout = () => call<void>('logout');
@@ -262,7 +287,17 @@ export const getLoanSummary = () => call<LoanSummary>('getLoanSummary');
 /** Live schedule + totals + other terms + policy warnings. Never rejects for bad input: check `valid`. */
 export const previewLoan = (d: Partial<LoanInput>) => call<LoanPreview>('previewLoan', d);
 export const addLoan = (d: LoanInput) => call<number>('addLoan', d);
-export const updateLoan = (id: number, d: { purpose?: string; guarantor?: string; notes?: string; reference?: string }) => call<void>('updateLoan', id, d);
+// Loan drafts: prepared and printed, but no money moves until the signed consent paper is uploaded
+export const getLoanApplications = (search = '', memberId?: number, startDate?: string, endDate?: string) => call<LoanApplication[]>('getLoanApplications', search, memberId, startDate, endDate);
+export const getLoanApplication = (id: number) => call<LoanApplicationDetail>('getLoanApplication', id);
+export const createLoanApplication = (d: LoanInput) => call<number>('createLoanApplication', d);
+export const updateLoanApplication = (id: number, d: LoanInput) => call<{ consentRemoved: boolean }>('updateLoanApplication', id, d);
+export const deleteLoanApplication = (id: number) => call<void>('deleteLoanApplication', id);
+/** Disburses the draft (needs the signed paper unless the policy switched that off). Returns the new loan id. */
+export const activateLoanApplication = (d: { id: number; disbursed_date: string }) => call<number>('activateLoanApplication', d);
+/** Same rules as saving: tells the form whether the guarantor details are complete and valid. */
+export const previewGuarantor = (d: Partial<LoanInput> & { member_id?: number }) => call<GuarantorCheck>('previewGuarantor', d);
+export const updateLoan = (id: number, d: { purpose?: string; notes?: string; reference?: string }) => call<void>('updateLoan', id, d);
 export const deleteLoan = (id: number) => call<void>('deleteLoan', id);
 export const previewLoanRepayment = (loanId: number, paidDate?: string, amount?: number | string, kind?: 'Installment' | 'Closure', interest?: number | string) =>
   call<LoanRepaymentQuote>('previewLoanRepayment', loanId, paidDate, amount, kind, interest);
@@ -272,3 +307,49 @@ export const deleteLoanRepayment = (id: number) => call<void>('deleteLoanRepayme
 /** Admin only. */
 export const writeOffLoan = (d: { loan_id: number; date: string; reason: string }) => call<void>('writeOffLoan', d);
 export const cancelLoanWriteOff = (loanId: number) => call<void>('cancelLoanWriteOff', loanId);
+
+// Software licence ----------------------------------------------------------------------------
+const lic = <T = any>(method: string, ...args: unknown[]) => unwrap<T>(bridge().licenseCall(method, args));
+/** Works before sign-in: the lock screen and the expiry notice use it. */
+export const licenseStatus = () => lic<LicenseView>('status');
+export const licenseActivate = (pin: string, username?: string) => lic<LicenseView>('activate', pin, username);
+export const licenseCheck = () => lic<LicenseView>('check');
+/** A user signing in for the first time under a customer licence is counted against its user limit (online, no PIN). */
+export const licenseRegisterUser = (username: string) => lic<LicenseView>('register', username);
+export const onLicenseChanged = (cb: () => void): (() => void) => (window.electronAPI?.onLicenseChanged ? window.electronAPI.onLicenseChanged(cb) : () => undefined);
+/** iqbal_labs only: the License Control panel. */
+export const licenseAdminState = () => lic<LicenseAdminState>('adminState');
+export const licenseAdminSignIn = (email: string, password: string) => lic<string>('adminSignIn', email, password);
+export const licenseAdminSignOut = () => lic<boolean>('adminSignOut');
+export const licenseAdminList = () => lic<LicenseRecord[]>('adminList');
+export const licenseAdminPayments = (id?: string) => lic<LicensePayment[]>('adminPayments', id);
+export const licenseAdminCreate = (d: { customer: string; username?: string; contact?: string; notes?: string; monthly_fee?: number; message?: string; months?: number; days?: number; max_devices?: number; max_users?: number | null; restrict_users?: boolean; users?: string[] }) => lic<LicenseRecord>('adminCreate', d);
+export const licenseAdminUpdate = (id: string, patch: Partial<Pick<LicenseRecord, 'customer' | 'username' | 'contact' | 'notes' | 'monthly_fee' | 'message' | 'status' | 'max_devices' | 'max_users' | 'restrict_users'>>) => lic<LicenseRecord>('adminUpdate', id, patch);
+export const licenseAdminResetDevice = (id: string) => lic<LicenseRecord>('adminResetDevice', id);
+export const licenseAdminExtend = (id: string, o: { months: number; days?: number; amount: number; method?: string; note?: string; paidOn?: string }) => lic<LicenseRecord>('adminExtend', id, o);
+export const licenseAdminRemove = (id: string) => lic<boolean>('adminRemove', id);
+export const licenseAdminRemoveDevice = (id: string) => lic<boolean>('adminRemoveDevice', id);
+export const licenseAdminRemoveUser = (id: string) => lic<boolean>('adminRemoveUser', id);
+/** Put a username on a customer's allowlist. */
+export const licenseAdminAddUser = (licenseId: string, username: string, note?: string) => lic<LicenseUser>('adminAddUser', licenseId, username, note);
+
+// Google account sync & Drive backup -----------------------------------------------------------
+const google = <T = any>(method: string, ...args: unknown[]) => unwrap<T>(bridge().googleCall(method, args));
+export const googleStatus = () => google<GoogleStatus>('status');
+/** Super User: paste the Desktop-app OAuth client of the Google Cloud project. */
+export const googleSaveConfig = (clientId: string, clientSecret: string) => google<boolean>('saveConfig', { clientId, clientSecret });
+export const googleClearConfig = () => google<boolean>('clearConfig');
+/** Opens the Google sign-in page in the browser and waits for it to finish. */
+export const googleConnect = () => google<{ email: string; name: string; picture: string }>('connect');
+export const googleDisconnect = () => google<boolean>('disconnect');
+/** Looks at Google Drive (changes nothing): is there newer data? */
+export const googleCheck = () => google<RemoteCheck>('check');
+/** Two-way sync. resolve = which side to keep when both changed; pin = the sync PIN of an encrypted cloud copy. */
+export const googleSync = (opts?: { resolve?: 'local' | 'remote'; pin?: string }) => google<SyncResult>('sync', opts || {});
+export const googleSetAuto = (on: boolean) => google<boolean>('setAuto', on);
+export const googleSetEncryption = (enabled: boolean, pin?: string) => google<boolean>('setEncryption', enabled, pin);
+export const driveBackups = () => google<DriveBackupItem[]>('driveList');
+export const driveBackupNow = (pin: string) => google<{ name: string; size: number }>('driveBackup', pin);
+/** Encrypted backups answer with needsPin: finish with restoreWithPin(pin). */
+export const driveRestore = (id: string) => google<{ canceled?: boolean; needsPin?: boolean; fileName?: string; masterRecovery?: boolean; safetySnapshot?: string }>('driveRestore', id);
+export const driveDelete = (id: string) => google<boolean>('driveDelete', id);

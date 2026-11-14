@@ -327,3 +327,92 @@ export function buildVoucherHtml(v: VoucherData, op: Operator): string {
     <style>.vt td{padding:7px 9px}.vt td.k{width:38%;color:#475569;font-weight:700;background:#f8fafc}</style>`;
   return pageHtml(inner, false, 'Payment voucher');
 }
+
+// ------------------------------------------------------------------ Loan consent & guarantee paper (PDF)
+export interface ConsentPaperData {
+  orgName: string; lang?: Lang; generatedOn: string; currency: string;
+  /** 'Application no.' for a draft, 'Loan no.' for a disbursed loan */
+  ref_no: string; ref_is_draft: boolean; loan_date: string; principal: number; term_months: number; method: string; method_label: string; annual_rate: number;
+  installment: number; total_interest: number; total_payable: number; first_due_date: string; purpose?: string; paid_via?: string; late_fee?: number;
+  schedule: Array<{ no: number; due_date: string; principal: number; interest: number; total: number }>;
+  borrower: { name: string; name_bn?: string | null; code?: string; nid?: string; phone?: string };
+  guarantor: { type: 'member' | 'outsider' | 'legacy'; name: string; name_bn?: string | null; code?: string; address?: string; nid?: string; phone?: string; relation?: string };
+}
+
+/**
+ * The standard consent paper for a personal loan: loan terms, full repayment schedule, guarantor details, the conditions the borrower and guarantor accept,
+ * and signature boxes for borrower, guarantor, a witness and the fund. Printed, signed, scanned and uploaded before the loan is disbursed.
+ */
+export function buildConsentPaperHtml(v: ConsentPaperData, op: Operator): string {
+  const bn = v.lang === 'bn';
+  const T = (en: string, b: string) => (bn ? b : en);
+  const money = (n: number) => { const x = Math.round((Number(n) || 0) * 100) / 100; const whole = Math.abs(x - Math.round(x)) < 0.005; return `${esc(v.currency)} ${x.toLocaleString('en-US', { minimumFractionDigits: whole ? 0 : 2, maximumFractionDigits: 2 })}`; };
+  const row = (k: string, val: unknown) => `<tr><td class="k">${esc(k)}</td><td class="${isBlank(val) ? 'na' : ''}">${isBlank(val) ? '<span class="blank" style="width:260px"></span>' : esc(val)}</td></tr>`;
+  const g = v.guarantor, b = v.borrower;
+  const gName = [g.name, g.name_bn].filter(x => !isBlank(x)).join(' / ');
+  const bName = [b.name, b.name_bn].filter(x => !isBlank(x)).join(' / ');
+  const rate = v.method === 'free' ? T('interest-free (no interest)', 'সুদমুক্ত (কোনো সুদ নেই)') : `${v.annual_rate}% ${T('a year', 'বার্ষিক')}, ${v.method_label}`;
+  const refLabel = v.ref_is_draft ? T('Application no.', 'আবেদন নং') : T('Loan no.', 'ঋণ নং');
+  const sched = v.schedule.map(r => `<tr><td class="c">${r.no}</td><td>${esc(fmtDate(r.due_date))}</td><td class="n">${money(r.principal)}</td><td class="n">${money(r.interest)}</td><td class="n"><b>${money(r.total)}</b></td></tr>`).join('');
+  const late = Number(v.late_fee) > 0 ? T(`A late payment penalty of ${money(Number(v.late_fee))} may be charged for each installment paid after its due date.`, `নির্ধারিত তারিখের পরে জমা দেওয়া প্রতিটি কিস্তির জন্য ${money(Number(v.late_fee))} জরিমানা ধার্য হতে পারে।`)
+    : T('Any late payment penalty will be as set by the Fund and told to the borrower.', 'দেরিতে পরিশোধের জরিমানা (যদি থাকে) ফান্ডের নিয়ম অনুযায়ী হবে এবং ঋণগ্রহীতাকে জানানো হবে।');
+  const clauses = bn ? [
+    `ফান্ড উপরে উল্লিখিত শর্তে ঋণগ্রহীতাকে ঋণ দেবে। এই কাগজে ঋণগ্রহীতা ও জামিনদারের স্বাক্ষর ফান্ডের কাছে জমা না পড়া পর্যন্ত কোনো টাকা বিতরণ করা হবে না।`,
+    `ঋণগ্রহীতা প্রতিটি কিস্তি উপরের সূচি অনুযায়ী নির্ধারিত তারিখে বা তার আগে নগদ, ব্যাংক বা মোবাইল মাধ্যমে পরিশোধ করবেন; প্রতিটি জমার জন্য রসিদ দেওয়া হবে।`,
+    `সুদের হিসাব উপরের পদ্ধতি অনুযায়ী হবে; এখানে উল্লিখিত ছাড়া কোনো লুকানো চার্জ নেই। ${late}`,
+    `ঋণগ্রহীতা চাইলে যেকোনো সময় আগেই ঋণ শোধ করতে পারবেন; তখন বাকি আসল এবং সেই তারিখ পর্যন্ত সুদ দিতে হবে।`,
+    `ঋণগ্রহীতা কিস্তি পরিশোধে ব্যর্থ হলে ফান্ড বকেয়া টাকা ঋণগ্রহীতার ফান্ডে থাকা সঞ্চয়/পাওনা থেকে সমন্বয় করতে পারবে এবং না কুলালে চাহিবামাত্র বাকি অর্থ জামিনদার পরিশোধ করতে বাধ্য থাকবেন।`,
+    `আদায় অসম্ভব হলে ফান্ড হিসাবে ঋণটি অবলোপন (write-off) করতে পারে; এতে ঋণগ্রহীতা ও জামিনদারের দায় বাতিল হয় না।`,
+    `ঋণগ্রহীতা ও জামিনদার নিশ্চিত করছেন যে এই কাগজে দেওয়া সব তথ্য সত্য এবং তারা স্বেচ্ছায়, সম্পূর্ণ বুঝে স্বাক্ষর করছেন।`,
+  ] : [
+    `The Fund lends the amount above to the borrower on the terms stated here. No money is disbursed until this paper, signed by the borrower and the guarantor, has been received by the Fund.`,
+    `The borrower will pay each installment on or before its due date in the schedule above (cash, bank or mobile payment). A receipt is issued for every payment.`,
+    `Interest is calculated by the method stated above; there are no hidden charges beyond those written here. ${late}`,
+    `The borrower may repay the loan early at any time by paying the outstanding principal plus interest up to that date.`,
+    `If the borrower fails to pay installments, the Fund may adjust the overdue amount against the borrower's savings and dues held by the Fund, and the guarantor agrees to pay any unpaid balance to the Fund on demand.`,
+    `If recovery is not possible the Fund may write the loan off in its books; this does not cancel the liability of the borrower or the guarantor.`,
+    `The borrower and the guarantor confirm that everything written on this paper is true and that they sign willingly and after understanding it.`,
+  ];
+  const sig = (cap: string, name: string, sub: string) => `<div class="sig2"><div class="line"></div><div class="cap">${esc(cap)}</div><div class="nm">${name ? `<b>${esc(name)}</b>` : '&nbsp;'}</div><div class="rl">${esc(sub)}</div></div>`;
+  const dateLine = `${T('Date', 'তারিখ')}: ____ / ____ / ______`;
+  const inner = `<div class="page" style="max-width:176mm;margin:0 auto">
+    <div class="band"><div><div class="org">${esc(v.orgName)}</div><div class="doc">${T('Loan consent &amp; guarantee paper', 'ঋণ গ্রহণ ও জামিন সম্মতিপত্র')}</div></div>
+      <div class="gen">${esc(refLabel)} <b>${esc(v.ref_no)}</b><br/>${esc(L(v.lang, 'generated'))}: ${esc(fmtDate(v.generatedOn))}</div></div>
+    <h3 class="st">${T('1. Loan details', '১. ঋণের বিবরণ')}</h3>
+    <table class="vt">
+      ${row(T('Borrower', 'ঋণগ্রহীতা'), `${bName}${b.code ? ` (${b.code})` : ''}`)}${row(T('Borrower NID', 'ঋণগ্রহীতার এনআইডি'), b.nid)}${row(T('Borrower phone', 'ঋণগ্রহীতার ফোন'), b.phone)}
+      ${row(T('Loan amount', 'ঋণের পরিমাণ'), money(v.principal))}${row(T('Purpose', 'উদ্দেশ্য'), v.purpose)}
+      ${row(T('Interest', 'সুদ'), rate)}${row(T('Repayment period', 'পরিশোধের মেয়াদ'), `${v.term_months} ${T('months', 'মাস')}`)}
+      ${row(T('Monthly installment', 'মাসিক কিস্তি'), money(v.installment))}${row(T('First installment due', 'প্রথম কিস্তির তারিখ'), fmtDate(v.first_due_date))}
+      ${row(T('Total interest', 'মোট সুদ'), money(v.total_interest))}${row(T('Total to repay', 'মোট পরিশোধযোগ্য'), money(v.total_payable))}
+      ${row(T('Money paid out by', 'টাকা দেওয়া হবে'), v.paid_via)}
+    </table>
+    <h3 class="st">${T('2. Repayment schedule', '২. পরিশোধের সূচি')}</h3>
+    <table><thead><tr><th class="c">#</th><th>${T('Due date', 'তারিখ')}</th><th class="n">${T('Principal', 'আসল')}</th><th class="n">${T('Interest', 'সুদ')}</th><th class="n">${T('Installment', 'কিস্তি')}</th></tr></thead>
+      <tbody>${sched}</tbody><tfoot><tr><td colspan="2">${T('Total', 'মোট')}</td><td class="n">${money(v.principal)}</td><td class="n">${money(v.total_interest)}</td><td class="n">${money(v.total_payable)}</td></tr></tfoot></table>
+    <div style="page-break-before:always"></div>
+    <h3 class="st">${T('3. Guarantor details', '৩. জামিনদারের বিবরণ')}</h3>
+    <table class="vt">
+      ${row(T('Guarantor type', 'জামিনদারের ধরন'), g.type === 'member' ? T('Fund member', 'ফান্ডের সদস্য') : g.type === 'outsider' ? T('Outside person (not a member)', 'বাইরের ব্যক্তি (সদস্য নন)') : '')}
+      ${row(T('Full name', 'পূর্ণ নাম'), gName)}${g.type === 'member' ? row(T('Member code', 'সদস্য কোড'), g.code) : ''}
+      ${row(T('Full address', 'পূর্ণ ঠিকানা'), g.address)}${row(T('National ID (NID)', 'জাতীয় পরিচয়পত্র নং'), g.nid)}
+      ${row(T('Phone', 'ফোন'), g.phone)}${row(T('Relationship to borrower', 'ঋণগ্রহীতার সাথে সম্পর্ক'), g.relation)}
+    </table>
+    <h3 class="st">${T('4. Conditions accepted by the borrower and the guarantor', '৪. ঋণগ্রহীতা ও জামিনদারের গৃহীত শর্তাবলী')}</h3>
+    <ol class="cl">${clauses.map(c => `<li>${c}</li>`).join('')}</ol>
+    <h3 class="st">${T('5. Consent', '৫. সম্মতি')}</h3>
+    <p style="line-height:1.7;margin:4px 2px 0">${bn
+      ? `আমি, <b>${esc(b.name)}</b>, উপরের শর্তে ${money(v.principal)} ঋণ গ্রহণে সম্মত এবং নির্ধারিত সূচি অনুযায়ী পরিশোধ করব। আমি, <b>${esc(g.name || '__________')}</b>${g.nid ? `, জাতীয় পরিচয়পত্র নং <b>${esc(g.nid)}</b>` : ''}, এই ঋণের জামিনদার হলাম এবং উপরের শর্ত মেনে নিলাম।`
+      : `I, <b>${esc(b.name)}</b>, agree to take the loan of ${money(v.principal)} on the conditions above and to repay it as scheduled. I, <b>${esc(g.name || '__________')}</b>${g.nid ? `, National ID <b>${esc(g.nid)}</b>` : ''}, stand guarantor for this loan and accept the conditions above.`}</p>
+    <div class="sign4">
+      ${sig(T('Borrower signature', 'ঋণগ্রহীতার স্বাক্ষর'), b.name, `${b.code || ''}   ${dateLine}`)}
+      ${sig(T('Guarantor signature', 'জামিনদারের স্বাক্ষর'), g.name, `${T('NID', 'এনআইডি')}: ${g.nid || '________________'}   ${dateLine}`)}
+      ${sig(T('Witness (name, NID, signature)', 'সাক্ষী (নাম, এনআইডি, স্বাক্ষর)'), '', dateLine)}
+      ${sig(T('Authorized by (Fund)', 'অনুমোদনকারী (ফান্ড)'), op.name, op.role || '')}
+    </div></div>
+    <style>.vt td{padding:5px 9px}.vt td.k{width:36%;color:#475569;font-weight:700;background:#f8fafc}.vt{page-break-inside:avoid}
+      ol.cl{margin:6px 2px 0 18px;padding:0;line-height:1.6}ol.cl li{margin-bottom:3px;padding-left:2px}
+      .sign4{display:grid;grid-template-columns:1fr 1fr;gap:20px 26px;margin-top:20mm;page-break-inside:avoid}.sig2 .line{border-top:1.3px solid #111827;margin-bottom:6px;height:0}
+      .sig2 .cap{font-weight:800;font-size:10.5px}.sig2 .nm{margin-top:4px}.sig2 .rl{color:#4b5563;font-size:9px;margin-top:2px}</style>`;
+  return pageHtml(inner, false, 'Loan consent paper');
+}

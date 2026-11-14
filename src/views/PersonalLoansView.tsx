@@ -1,11 +1,11 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import {
   Plus, Search, RotateCcw, Landmark, Wallet, Percent, AlertTriangle, Users, CalendarClock, ShieldCheck, Ban, CheckCircle2,
-  SlidersHorizontal, HandCoins, Eye, Banknote,
+  SlidersHorizontal, HandCoins, Eye, Banknote, FileSignature, FileCheck2, Clock,
 } from 'lucide-react';
 import { useApp } from '../context/AppContext';
-import { getLoans, getLoanSummary, getAllMembersLite, exportTable } from '../services/db';
-import type { Loan, LoanSummary } from '../types';
+import { getLoans, getLoanSummary, getLoanApplications, getAllMembersLite, exportTable } from '../services/db';
+import type { Loan, LoanSummary, LoanApplication, LoanApplicationDetail } from '../types';
 import { SearchableSelect, SelectOption } from '../components/common/SearchableSelect';
 import { DatePicker } from '../components/common/DatePicker';
 import { DownloadMenu } from '../components/common/DownloadMenu';
@@ -14,13 +14,14 @@ import { serial } from '../utils/i18n';
 import { todayISO } from '../utils/date';
 import { LoanFormModal } from '../components/loans/LoanFormModal';
 import { LoanDetailModal } from '../components/loans/LoanDetailModal';
+import { LoanApplicationModal } from '../components/loans/LoanApplicationModal';
 import { LoanRepaymentModal } from '../components/loans/LoanRepaymentModal';
 import { LoanPolicyModal } from '../components/loans/LoanPolicyModal';
 import { LoanStatusBadge, ProgressBar, useMoney, useNum, useRateText, useMethodText } from '../components/loans/loanUi';
 
 const EMPTY: LoanSummary = {
   loans: 0, running: 0, overdueLoans: 0, closed: 0, writtenOff: 0, borrowers: 0, totalLent: 0, outstanding: 0, principalRepaid: 0, interestEarned: 0, penaltyEarned: 0,
-  interestExpected: 0, totalCollected: 0, overdueAmount: 0, overduePrincipal: 0, dueNext30: 0, writtenOffAmount: 0, onTrackPct: 100, cashInHand: 0, fundBalance: 0, lentPctOfFund: 0, avgRate: 0,
+  drafts: 0, draftsAmount: 0, interestExpected: 0, totalCollected: 0, overdueAmount: 0, overduePrincipal: 0, dueNext30: 0, writtenOffAmount: 0, onTrackPct: 100, cashInHand: 0, fundBalance: 0, lentPctOfFund: 0, avgRate: 0,
 };
 
 function useDebounced<T>(value: T, ms = 250): T {
@@ -54,11 +55,14 @@ export const PersonalLoansView: React.FC = () => {
   const [formOpen, setFormOpen] = useState(false);
   const [policyOpen, setPolicyOpen] = useState(false);
   const [detailId, setDetailId] = useState<number | null>(null);
+  const [drafts, setDrafts] = useState<LoanApplication[]>([]);
+  const [draftId, setDraftId] = useState<number | null>(null);
+  const [editApp, setEditApp] = useState<LoanApplicationDetail | null>(null);
   const [payLoan, setPayLoan] = useState<Loan | null>(null);
 
   // arriving from the "loans overdue" notification
   useEffect(() => {
-    if (memberFilterStatus === 'Overdue') { setStatusFilter('Overdue'); setMemberFilterStatus('All'); }
+    if (memberFilterStatus === 'Overdue' || memberFilterStatus === 'Draft') { setStatusFilter(memberFilterStatus); setMemberFilterStatus('All'); }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -67,8 +71,9 @@ export const PersonalLoansView: React.FC = () => {
   useEffect(() => {
     let alive = true;
     setLoading(true);
-    Promise.all([getLoans(sortBy, statusFilter, startDate || undefined, endDate || undefined, search, memberFilter === '' ? undefined : Number(memberFilter)), getLoanSummary()])
-      .then(([l, s]) => { if (alive) { setLoans(l); setSum(s); } })
+    const mid = memberFilter === '' ? undefined : Number(memberFilter);
+    Promise.all([getLoans(sortBy, statusFilter, startDate || undefined, endDate || undefined, search, mid), getLoanSummary(), getLoanApplications(search, mid, startDate || undefined, endDate || undefined)])
+      .then(([l, s, dr]) => { if (alive) { setLoans(l); setSum(s); setDrafts(dr); } })
       .catch((e: any) => alive && showToast(e.message, 'error'))
       .finally(() => alive && setLoading(false));
     return () => { alive = false; };
@@ -76,11 +81,13 @@ export const PersonalLoansView: React.FC = () => {
   }, [sortBy, statusFilter, startDate, endDate, search, memberFilter, refreshKey]);
 
   const hasFilters = !!(searchInput || statusFilter !== 'All' || memberFilter !== '' || startDate || endDate || sortBy !== 'newest');
-  const isFreshEmpty = !loading && sum.loans === 0;
+  const isFreshEmpty = !loading && sum.loans === 0 && sum.drafts === 0;
+  const shownDrafts = statusFilter === 'All' || statusFilter === 'Draft' ? drafts : [];
   const resetFilters = () => { setSearchInput(''); setStatusFilter('All'); setMemberFilter(''); setStartDate(''); setEndDate(''); setSortBy('newest'); };
 
   const statusOptions = useMemo<SelectOption[]>(() => [
     { value: 'All', label: t('finance.all_statuses', 'All statuses') },
+    { value: 'Draft', label: t('loan.s_draft', 'Draft') },
     { value: 'Open', label: t('loan.f_open', 'Open (running + overdue)') },
     { value: 'Overdue', label: t('loan.s_overdue', 'Overdue') },
     { value: 'Running', label: t('loan.s_running', 'Running') },
@@ -156,12 +163,12 @@ export const PersonalLoansView: React.FC = () => {
             { header: t('loan.loan_no', 'Loan') }, { header: t('common.member', 'Member') }, { header: t('loan.date', 'Loan date'), kind: 'date' }, { header: t('loan.amount', 'Loan amount'), kind: 'money' },
             { header: t('loan.period_short', 'Period') }, { header: t('loan.rate_short', 'Rate') }, { header: t('loan.monthly', 'Monthly installment'), kind: 'money' },
             { header: t('loan.repaid_so_far', 'Repaid so far'), kind: 'money' }, { header: t('loan.interest_paid', 'Interest paid'), kind: 'money' }, { header: t('loan.outstanding', 'Principal owed'), kind: 'money' },
-            { header: t('loan.overdue_short', 'Overdue'), kind: 'money' }, { header: t('loan.next_due', 'Next installment'), kind: 'date' }, { header: t('common.status', 'Status') },
+            { header: t('loan.overdue_short', 'Overdue'), kind: 'money' }, { header: t('loan.next_due', 'Next installment'), kind: 'date' }, { header: t('common.status', 'Status') }, { header: t('loan.guarantor', 'Guarantor') },
           ],
           rows: loans.map(l => [
             cell(l.loan_no), cell(`${bnName(l.member_name, l.member_name_bn)} (${l.member_code})`), cell(l.disbursed_date, formatDate(l.disbursed_date)), m(l.principal),
             cell(`${l.term_months} ${t('loan.months_short', 'months')}`), cell(l.method === 'free' ? mt.label('free') : `${l.annual_rate}% ${mt.label(l.method)}`), m(l.installment),
-            m(l.total_paid), m(l.paid_interest), m(l.outstanding_principal), m(l.overdue_amount), cell(l.next_due_date, l.next_due_date ? formatDate(l.next_due_date) : ''), cell(status(l)),
+            m(l.total_paid), m(l.paid_interest), m(l.outstanding_principal), m(l.overdue_amount), cell(l.next_due_date, l.next_due_date ? formatDate(l.next_due_date) : ''), cell(status(l)), cell(l.guarantor || ''),
           ]),
         }],
       };
@@ -175,12 +182,13 @@ export const PersonalLoansView: React.FC = () => {
   return (
     <div className="p-6 lg:p-8 space-y-6 max-w-[1680px] mx-auto">
       {/* header */}
-      <div className="flex flex-wrap items-center justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-black text-slate-900 dark:text-white tracking-tight">{t('loan.title', 'Personal loans')}</h1>
+      <section className="card-base px-5 py-4 lg:px-6">
+       <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_auto] gap-x-8 gap-y-3 items-center">
+        <div className="min-w-0">
+          <h1 className="text-2xl font-black text-slate-900 dark:text-white tracking-tight leading-tight">{t('loan.title', 'Personal loans')}</h1>
           <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">{t('loan.subtitle', 'Money the fund lends to its members, repaid month by month. Installments, interest and balances are calculated automatically.')}</p>
         </div>
-        <div className="flex flex-wrap items-center gap-3">
+        <div className="flex flex-wrap items-center gap-2 lg:justify-end">
           {isAdmin && (
             <button type="button" onClick={() => setPolicyOpen(true)} className="btn btn-outline">
               <SlidersHorizontal size={14} className="text-slate-500 dark:text-slate-400" /><span>{t('loan.policy', 'Loan policy')}</span>
@@ -193,7 +201,21 @@ export const PersonalLoansView: React.FC = () => {
             </button>
           )}
         </div>
-      </div>
+       </div>
+      </section>
+
+      {/* drafts waiting for the signed paper */}
+      {sum.drafts > 0 && statusFilter !== 'Draft' && (
+        <div className="bg-amber-50/80 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-900/80 rounded-2xl p-4 flex flex-wrap items-center justify-between gap-3">
+          <div className="flex items-center gap-3 min-w-0">
+            <div className="w-9 h-9 rounded-xl bg-amber-100 dark:bg-amber-900/50 text-amber-700 dark:text-amber-300 flex items-center justify-center shrink-0 border border-amber-300 dark:border-amber-800"><FileSignature size={18} /></div>
+            <p className="text-xs font-bold text-slate-900 dark:text-white">
+              {t('loan.draft_alert', '{n} loan draft(s), {amt} in total, are waiting for the signed consent paper. No money has been disbursed.').replace('{n}', n(sum.drafts)).replace('{amt}', formatCurrency(sum.draftsAmount))}
+            </p>
+          </div>
+          <button type="button" onClick={() => setStatusFilter('Draft')} className="btn btn-outline btn-sm">{t('loan.show_drafts', 'Show drafts')}</button>
+        </div>
+      )}
 
       {/* overdue alert */}
       {sum.overdueLoans > 0 && (
@@ -221,7 +243,7 @@ export const PersonalLoansView: React.FC = () => {
       </div>
       <div className="kpi-zoom grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
         {kpi('border-l-sky-500', t('loan.kpi_running', 'Running loans'), <Users size={16} />, 'bg-sky-50 dark:bg-sky-950/60 text-sky-600 dark:text-sky-400',
-          n(sum.running + sum.overdueLoans), 'text-slate-900 dark:text-white', t('loan.kpi_running_sub', '{c} repaid · {w} written off').replace('{c}', n(sum.closed)).replace('{w}', n(sum.writtenOff)))}
+          n(sum.running + sum.overdueLoans), 'text-slate-900 dark:text-white', t('loan.kpi_running_sub', '{c} repaid · {w} written off').replace('{c}', n(sum.closed)).replace('{w}', n(sum.writtenOff)) + (sum.drafts > 0 ? ' · ' + t('loan.kpi_drafts', '{d} draft(s)').replace('{d}', n(sum.drafts)) : ''))}
         {kpi('border-l-purple-500', t('loan.kpi_due30', 'Due in 30 days'), <CalendarClock size={16} />, 'bg-purple-50 dark:bg-purple-950/60 text-purple-600 dark:text-purple-400',
           formatCurrency(sum.dueNext30), 'text-slate-900 dark:text-white', t('loan.kpi_due30_sub', 'installments coming up'))}
         {kpi('border-l-emerald-500', t('loan.kpi_ontrack', 'On-time rate'), <ShieldCheck size={16} />, 'bg-emerald-50 dark:bg-emerald-950/60 text-emerald-600 dark:text-emerald-400',
@@ -258,7 +280,7 @@ export const PersonalLoansView: React.FC = () => {
       <div className="card-base overflow-hidden">
         <div className="p-5 pb-3 flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 dark:border-slate-800">
           <h3 className="text-base font-bold text-slate-900 dark:text-white">{t('loan.history_title', 'Loan history')}</h3>
-          <span className="text-xs text-slate-500 dark:text-slate-400 font-semibold">{n(loans.length)} {t('finance.records', 'records')}</span>
+          <span className="text-xs text-slate-500 dark:text-slate-400 font-semibold">{n(loans.length + shownDrafts.length)} {t('finance.records', 'records')}</span>
         </div>
 
         <div className="tbl-filter p-4 bg-slate-50 dark:bg-[#121f26] border-b border-slate-200 dark:border-slate-800 flex flex-wrap items-center gap-3 text-xs">
@@ -332,16 +354,44 @@ export const PersonalLoansView: React.FC = () => {
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100 dark:divide-slate-800/80 font-medium">
-                {loading && loans.length === 0 ? (
+                {loading && loans.length + shownDrafts.length === 0 ? (
                   <tr><td colSpan={12} className="py-8 text-center text-slate-400">{t('common.loading', 'Loading…')}</td></tr>
-                ) : loans.length === 0 ? (
+                ) : loans.length + shownDrafts.length === 0 ? (
                   <tr><td colSpan={12} className="py-8 text-center text-slate-400">{t('loan.no_match', 'No loans match your filters.')}</td></tr>
-                ) : loans.map((l, i) => {
+                ) : [...shownDrafts.map((a, i) => {
+                  const ready = a.has_consent && a.consent_file_exists;
+                  return (
+                    <tr key={`d${a.id}`} onClick={() => setDraftId(a.id)} className="group bg-amber-50/40 dark:bg-amber-950/10 hover:bg-[#f0f7f3] dark:hover:bg-[#1a2b34] transition-colors cursor-pointer">
+                      <td className="py-3 px-3 text-center text-slate-400 dark:text-slate-500 font-semibold tabular-nums sticky left-0 z-10 bg-amber-50 dark:bg-[#1c2420] group-hover:bg-[#f0f7f3] dark:group-hover:bg-[#1a2b34]" style={{ width: '3.25rem', minWidth: '3.25rem', maxWidth: '3.25rem' }}>{serial(i + 1)}</td>
+                      <td className="py-3 px-3 sticky z-10 sticky-col-edge bg-amber-50 dark:bg-[#1c2420] group-hover:bg-[#f0f7f3] dark:group-hover:bg-[#1a2b34]" style={{ left: '3.25rem', minWidth: '14rem' }}>
+                        <div className="flex items-center gap-3 min-w-0">
+                          <div className="w-8 h-8 rounded-xl bg-gradient-to-br from-amber-500 to-amber-700 text-white text-[11px] font-bold flex items-center justify-center shrink-0">{a.avatar_initials || '?'}</div>
+                          <div className="min-w-0"><span className="font-bold text-slate-900 dark:text-white block truncate">{bnName(a.member_name, a.member_name_bn)}</span><span className="text-[10px] text-slate-400 block">{a.member_code}</span></div>
+                        </div>
+                      </td>
+                      <td className="py-3 px-3"><span className="font-bold text-slate-900 dark:text-white block">{a.app_no}</span>{a.purpose && <span className="text-[10px] text-slate-400 block truncate max-w-[150px]" title={a.purpose}>{a.purpose}</span>}</td>
+                      <td className="py-3 px-3 whitespace-nowrap text-slate-600 dark:text-slate-300">{formatDate(a.disbursed_date)}</td>
+                      <td className="py-3 px-3 text-right font-bold text-slate-900 dark:text-white whitespace-nowrap tabular-nums">{formatCurrency(a.principal)}</td>
+                      <td className="py-3 px-3 whitespace-nowrap"><span className="font-bold block">{n(a.term_months)} {t('loan.months_short', 'months')}</span><span className="text-[10px] text-slate-400 block">{rateText(a.method, a.annual_rate)}</span></td>
+                      <td className="py-3 px-3 text-right whitespace-nowrap tabular-nums font-bold">{formatCurrency(a.installment)}</td>
+                      <td className="py-3 px-3" colSpan={2}>
+                        {ready
+                          ? <span className="inline-flex items-center gap-1.5 text-[11px] font-bold text-emerald-700 dark:text-emerald-400"><FileCheck2 size={13} />{t('loan.row_ready', 'Signed paper uploaded — ready to disburse')}</span>
+                          : <span className="inline-flex items-center gap-1.5 text-[11px] font-bold text-amber-700 dark:text-amber-400"><Clock size={13} />{t('loan.row_waiting', 'Waiting for the signed paper')}{a.age_days > 0 ? ` · ${t('loan.row_days', '{d} days').replace('{d}', n(a.age_days))}` : ''}</span>}
+                      </td>
+                      <td className="py-3 px-3 whitespace-nowrap text-slate-500 dark:text-slate-400">{formatDate(a.first_due_date)}</td>
+                      <td className="py-3 px-3"><span className="inline-block px-2.5 py-0.5 rounded-full text-[11px] font-bold border whitespace-nowrap bg-amber-100 dark:bg-amber-950 text-amber-800 dark:text-amber-300 border-amber-200 dark:border-amber-800">{t('loan.s_draft', 'Draft')}</span></td>
+                      <td className="py-3 px-3 text-right whitespace-nowrap" onClick={e => e.stopPropagation()}>
+                        <div className="flex items-center justify-end gap-1"><button type="button" onClick={() => setDraftId(a.id)} className="btn btn-green-outline btn-sm"><FileSignature size={12} /><span>{t('loan.open_draft', 'Open')}</span></button></div>
+                      </td>
+                    </tr>
+                  );
+                }), ...loans.map((l, i) => {
                   const open = l.status === 'Active';
                   const late = l.derived_status === 'Overdue';
                   return (
                     <tr key={l.id} onClick={() => setDetailId(l.id)} className="group hover:bg-[#f0f7f3] dark:hover:bg-[#1a2b34] transition-colors cursor-pointer">
-                      <td className="py-3 px-3 text-center text-slate-400 dark:text-slate-500 font-semibold tabular-nums sticky left-0 z-10 bg-white dark:bg-[#142026] group-hover:bg-[#f0f7f3] dark:group-hover:bg-[#1a2b34]" style={{ width: '3.25rem', minWidth: '3.25rem', maxWidth: '3.25rem' }}>{serial(i + 1)}</td>
+                      <td className="py-3 px-3 text-center text-slate-400 dark:text-slate-500 font-semibold tabular-nums sticky left-0 z-10 bg-white dark:bg-[#142026] group-hover:bg-[#f0f7f3] dark:group-hover:bg-[#1a2b34]" style={{ width: '3.25rem', minWidth: '3.25rem', maxWidth: '3.25rem' }}>{serial(shownDrafts.length + i + 1)}</td>
                       <td className="py-3 px-3 sticky z-10 sticky-col-edge bg-white dark:bg-[#142026] group-hover:bg-[#f0f7f3] dark:group-hover:bg-[#1a2b34]" style={{ left: '3.25rem', minWidth: '14rem' }}>
                         <div className="flex items-center gap-3 min-w-0">
                           <div className="w-8 h-8 rounded-xl bg-gradient-to-br from-emerald-600 to-teal-800 text-white text-[11px] font-bold flex items-center justify-center shrink-0">{l.avatar_initials || '?'}</div>
@@ -389,14 +439,19 @@ export const PersonalLoansView: React.FC = () => {
                       </td>
                     </tr>
                   );
-                })}
+                })]}
               </tbody>
             </table>
           </div>
         )}
       </div>
 
-      <LoanFormModal open={formOpen} onClose={() => setFormOpen(false)} presetMemberId={memberFilter === '' ? null : Number(memberFilter)} onSaved={id => { setFormOpen(false); setDetailId(id); }} />
+      <LoanFormModal
+        open={formOpen || !!editApp} application={editApp} presetMemberId={memberFilter === '' ? null : Number(memberFilter)}
+        onClose={() => { const back = editApp?.application.id ?? null; setFormOpen(false); setEditApp(null); if (back) setDraftId(back); }}
+        onSaved={(id, kind) => { setFormOpen(false); setEditApp(null); if (kind === 'draft') setDraftId(id); else setDetailId(id); }} />
+      <LoanApplicationModal applicationId={draftId} onClose={() => setDraftId(null)} onChanged={() => undefined}
+        onEdit={d => { setDraftId(null); setEditApp(d); }} onDisbursed={id => { setDraftId(null); setDetailId(id); }} />
       <LoanDetailModal loanId={detailId} onClose={() => setDetailId(null)} onOpenLoan={id => setDetailId(id)} onChanged={() => undefined} />
       <LoanRepaymentModal loan={payLoan} kind="Installment" onClose={() => setPayLoan(null)} onDone={() => setPayLoan(null)} />
       <LoanPolicyModal open={policyOpen} onClose={() => setPolicyOpen(false)} />

@@ -1,8 +1,11 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { serial } from '../utils/i18n';
-import { UserPlus, Trash2, Pencil, History, Users, KeyRound, Lock, Camera, X, ChevronRight, Search, Loader2 } from 'lucide-react';
+import { UserPlus, Trash2, Pencil, History, Users, KeyRound, Lock, Camera, X, ChevronRight, Search, Loader2, ShieldCheck } from 'lucide-react';
 import { useApp } from '../context/AppContext';
-import { getUsers, addUser, updateUser, deleteUser, getAuditLog, setUserPassword } from '../services/db';
+import { getUsers, addUser, updateUser, deleteUser, getAuditLog, setUserPassword, getRoleDefaults } from '../services/db';
+import { PermissionsModal } from '../components/access/PermissionsModal';
+import { AccessMatrix } from '../components/access/AccessMatrix';
+import { ALL_MODULES, type ModuleKey, type AccessLevel } from '../utils/access';
 import { AppUser, AuditEntry, UserRole, UserStatus } from '../types';
 import { Modal } from '../components/common/Modal';
 import { SearchableSelect } from '../components/common/SearchableSelect';
@@ -22,7 +25,7 @@ const btnSoft = 'btn btn-outline';
 const btnPrimary = 'btn btn-primary';
 
 export const UserManagementView: React.FC = () => {
-  const { currentUser, isAdmin, showToast, refreshKey, triggerRefresh, t, tv, openProfile, language, toBanglaDigits, bnName } = useApp();
+  const { currentUser, isAdmin, canUpload, showToast, refreshKey, triggerRefresh, t, tv, openProfile, language, toBanglaDigits, bnName } = useApp();
   const labels = useAuditLabels();
   const stamp = useStamp();
   const num = (n: number) => (language === 'bn' ? toBanglaDigits(n) : String(n));
@@ -39,6 +42,11 @@ export const UserManagementView: React.FC = () => {
   const fileRef = useRef<HTMLInputElement>(null);
 
   const [editUser, setEditUser] = useState<AppUser | null>(null);
+  // module access: the editor for an existing user, and the optional matrix when creating one (Super User only)
+  const [accessUser, setAccessUser] = useState<AppUser | null>(null);
+  const [roleDefaults, setRoleDefaults] = useState<Record<string, Record<ModuleKey, AccessLevel>>>({});
+  const [addPerms, setAddPerms] = useState<Record<ModuleKey, AccessLevel> | null>(null);
+  useEffect(() => { getRoleDefaults().then(setRoleDefaults).catch(() => undefined); }, []);
   const [edit, setEdit] = useState<EditForm>({ full_name: '', full_name_bn: '', email: '', phone: '', designation: '', role: 'Treasurer', status: 'Active' });
   const [deleteTarget, setDeleteTarget] = useState<AppUser | null>(null);
 
@@ -82,6 +90,9 @@ export const UserManagementView: React.FC = () => {
     }
   };
 
+  const addDefaults = roleDefaults[add.role];
+  useEffect(() => { if (addOpen && addDefaults) setAddPerms({ ...addDefaults }); }, [addOpen, add.role, addDefaults]);
+
   const handleCreate = async (e?: React.FormEvent) => {
     e?.preventDefault();
     if (!add.full_name.trim()) { showToast(t('admin.name_required', 'Full name is required.'), 'error'); return; }
@@ -100,6 +111,8 @@ export const UserManagementView: React.FC = () => {
         avatar: add.avatar || undefined,
         avatar_initials: initialsOf(add.full_name),
         status: 'Active',
+        // only the Super User can set module access; sent only when it differs from the role's default
+        ...(canUpload && addPerms && addDefaults && ALL_MODULES.some(m => addPerms[m] !== addDefaults[m]) ? { permissions: addPerms } : {}),
       });
       await setUserPassword(newId, add.password);
       done(`${t('admin.user_created', 'User created')}: ${add.full_name.trim()} (${tv(add.role)})`);
@@ -236,6 +249,7 @@ export const UserManagementView: React.FC = () => {
                     <div className="flex flex-wrap items-center gap-2">
                       <span className="font-bold text-slate-900 dark:text-white text-sm truncate">{bnName(u.full_name, u.full_name_bn)}</span>
                       <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold border ${ROLE_BADGE[u.role] || ROLE_BADGE.Manager}`}>{tv(u.role)}</span>
+                      {u.permissions && <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-violet-100 dark:bg-violet-950 text-violet-800 dark:text-violet-300 border border-violet-200 dark:border-violet-800">{t('access.custom_badge', 'Custom access')}</span>}
                       {u.status !== 'Active' && (
                         <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-slate-200 dark:bg-slate-700 text-slate-600 dark:text-slate-300">{tv(u.status)}</span>
                       )}
@@ -251,6 +265,12 @@ export const UserManagementView: React.FC = () => {
                 </div>
 
                 <div className="flex items-center gap-1 shrink-0">
+                  {!u.is_system && (
+                    <button type="button" onClick={stop(() => setAccessUser(u))} title={t('access.title', 'Module access')}
+                      className="flex items-center gap-1 px-3 py-1.5 bg-violet-50 dark:bg-violet-950/40 hover:bg-violet-100 dark:hover:bg-violet-950/70 text-violet-800 dark:text-violet-300 rounded-lg font-bold border border-violet-200 dark:border-violet-900">
+                      <ShieldCheck size={13} /> <span className="hidden sm:inline">{t('access.button', 'Access')}</span>
+                    </button>
+                  )}
                   {u.is_system ? (
                     <span className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-amber-50 dark:bg-amber-950/40 text-amber-700 dark:text-amber-300 font-bold text-[11px]" title={t('admin.protected_hint', 'Protected system account: fixed password, data upload enabled')}>
                       <Lock size={12} />{t('admin.protected', 'Protected')}
@@ -337,6 +357,8 @@ export const UserManagementView: React.FC = () => {
         </div>
       </div>
 
+      <PermissionsModal user={accessUser} canEdit={canUpload} onClose={() => setAccessUser(null)} onSaved={() => triggerRefresh()} />
+
       {/* Add user */}
       <Modal
         open={addOpen}
@@ -413,6 +435,18 @@ export const UserManagementView: React.FC = () => {
               <SearchableSelect options={roleOptions} value={add.role} onChange={v => setAdd(a => ({ ...a, role: v as UserRole }))} />
             </div>
           </div>
+          {canUpload && addPerms && addDefaults && (
+            <details className="rounded-2xl border border-violet-200 dark:border-violet-900 bg-violet-50/40 dark:bg-violet-950/20 p-3">
+              <summary className="cursor-pointer select-none text-[12px] font-black text-violet-900 dark:text-violet-200 flex items-center gap-2">
+                <ShieldCheck size={14} />{t('access.add_summary', 'Module access (optional)')}
+                <span className="font-semibold text-[11px] text-violet-700 dark:text-violet-300">
+                  {ALL_MODULES.some(m => addPerms[m] !== addDefaults[m]) ? t('access.custom_badge', 'Custom access') : t('access.role_default', 'role default')}
+                </span>
+              </summary>
+              <p className="mt-2 mb-3 text-[11px] text-slate-600 dark:text-slate-300">{t('access.add_hint', 'Start from the role\'s default and change only what this person should or should not reach.')}</p>
+              <AccessMatrix value={addPerms} defaults={addDefaults} onChange={(m, l) => setAddPerms(v => (v ? { ...v, [m]: l } : v))} role={add.role} />
+            </details>
+          )}
         </form>
       </Modal>
 

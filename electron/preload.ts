@@ -27,4 +27,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
   exportStatements: (memberId: number | null, format: 'pdf' | 'xlsx', lang?: string) => ipcRenderer.invoke('members:export-statements', memberId, format, lang),
   exportTable: (doc: unknown, format: 'pdf' | 'xlsx', fileName: string) => ipcRenderer.invoke('export:table', doc, format, fileName),
   exportVoucher: (v: unknown) => ipcRenderer.invoke('export:voucher', v),
+  googleCall: (method: string, args: unknown[]) => ipcRenderer.invoke('google:call', method, args),
+  licenseCall: (method: string, args: unknown[]) => ipcRenderer.invoke('license:call', method, args),
+  onLicenseChanged: (cb: () => void) => { const h = () => cb(); ipcRenderer.on('license:changed', h); return () => { ipcRenderer.removeListener('license:changed', h); }; },
+  exportConsentPaper: (v: unknown) => ipcRenderer.invoke('export:consent', v),
+  uploadLoanConsent: (kind: string, id: number) => ipcRenderer.invoke('loan:upload-consent', kind, id),
+  openLoanConsent: (kind: string, id: number) => ipcRenderer.invoke('loan:open-consent', kind, id),
 });

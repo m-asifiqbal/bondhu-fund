@@ -313,7 +313,7 @@ export const EntryCenterView: React.FC = () => {
                     </div>
                     <div>
                       <label className="form-label mb-1.5 block">{t('members.entry_pay_month', 'Payment month')} <Req /></label>
-                      <MonthPicker value={paymentMonth} onChange={setPaymentMonth} align="left" className="w-full" />
+                      <MonthPicker variant="field" value={paymentMonth} onChange={setPaymentMonth} align="left" className="w-full" />
                       <p className="form-hint">{t('members.entry_pay_month_hint', 'The month this contribution is for.')}</p>
                     </div>
                   </div>

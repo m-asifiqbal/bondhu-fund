@@ -157,7 +157,12 @@ import reportsDict from '../locales/reports';
 import adminDict from '../locales/admin';
 import returnsDict from '../locales/returns';
 import loansDict from '../locales/loans';
-Object.assign(translations, commonDict, shellDict, membersDict, financeDict, reportsDict, adminDict, returnsDict, loansDict);
+import accessDict from '../locales/access';
+import googleDict from '../locales/google';
+import licenseDict from '../locales/license';
+import reviewDict from '../locales/review';
+import finesDict from '../locales/fines';
+Object.assign(translations, commonDict, shellDict, membersDict, financeDict, reportsDict, adminDict, returnsDict, loansDict, accessDict, googleDict, licenseDict, reviewDict, finesDict);
 /** Serial number for table rows: Bangla digits when the interface language is Bangla. */
 export const serial = (n: number): string =>
   (typeof document !== 'undefined' && document.documentElement.lang === 'bn') ? toBanglaDigits(n) : String(n);
