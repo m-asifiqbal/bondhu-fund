@@ -21,8 +21,8 @@ const iso = (d = 0) => { const x = new Date(Date.now() + d * 86400000); return `
   let nid = 1990555500000;
   const m1 = A.addMember({ name: 'Rev One', nid: String(++nid), opening_balance: 10000, join_date: '2025-01-01', monthly_due: 500 });
   A.addMember({ name: 'Rev Two', nid: String(++nid), opening_balance: 20000, join_date: '2025-01-01', monthly_due: 500 });
-  const inv = A.addInvestment({ name: 'Plot R', sector: 'Land', invested_amount: 30000, purchase_date: '2025-02-01', current_estimated_value: 32000, status: 'Review', review_date: iso(-3) });
-  const inv2 = A.addInvestment({ name: 'Flat R', sector: 'Flat', invested_amount: 5000, purchase_date: '2025-02-01' });
+  const inv = A.addInvestment({ allow_overdraft: true, name: 'Plot R', sector: 'Land', invested_amount: 30000, purchase_date: '2025-02-01', current_estimated_value: 32000, status: 'Review', review_date: iso(-3) });
+  const inv2 = A.addInvestment({ allow_overdraft: true, name: 'Flat R', sector: 'Flat', invested_amount: 5000, purchase_date: '2025-02-01' });
   ok(A.getInvestmentReviews(inv).length === 0, 'a new investment has no review history');
 
   const m0 = A.getOverviewMetrics(iso().slice(0, 7));

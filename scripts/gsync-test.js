@@ -96,7 +96,7 @@ function newAuth(fake, over = {}) {
     for (const k of Object.keys(require.cache)) if (k.startsWith(DIST) && /database\.js$|loans\.js$/.test(k)) delete require.cache[k];
     return require(path.join(DIST, 'database.js'));
   }
-  async function makePc(name, email = 'asif@example.com') {
+  async function makePc(name, email = 'asif@example.com', retry = { delayMs: 5, max: 0 }) {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), `bondhu-gs-${name}-`));
     const store = freshStore();
     await store.openDatabase(path.join(dir, 't.db'), wasm);
@@ -114,7 +114,7 @@ function newAuth(fake, over = {}) {
     fake.state.nextEmail = email;
     const { auth } = newAuth(fake); await auth.signIn();
     const drive = new G.GoogleDrive(auth, fetch, fake.endpoints);
-    const engine = new S.SyncEngine(drive, local, stateStore, vault, cx, () => auth.account()?.email || null);
+    const engine = new S.SyncEngine(drive, local, stateStore, vault, cx, () => auth.account()?.email || null, retry);
     store.setChangeHook(() => engine.markDirty());
     return { name, dir, store, A: store.api, engine, auth, drive, docsDir, vault, getState: () => st, snapshots: () => fs.readdirSync(dir).filter(f => f.startsWith('safety-')), stateStore };
   }
@@ -150,7 +150,7 @@ function newAuth(fake, over = {}) {
   ok(names1.includes('bondhu-sync-head.json') && names1.some(n => n.startsWith('bondhu-snap-000001-')), 'Drive holds the head index and the snapshot');
   if (adminPw) ok(names1.some(n => n === `bondhu-doc-${sha256(paperBytes)}`), 'the signed paper was uploaded too');
   ok((await A.engine.syncNow()).status === 'up-to-date', 'PC A: syncing again with nothing new changes nothing');
-  A.A.login?.call(null, 'admin', adminPw || 'x') ;
+  if (adminPw) A.A.login?.call(null, 'admin', adminPw);
 
   // ---- a brand new PC logs in with the same Google account: everything comes back ------------------------------
   ok(!B.store.syncHasData(), 'PC B is a fresh install (no data)');
@@ -279,6 +279,64 @@ function newAuth(fake, over = {}) {
   await A.engine.deleteBackup(list[0].id);
   ok((await A.engine.listBackups()).length === S.KEEP_BACKUPS - 1, 'a Drive backup can be deleted');
   ok(fake.fileNames().includes('bondhu-sync-head.json'), 'backups never touch the sync files');
+
+  // ---- rule: Google sync is a premium feature that only iqbal_labs switches on or off ------------------------------------
+  {
+    ok(S.premiumGate(false, 'sync') === S.PREMIUM_MESSAGE && S.premiumGate(false, 'driveBackup') === S.PREMIUM_MESSAGE && S.premiumGate(false, 'connect') === S.PREMIUM_MESSAGE && S.premiumGate(false, 'driveRestore') === S.PREMIUM_MESSAGE,
+      'PREMIUM OFF: sync, sign-in, Drive backup and restore are all refused');
+    ok(['status', 'setPremium', 'disconnect'].every(m => S.premiumGate(false, m) === null), 'PREMIUM OFF: the screen can still ask its state, iqbal_labs can switch it on, and an account can be disconnected');
+    ok(['sync', 'connect', 'driveBackup', 'check', 'setAuto', 'driveList'].every(m => S.premiumGate(true, m) === null), 'PREMIUM ON: nothing is blocked by the premium rule (the per-user permissions still apply)');
+    ok(/premium feature/i.test(S.PREMIUM_MESSAGE) && /iqbal_labs/.test(S.PREMIUM_MESSAGE), 'the refusal tells the user who to ask');
+  }
+
+  // ---- rule: keep only the newest 10, the oldest one is deleted -----------------------------------------------------
+  {
+    ok(S.KEEP_BACKUPS === 10 && S.KEEP_SNAPSHOTS === 10, 'the rule is ten: ten backups and ten synced copies');
+    const names = [];
+    for (let i = 0; i < 13; i++) { const f = await A.engine.uploadBackup(Buffer.from('keep' + i), { device: 'PC-A', encrypted: false }); names.push(f.name); await new Promise(r => setTimeout(r, 4)); }
+    const have = (await A.engine.listBackups()).map(b => b.name).sort();
+    ok(have.length === 10 && have.join() === names.slice(3).sort().join(), '13 backups saved: exactly 10 remain and the 3 oldest are the ones deleted');
+  }
+
+  // ---- rule: a failed backup is tried again after a pause, by itself ---------------------------------------------------
+  {
+    fake.state.accounts['retry@example.com'] = { name: 'Retry Tester', picture: '' };
+    const seen = []; let slept = 0;
+    const policy = { delayMs: 20, max: 3, sleep: async ms => { slept++; seen.push(R.getState().lastResult); await new Promise(r => setTimeout(r, ms)); } };
+    const R = await makePc('PC-R', 'retry@example.com', policy);
+    addMember(R, 'Retry One', 12000);
+    // a Google hiccup on the first two requests: the sync still completes by itself
+    fake.state.failNext = 2;
+    r = await R.engine.syncNow();
+    ok(r.status === 'pushed' && slept === 2, 'AUTO RETRY: two failed attempts, then the third works on its own (paused ' + slept + ' times)');
+    ok(seen.length === 2 && seen.every(x => /^retrying: .*Trying again in \d+ seconds \(\d of 3\)/.test(x)), 'while waiting, the screen is told it is retrying: "' + (seen[0] || '').slice(0, 90) + '"');
+    ok(/^pushed:/.test(R.getState().lastResult), 'and when it works the message says so');
+    // a failure after the snapshot was uploaded (the head could not be written): the half-done upload is removed, the retry leaves one clean copy
+    const realUpdate = R.drive.update.bind(R.drive); let failedHead = false; slept = 0;
+    R.drive.update = async (id, bytes, props) => { if (!failedHead) { failedHead = true; throw G.failure('offline'); } return realUpdate(id, bytes, props); };   // writing the new head index fails once, after the snapshot is already in Drive
+    addMember(R, 'Retry Two', 9000);
+    const before = fake.fileNames().filter(n => n.startsWith('bondhu-snap-')).length;
+    r = await R.engine.syncNow();
+    const after = fake.fileNames().filter(n => n.startsWith('bondhu-snap-')).length;
+    ok(failedHead && r.status === 'pushed' && slept === 1, 'a failure half way through an upload is retried and then succeeds');
+    ok(after === before + 1, 'and the half-uploaded copy was removed: exactly one new copy in Drive (' + before + ' -> ' + after + ')');
+    R.drive.update = realUpdate;
+    // it gives up after the last retry, shows the failure, and works again once Google does
+    fake.state.failNext = 1000; slept = 0;
+    await rejects(() => R.engine.syncNow(), /./, 'if Google keeps failing, it stops after the last retry and reports the error');
+    ok(slept === 3 && /^failed:/.test(R.getState().lastResult), 'it paused exactly 3 times, then the screen says the attempt failed: "' + R.getState().lastResult.slice(0, 60) + '"');
+    fake.state.failNext = 0; addMember(R, 'Retry Three', 7000);
+    ok((await R.engine.syncNow()).status === 'pushed', 'and the next attempt works normally (nothing is stuck)');
+    // not worth retrying: a full Drive stops at once
+    fake.state.quotaFull = true; addMember(R, 'Retry Four', 5000); slept = 0;
+    await rejects(() => R.engine.syncNow(), /storage is full|quota/i, 'a full Drive is reported');
+    ok(slept === 0, 'and is NOT retried (waiting would not help)');
+    fake.state.quotaFull = false;
+    // the manual Drive backup is retried too
+    fake.state.failNext = 2; slept = 0;
+    const bf = await R.engine.uploadBackup(Buffer.from('retry-backup'), { device: 'PC-R', encrypted: false });
+    ok(!!bf.id && slept === 2, 'a Drive backup that fails twice is retried and then saved');
+  }
 
   console.log(fails ? `\n${fails} FAILURE(S)` : '\nALL GOOGLE SYNC TESTS PASSED');
   await fake.close();

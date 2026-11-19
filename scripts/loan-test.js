@@ -122,7 +122,9 @@ const sum = (rows, k) => Math.round(rows.reduce((a, r) => a + r[k], 0) * 100) / 
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'bondhu-loan-'));
   await store.openDatabase(path.join(dir, 't.db'), wasm);
   A.resetDatabase(true);
-  A.saveAppSettings({ loan_default_rate: 12, loan_default_method: 'reducing', loan_max_multiple: 0, loan_late_fee: 0, loan_consent_required: false });   // the older tests give loans directly
+  if (process.env.BONDHU_SYSTEM_PASSWORD) A.login('iqbal_labs', process.env.BONDHU_SYSTEM_PASSWORD);      // the loan policy and deletions are decided by the signed-in user's role
+  const POLICY_OFF = { loan_max_active: 0, loan_block_overdue: false, loan_block_written_off: false, loan_guarantor_max: 0, loan_min_member_months: 0, loan_max_arrears_months: 0, loan_max_pct_of_fund: 0, loan_cash_reserve: 0 };
+  A.saveAppSettings({ loan_default_rate: 12, loan_default_method: 'reducing', loan_max_multiple: 0, loan_late_fee: 0, loan_consent_required: false, ...POLICY_OFF });   // the older tests give loans directly, outside the new policy
 
   let nid = 1990123400000;
   const mk = (name, opening) => A.addMember({ name, nid: String(++nid), opening_balance: opening, join_date: '2025-01-01', monthly_due: 500 });
@@ -185,8 +187,8 @@ const sum = (rows, k) => Math.round(rows.reduce((a, r) => a + r[k], 0) * 100) / 
   near(d1.loan.paid_schedule, 4066, 'paid towards schedule 4,066');
   ok(d1.schedule[0].status === 'Paid' && d1.schedule[1].status === 'Paid' && d1.schedule[2].status === 'Paid' && d1.schedule[3].status === 'Overdue', 'installments 1–3 paid, 4 partly paid');
   near(d1.loan.outstanding_principal, 12000 - d1.loan.paid_principal, 'outstanding = loan − principal repaid');
-  throws(() => A.deleteLoan(l1), /already has repayments/, 'cannot delete a loan with repayments');
-  throws(() => A.deleteLoanRepayment(d1.repayments[1].id), /most recent/, 'only the latest repayment can be removed');
+  throws(() => A.deleteLoan(l1, 'test: delete with repayments'), /already has repayments/, 'cannot delete a loan with repayments');
+  throws(() => A.deleteLoanRepayment(d1.repayments[1].id, 'test: not the latest'), /most recent/, 'only the latest repayment can be removed');
 
   // ---- early closure at 2025-06-15: installments due by then = #1–#4 (03-01, 04-01, 05-01, 06-01) ----
   const planOf = A.getLoan(l1).schedule;
@@ -222,7 +224,7 @@ const sum = (rows, k) => Math.round(rows.reduce((a, r) => a + r[k], 0) * 100) / 
   near(beforeWO.cash - afterWO.cash, 0, 'WRITE-OFF: cash does not change');
   ok(A.getLoan(l2).loan.status === 'Written off' && A.getLoan(l2).loan.written_off_amount === 4000, 'loan 2 written off for 4,000');
   throws(() => A.recordLoanRepayment({ loan_id: l2, paid_date: '2025-09-02', amount: 100, payment_method: 'Cash' }), /written off/, 'written-off loan takes no payments');
-  throws(() => A.deleteLoanRepayment(A.getLoan(l2).repayments[0].id), /written off/, 'cannot remove repayments of a written-off loan');
+  throws(() => A.deleteLoanRepayment(A.getLoan(l2).repayments[0].id, 'test: written off'), /written off/, 'cannot remove repayments of a written-off loan');
 
 
   // ---- loan 3 (flat, 12 % × 3 months on 3,000 = 90 interest, 1,030 a month) ----
@@ -256,7 +258,7 @@ const sum = (rows, k) => Math.round(rows.reduce((a, r) => a + r[k], 0) * 100) / 
   near(d3.loan.paid_principal + d3.loan.paid_interest, 1630, 'penalty is not counted towards the schedule');
   near(d3.loan.paid_schedule, 1630, 'schedule progress 1,630 of 3,090');
   // undo the last repayment (latest only) and re-check
-  A.deleteLoanRepayment(d3.latestRepaymentId);
+  A.deleteLoanRepayment(d3.latestRepaymentId, 'test: wrong amount');
   near(A.getLoan(l3).loan.paid_schedule, 1030, 'removing the latest repayment reverses it');
   A.recordLoanRepayment({ loan_id: l3, paid_date: '2025-11-20', amount: 2060, payment_method: 'Cash' });   // pays the rest exactly
   const e3 = A.getLoan(l3);
@@ -264,7 +266,7 @@ const sum = (rows, k) => Math.round(rows.reduce((a, r) => a + r[k], 0) * 100) / 
   near(e3.loan.paid_principal, 3000, 'loan 3 principal repaid exactly 3,000 (no stray cent)');
   near(e3.loan.paid_interest, 90, 'loan 3 interest exactly 90');
   const lastRep = e3.repayments[0];
-  A.deleteLoanRepayment(lastRep.id);
+  A.deleteLoanRepayment(lastRep.id, 'test: wrong amount');
   ok(A.getLoan(l3).loan.status === 'Active', 'removing the closing repayment re-opens the loan');
   A.recordLoanRepayment({ loan_id: l3, paid_date: '2025-11-20', amount: 2060, payment_method: 'Cash' });
 
@@ -274,7 +276,7 @@ const sum = (rows, k) => Math.round(rows.reduce((a, r) => a + r[k], 0) * 100) / 
   const lim = addLoanG({ member_id: m2, principal: 11000, method: 'free', term_months: 11, disbursed_date: '2025-12-01', payment_method: 'Cash', limit_note: 'Committee approved 2025-11-30' });
   ok(/Over-limit approval/.test(A.getLoan(lim).loan.notes), 'the approval reason is stored on the loan');
   const cashWith = cashBook().cash;
-  A.deleteLoan(lim);
+  A.deleteLoan(lim, 'test: clean up');
   near(cashBook().cash - cashWith, 11000, 'deleting an unpaid loan puts the money back');
   A.saveAppSettings({ loan_max_multiple: 0 });
   throws(() => A.saveAppSettings({ loan_default_rate: 500 }), /between 0 and 100/, 'default rate is validated');
@@ -365,7 +367,7 @@ const sum = (rows, k) => Math.round(rows.reduce((a, r) => a + r[k], 0) * 100) / 
   ok(new Set(reps.map(r => r.trx_id)).size === 2, 'receipt numbers are unique');
   ok(A.getTransactions(undefined, undefined, 'loan').some(r => r.reference === reps[1].trx_id), 'the automatic receipt number shows in the ledger');
   ok(A.checkAccountingHealth().checks.find(c => c.id === 'loan_guarantor').status === 'pass', 'health check: every loan has complete guarantor details');
-  A.deleteLoanRepayment(reps[0].id); A.deleteLoanRepayment(reps[1].id); A.deleteLoan(ol); A.deleteLoan(gl);
+  A.deleteLoanRepayment(reps[0].id, 'test: clean up'); A.deleteLoanRepayment(reps[1].id, 'test: clean up'); A.deleteLoan(ol, 'test: clean up'); A.deleteLoan(gl, 'test: clean up');
 
   // ---- a schema-5 database (loans with only a free-text guarantor) upgrades and keeps its loans ----
   {
@@ -400,7 +402,7 @@ const sum = (rows, k) => Math.round(rows.reduce((a, r) => a + r[k], 0) * 100) / 
   ok(A.getLoans().length === 0 && A.getDatabaseStats().schemaVersion === 9, 'a schema-4 database gains the loan tables and moves to the current schema');
   ok(A.getAppSettings().loan_default_rate === 12 && A.getAppSettings().loan_default_method === 'reducing', 'loan policy defaults appear after the upgrade');
   ok(A.getAppSettings().loan_consent_required === true, 'after the upgrade the signed consent paper is required by default');
-  A.saveAppSettings({ loan_consent_required: false });
+  A.saveAppSettings({ loan_consent_required: false, ...POLICY_OFF });
   const lx = addLoanG({ member_id: m1, principal: 1000, method: 'free', term_months: 4, disbursed_date: '2025-01-05', payment_method: 'Cash' });
   ok(A.getLoan(lx).schedule.length === 4, 'loans work on the upgraded database');
   throws(() => store.replaceWith(Buffer.from(new SQL.Database().export())), /not a Bondhu Fund backup/, 'an unrelated database file is still refused');
@@ -562,12 +564,95 @@ const sum = (rows, k) => Math.round(rows.reduce((a, r) => a + r[k], 0) * 100) / 
     const direct = A.addLoan({ ...dbase, principal: 3000, term_months: 6, disbursed_date: today, first_due_date: undefined });
     ok(A.getLoan(direct).loan.consent_status === 'Waived' && !A.getLoan(direct).loan.application_no, 'with the requirement off a loan is disbursed at once and marked "Waived"');
     const leftover = A.getLoanApplications();
-    ok(leftover.length === 1 && leftover[0].app_no === 'LA-0001', 'the older draft is still waiting');
+    console.log('DEBUG leftover', JSON.stringify(leftover.map(x=>[x.app_no,x.status]))); ok(leftover.length === 1 && leftover[0].app_no === 'LA-0001', 'the older draft is still waiting');
     A.saveAppSettings({ loan_consent_required: true });
     const dw = A.createLoanApplication({ ...dbase, principal: 2000, term_months: 4, disbursed_date: today, first_due_date: undefined });
     A.saveAppSettings({ loan_consent_required: false });
     const wl = A.activateLoanApplication({ id: dw, disbursed_date: today });
     ok(A.getLoan(wl).loan.consent_status === 'Waived' && A.getLoan(wl).loan.application_no === 'LA-0005', 'a draft waiting when the requirement is switched off can be disbursed without a paper (marked Waived)');
+  }
+
+  // ---------------------------------------------------------------------------------------------------------------
+  // 6. The lending policy, controlled deletion and portfolio quality (needs the owner password to sign in as an Admin)
+  // ---------------------------------------------------------------------------------------------------------------
+  if (process.env.BONDHU_SYSTEM_PASSWORD) {
+    await store.openDatabase(path.join(dir, 'policy.db'), wasm);                      // a brand-new fund: the policy defaults are the real defaults
+    A.login('iqbal_labs', process.env.BONDHU_SYSTEM_PASSWORD);
+    let nidP = 1990555500000;
+    const mem = (name, o = {}) => A.addMember({ name, nid: String(++nidP), opening_balance: 100000, join_date: '2024-01-01', monthly_due: 500, ...o });
+    // the defaults a new fund gets are the strict ones
+    const st = A.getAppSettings();
+    ok(st.loan_max_active === 1 && st.loan_block_overdue === true && st.loan_block_written_off === true && st.loan_guarantor_max === 2 && st.loan_min_member_months === 0 && st.loan_max_pct_of_fund === 0, 'POLICY: a new fund starts with one open loan per member, no new loan for an overdue or written-off borrower, and two guarantees per member');
+    A.saveAppSettings({ loan_consent_required: false });
+    const B1 = mem('Policy Borrower'), G1 = mem('Policy Guarantor One'), G2 = mem('Policy Guarantor Two'), M2 = mem('Policy Second'), W1 = mem('Policy Writeoff'); mem('Policy Funder', { opening_balance: 2000000 });
+    const mk2 = (member_id, over = {}) => ({ member_id, principal: 10000, method: 'reducing', annual_rate: 12, term_months: 10, disbursed_date: '2025-02-01', first_due_date: '2025-03-01', payment_method: 'Cash', purpose: 'Shop', guarantor_type: 'member', guarantor_member_id: G1, ...over });
+
+    const l1 = A.addLoan(mk2(B1));
+    ok(!!l1, 'POLICY: a first loan within policy is given');
+    // the second loan to the same borrower breaks two rules (one open loan at a time; the first is overdue)
+    throws(() => A.addLoan(mk2(B1, { principal: 5000 })), /Loan policy:.*open loan.*Write the reason/s, 'POLICY: a second open loan is refused; an Admin is told to write the reason for an exception');
+    throws(() => A.addLoan(mk2(B1, { principal: 5000 })), /has an overdue loan/, 'POLICY: a borrower with an overdue loan is refused');
+    const pv = A.previewLoan(mk2(B1, { principal: 5000 }));
+    ok(pv.valid && pv.member.policyBlocks.length >= 2 && pv.member.canOverride === true && pv.warnings.some(w => w.level === 'warn' && /Loan policy/.test(w.text)), 'POLICY: the preview shows the same reasons, and tells an Admin an exception is possible');
+    const l2 = A.addLoan({ ...mk2(B1, { principal: 5000, guarantor_member_id: G2 }), policy_override_note: 'Committee approved on 12 Nov' });
+    ok(!!l2 && /Policy exception approved by/.test(A.getLoan(l2).loan.notes) && /Committee approved on 12 Nov/.test(A.getLoan(l2).loan.notes), 'POLICY: an Admin can approve the exception with a written reason, and the reason stays on the loan');
+
+    // a Treasurer cannot approve exceptions or delete loans
+    const tre = A.addUser({ username: 'pol_tre', full_name: 'Pol Treasurer', role: 'Treasurer', email: '' });
+    A.setUserPassword(tre, 'Tr3asurerpass'); A.logout(); A.login('pol_tre', 'Tr3asurerpass');
+    throws(() => A.addLoan({ ...mk2(B1, { principal: 3000, guarantor_member_id: G2 }), policy_override_note: 'I say it is fine' }), /Only an Admin can approve an exception/, 'POLICY: a Treasurer cannot approve an exception');
+    throws(() => A.addLoan(mk2(B1, { principal: 3000, guarantor_member_id: G2 })), /Only an Admin can approve an exception/, 'POLICY: without a note a Treasurer is simply told only an Admin can approve it');
+    const pvT = A.previewLoan(mk2(B1, { principal: 3000, guarantor_member_id: G2 }));
+    ok(pvT.member.canOverride === false && pvT.warnings.some(w => w.level === 'error' && /Loan policy/.test(w.text)), 'POLICY: for a Treasurer the preview shows the policy as an error (cannot save)');
+    throws(() => A.deleteLoan(l2, 'a good reason here'), /Only an Admin can delete/, 'DELETE: only an Admin can delete a disbursed loan');
+    A.logout(); A.login('iqbal_labs', process.env.BONDHU_SYSTEM_PASSWORD);
+
+    // deletion needs a reason and is logged with it
+    throws(() => A.deleteLoan(l2), /reason/, 'DELETE: a reason is required');
+    throws(() => A.deleteLoan(l2, 'oops'), /at least 5/, 'DELETE: a one-word reason is not enough');
+    A.deleteLoan(l2, 'entered twice by mistake');
+    ok(!A.getLoans().some(l => l.id === l2) && JSON.stringify(A.getAuditLog(200)).includes('reason: entered twice by mistake'), 'DELETE: the loan is gone and the reason is in the activity log');
+
+    // portfolio quality: l1 was due in March 2025 and has never been paid
+    const sm = A.getLoanSummary();
+    ok(sm.aging.d90plus.count >= 1 && sm.aging.d90plus.principal > 0 && sm.aging.par90 > 0 && sm.aging.par30 >= sm.aging.par90, `PORTFOLIO: a loan overdue for a year is in the 90+ day bucket (PAR90 ${sm.aging.par90}%)`);
+    ok(sm.defaulters.length >= 1 && sm.defaulters[0].loan_id === l1 && sm.defaulters[0].days_overdue > 90 && sm.defaulters[0].guarantor === 'Policy Guarantor One', 'PORTFOLIO: the defaulters list names the loan, the days overdue and the guarantor');
+
+    // a written-off borrower cannot simply borrow again
+    const lw = A.addLoan(mk2(W1, { guarantor_member_id: G2 }));
+    A.writeOffLoan({ loan_id: lw, date: '2025-09-01', reason: 'Borrower left the country' });
+    throws(() => A.addLoan(mk2(W1, { guarantor_member_id: G2 })), /had a loan written off/, 'POLICY: a borrower whose loan was written off is refused a new loan');
+
+    // the guarantor cap: G1 already guarantees one open loan (B1's); with a cap of 1 he cannot guarantee another
+    A.saveAppSettings({ loan_guarantor_max: 1 });
+    throws(() => A.addLoan(mk2(M2)), /already guarantees 1 open loan/, 'POLICY: a member cannot guarantee more open loans than the policy allows');
+    A.saveAppSettings({ loan_guarantor_max: 2 });
+
+    // the other limits
+    A.saveAppSettings({ loan_min_member_months: 60 });
+    throws(() => A.addLoan(mk2(M2, { guarantor_member_id: G2 })), /been a member for \d+ month\(s\); the policy requires 60/, 'POLICY: a minimum membership period is enforced');
+    A.saveAppSettings({ loan_min_member_months: 0, loan_max_arrears_months: 3 });
+    throws(() => A.addLoan(mk2(M2, { guarantor_member_id: G2 })), /unpaid contribution month\(s\); the policy allows 3/, 'POLICY: unpaid contribution months are limited');
+    A.saveAppSettings({ loan_max_arrears_months: 0, loan_max_pct_of_fund: 0.1 });
+    throws(() => A.addLoan(mk2(M2, { guarantor_member_id: G2 })), /may not be more than 0\.1% of the fund/, 'POLICY: one loan cannot take more than the set share of the fund');
+    A.saveAppSettings({ loan_max_pct_of_fund: 0, loan_cash_reserve: 1000000000 });
+    throws(() => A.addLoan(mk2(M2, { guarantor_member_id: G2 })), /below the required reserve/, 'POLICY: a cash reserve must remain after the loan');
+    A.saveAppSettings({ loan_cash_reserve: 0 });
+    throws(() => A.saveAppSettings({ loan_max_pct_of_fund: 150 }), /0 \(not checked\) to 100/, 'POLICY: the settings are validated');
+    ok(!!A.addLoan(mk2(M2, { guarantor_member_id: G2 })), 'POLICY: with every limit satisfied the loan is given');
+
+    // removing a repayment needs a reason, and may not drive the cash negative
+    const lr = A.getLoans().find(l => l.member_id === M2).id;
+    A.recordLoanRepayment({ loan_id: lr, paid_date: '2025-03-01', amount: 1066, payment_method: 'Cash' });
+    const rid = A.getLoan(lr).repayments[0].id;
+    throws(() => A.deleteLoanRepayment(rid), /reason/, 'REPAYMENT: removing a payment needs a reason');
+    const cashNow = A.getOverviewMetrics('2030-01').cash_in_hand;
+    const exp = A.addExpense({ allow_overdraft: true, title: 'Spend all cash', category: 'Meetup & Events', amount: cashNow, expense_date: '2025-04-01', payee: 'Shop', receipt_ref: 'R' });
+    throws(() => A.deleteLoanRepayment(rid, 'entered on the wrong loan'), /would make the fund's cash negative/, 'REPAYMENT: removing a payment is refused when the money has been spent since');
+    A.deleteExpense(exp);
+    A.deleteLoanRepayment(rid, 'entered on the wrong loan');
+    ok(A.getLoan(lr).repayments.length === 0 && JSON.stringify(A.getAuditLog(200)).includes('reason: entered on the wrong loan'), 'REPAYMENT: with a reason and enough cash it is removed, and the reason is logged');
+    ok(A.checkAccountingHealth().fails === 0, 'the books are still healthy after all of that');
   }
 
   console.log(fails ? `\n${fails} FAILURE(S)` : '\nALL LOAN TESTS PASSED');

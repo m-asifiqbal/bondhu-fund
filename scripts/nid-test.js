@@ -14,7 +14,7 @@ const throws = (fn, re, m) => { try { fn(); ok(false, m + ' (no error)'); } catc
   throws(() => A.addMember({ name: 'Letters', nid: '12345abcde' }), /digits only/, 'letters in an NID are refused');
   throws(() => A.addMember({ name: 'Short', nid: '123456789' }), /10, 13 or 17/, '9 digits are refused');
   throws(() => A.addMember({ name: 'Odd', nid: '12345678901234' }), /10, 13 or 17/, '14 digits are refused');
-  const a = A.addMember({ name: 'Rafiq Hasan', nid: '1990 1234-56789' });
+  const a = A.addMember({ name: 'Rafiq Hasan', nid: '1990 1234-56789', join_date: '2025-01-01' });
   const find = id => A.getMembers('', 'All', 1, 50).members.find(m => m.id === id);
   ok(find(a).nid === '1990123456789', 'spaces and dashes are removed and the NID is saved');
   const b = A.addMember({ name: 'Sadia Rahman', nid: '১৯৯০১২৩৪৫৬৭৯০' });

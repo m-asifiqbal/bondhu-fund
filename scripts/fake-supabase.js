@@ -94,6 +94,14 @@ function start(opts = {}) {
             else if (!l.restrict_users && (tagOf(l) || l.max_users == null || usersOf(l).length < l.max_users)) db.licUsers.push({ id: uuid(), license_id: l.id, username: u, first_seen: now().toISOString(), last_seen: now().toISOString() });
           }
           Object.assign(d, { last_seen: now().toISOString(), device_name: j.p_device || d.device_name, app_version: j.p_version || d.app_version, last_user: lastU || d.last_user });
+          const off = Math.min(Math.max(Number(j.p_offline_seconds) || 0, 0), 31536000), rb = Math.min(Math.max(Number(j.p_rollbacks) || 0, 0), 1000);
+          if (off > 0 || rb > 0) {
+            d.offline_seconds_total = (d.offline_seconds_total || 0) + off;
+            d.offline_stretches = (d.offline_stretches || 0) + (off > 0 ? 1 : 0);
+            d.longest_offline_seconds = Math.max(d.longest_offline_seconds || 0, off);
+            if (off > 0) { d.last_offline_seconds = off; d.last_offline_at = now().toISOString(); }
+            d.clock_rollbacks = (d.clock_rollbacks || 0) + rb;
+          }
           return send(200, { ok: true, ...payload(l) });
         }
         if (m[1] === 'bf_register_user') {

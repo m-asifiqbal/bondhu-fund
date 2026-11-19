@@ -54,6 +54,15 @@ create table if not exists public.bf_devices (
   unique (license_id, install_id)
 );
 
+-- Offline monitoring: each copy counts how long it has been running without reaching this server (with a timer that the clock
+-- cannot change) and reports it, with any clock changes it noticed, the next time it is online.
+alter table public.bf_devices add column if not exists offline_seconds_total   bigint not null default 0;   -- all offline running time ever reported
+alter table public.bf_devices add column if not exists offline_stretches       int    not null default 0;   -- how many separate offline periods were reported
+alter table public.bf_devices add column if not exists longest_offline_seconds int    not null default 0;
+alter table public.bf_devices add column if not exists last_offline_seconds    int    not null default 0;   -- the most recent offline period
+alter table public.bf_devices add column if not exists last_offline_at         timestamptz;                  -- when it was reported (the computer came back online)
+alter table public.bf_devices add column if not exists clock_rollbacks         int    not null default 0;   -- times the computer's clock was found set back
+
 -- the users who have signed in under a licence
 create table if not exists public.bf_license_users (
   id         uuid primary key default gen_random_uuid(),
@@ -199,7 +208,9 @@ end $$;
 
 -- The regular check-in (every few minutes while the app is open and online). p_users = who signed in since the last check.
 drop function if exists public.bf_check(text, text, text);
-create or replace function public.bf_check(p_token text, p_device text, p_version text, p_users text[] default null)
+drop function if exists public.bf_check(text, text, text, text[]);
+create or replace function public.bf_check(p_token text, p_device text, p_version text, p_users text[] default null,
+                                           p_offline_seconds int default 0, p_rollbacks int default 0)
 returns jsonb language plpgsql security definer set search_path = public as $$
 declare
   d public.bf_devices;
@@ -228,6 +239,20 @@ begin
      set last_seen = now(), device_name = left(coalesce(p_device, device_name), 80), app_version = left(coalesce(p_version, app_version), 40),
          last_user = coalesce(last_u, last_user)
    where id = d.id;
+
+  -- the offline counter reported by the copy (0 = it was not offline for long); the numbers are capped so a bad client cannot overflow them
+  p_offline_seconds := least(greatest(coalesce(p_offline_seconds, 0), 0), 31536000);
+  p_rollbacks       := least(greatest(coalesce(p_rollbacks, 0), 0), 1000);
+  if p_offline_seconds > 0 or p_rollbacks > 0 then
+    update public.bf_devices
+       set offline_seconds_total   = offline_seconds_total + p_offline_seconds,
+           offline_stretches       = offline_stretches + (case when p_offline_seconds > 0 then 1 else 0 end),
+           longest_offline_seconds = greatest(longest_offline_seconds, p_offline_seconds),
+           last_offline_seconds    = case when p_offline_seconds > 0 then p_offline_seconds else last_offline_seconds end,
+           last_offline_at         = case when p_offline_seconds > 0 then now() else last_offline_at end,
+           clock_rollbacks         = clock_rollbacks + p_rollbacks
+     where id = d.id;
+  end if;
   return jsonb_build_object('ok', true) || public.bf_license_payload(l);
 end $$;
 
@@ -264,10 +289,10 @@ begin
 end $$;
 
 revoke all on function public.bf_activate(text, text, text, text, text) from public;
-revoke all on function public.bf_check(text, text, text, text[]) from public;
+revoke all on function public.bf_check(text, text, text, text[], int, int) from public;
 revoke all on function public.bf_register_user(text, text) from public;
 grant execute on function public.bf_activate(text, text, text, text, text) to anon, authenticated;
-grant execute on function public.bf_check(text, text, text, text[]) to anon, authenticated;
+grant execute on function public.bf_check(text, text, text, text[], int, int) to anon, authenticated;
 grant execute on function public.bf_register_user(text, text) to anon, authenticated;
 
 -- ---------------------------------------------------------------------------------------------- vendor only

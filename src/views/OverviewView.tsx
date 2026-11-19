@@ -420,14 +420,14 @@ export const OverviewView: React.FC = () => {
           <div className="grid grid-cols-2 gap-4">
             <div className="min-w-0">
               <div className="text-[10px] font-bold uppercase tracking-wide text-slate-400">{tr('lateMonth')} · {fmtMonth(data.month, language as any, true)}</div>
-              <div className="text-xl font-black text-slate-900 dark:text-white tracking-tight tabular-nums truncate">{money(k.monthLateFees)}</div>
+              <div className="text-xl font-black text-slate-900 dark:text-white tracking-tight tabular-nums break-words leading-tight">{money(k.monthLateFees)}</div>
               <div className="text-[11px] text-slate-500 dark:text-slate-400 truncate">{digits(k.monthLateCount)} {tr('latePayments')}
                 · {tr('lateLast')} {money(k.prevMonthLateFees)}
               </div>
             </div>
             <div className="min-w-0 border-l border-slate-200 dark:border-[#22353f] pl-4">
               <div className="text-[10px] font-bold uppercase tracking-wide text-slate-400">{tr('lateYear')} · {digits(data.month.slice(0, 4))} ({tr('lateToDate')})</div>
-              <div className="text-xl font-black text-slate-900 dark:text-white tracking-tight tabular-nums truncate">{money(k.yearLateFees)}</div>
+              <div className="text-xl font-black text-slate-900 dark:text-white tracking-tight tabular-nums break-words leading-tight">{money(k.yearLateFees)}</div>
               <div className="text-[11px] text-slate-500 dark:text-slate-400 truncate">{digits(k.yearLateCount)} {tr('latePayments')} · {tr('lateAll')} {money(k.lifetimeLateFees)}</div>
             </div>
           </div>
@@ -450,7 +450,7 @@ export const OverviewView: React.FC = () => {
             ].map((x, i) => (
               <div key={i} className={`min-w-0 ${i ? 'border-l border-slate-200 dark:border-[#22353f] pl-4' : ''}`}>
                 <div className="text-[10px] font-bold uppercase tracking-wide text-slate-400 truncate">{x.l}</div>
-                <div className={`text-xl font-black tracking-tight tabular-nums truncate ${x.v > 0 ? 'text-emerald-600 dark:text-emerald-400' : x.v < 0 ? 'text-rose-600 dark:text-rose-400' : 'text-slate-900 dark:text-white'}`}>{x.v > 0 ? '+' : x.v < 0 ? '−' : ''}{money(Math.abs(x.v))}</div>
+                <div className={`text-xl font-black tracking-tight tabular-nums break-words leading-tight ${x.v > 0 ? 'text-emerald-600 dark:text-emerald-400' : x.v < 0 ? 'text-rose-600 dark:text-rose-400' : 'text-slate-900 dark:text-white'}`}>{x.v > 0 ? '+' : x.v < 0 ? '−' : ''}{money(Math.abs(x.v))}</div>
               </div>
             ))}
           </div>
@@ -651,7 +651,7 @@ const Kpi: React.FC<{
         <span className="text-[11px] font-bold text-slate-500 dark:text-slate-400 truncate">{label}</span>
         <span className="w-7 h-7 shrink-0 rounded-lg bg-brand-light dark:bg-emerald-950/50 text-brand dark:text-emerald-400 flex items-center justify-center">{icon}</span>
       </div>
-      <div className="text-xl font-black text-slate-900 dark:text-white tracking-tight tabular-nums truncate">{value}</div>
+      <div className="text-xl font-black text-slate-900 dark:text-white tracking-tight tabular-nums break-words leading-tight">{value}</div>
       {foot ?? (delta === null || delta === undefined ? <span className="text-[11px] text-slate-400">—</span> : (
         <span className={`flex items-center gap-1 text-[11px] font-bold ${delta === 0 ? 'text-slate-500' : good ? 'text-emerald-600 dark:text-emerald-400' : 'text-rose-600 dark:text-rose-400'}`}>
           {delta === 0 ? <Minus size={12} /> : delta > 0 ? <TrendingUp size={12} /> : <TrendingDown size={12} />}

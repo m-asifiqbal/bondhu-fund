@@ -14,6 +14,7 @@ export const DriveBackupCard: React.FC = () => {
   const n = (v: number | string) => (language === 'bn' ? toBanglaDigits(v) : String(v));
   const canEdit = can('drive_backup', 'edit');
   const [connected, setConnected] = useState<boolean | null>(null);
+  const [premium, setPremium] = useState<boolean | null>(null);
   const [list, setList] = useState<DriveBackupItem[] | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -27,7 +28,8 @@ export const DriveBackupCard: React.FC = () => {
     setLoading(true); setError(null);
     try {
       const s = await googleStatus();
-      setConnected(!!s.account);
+      setConnected(!!s.account); setPremium(s.premium);
+      if (!s.premium) { setList(null); return; }
       setList(s.account ? await driveBackups() : null);
     } catch (e: any) { setError(e.message); } finally { setLoading(false); }
   }, []);
@@ -47,6 +49,18 @@ export const DriveBackupCard: React.FC = () => {
     try { await driveDelete(b.id); showToast(t('google.backup_deleted', 'Backup deleted from Google Drive.')); void load(); }
     catch (e: any) { showToast(e.message, 'error'); } finally { setBusy(false); }
   };
+
+  if (premium === false) return (
+    <div className="card-base p-6">
+      <div className="flex items-start gap-4">
+        <div className="w-12 h-12 rounded-2xl bg-violet-50 dark:bg-violet-950/50 text-violet-700 dark:text-violet-400 flex items-center justify-center shrink-0 border border-violet-200 dark:border-violet-900"><Lock size={22} /></div>
+        <div className="min-w-0 flex-1">
+          <h3 className="text-sm font-bold text-slate-900 dark:text-white">{t('google.drive_title', 'Google Drive backup')} <span className="ml-1 text-[10px] font-black uppercase tracking-wider text-violet-700 dark:text-violet-300">{t('google.premium_badge', 'Premium')}</span></h3>
+          <p className="text-xs text-slate-500 dark:text-slate-400 mt-1 leading-relaxed">{t('google.premium_locked', 'Google sync and Google Drive backup are a premium feature and are not switched on for this computer. Ask the software provider (iqbal_labs) to enable them.')}</p>
+        </div>
+      </div>
+    </div>
+  );
 
   return (
     <div className="card-base p-6">

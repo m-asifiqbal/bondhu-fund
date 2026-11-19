@@ -16,6 +16,14 @@ export const LoanPolicyModal: React.FC<{ open: boolean; onClose: () => void }> =
   const [method, setMethod] = useState<LoanMethod>('reducing');
   const [mult, setMult] = useState('0');
   const [fee, setFee] = useState('0');
+  const [maxActive, setMaxActive] = useState('1');
+  const [blockOverdue, setBlockOverdue] = useState(true);
+  const [blockWO, setBlockWO] = useState(true);
+  const [minMonths, setMinMonths] = useState('0');
+  const [maxArrears, setMaxArrears] = useState('0');
+  const [maxPct, setMaxPct] = useState('0');
+  const [reserve, setReserve] = useState('0');
+  const [gMax, setGMax] = useState('2');
   const [consent, setConsent] = useState(true);
   const [saving, setSaving] = useState(false);
 
@@ -25,6 +33,9 @@ export const LoanPolicyModal: React.FC<{ open: boolean; onClose: () => void }> =
     setMethod((settings?.loan_default_method as LoanMethod) || 'reducing');
     setMult(String(settings?.loan_max_multiple ?? 0));
     setFee(String(settings?.loan_late_fee ?? 0));
+    setMaxActive(String(settings?.loan_max_active ?? 1)); setBlockOverdue(settings?.loan_block_overdue !== false); setBlockWO(settings?.loan_block_written_off !== false);
+    setMinMonths(String(settings?.loan_min_member_months ?? 0)); setMaxArrears(String(settings?.loan_max_arrears_months ?? 0)); setMaxPct(String(settings?.loan_max_pct_of_fund ?? 0));
+    setReserve(String(settings?.loan_cash_reserve ?? 0)); setGMax(String(settings?.loan_guarantor_max ?? 2));
     setConsent(settings?.loan_consent_required !== false);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
@@ -34,7 +45,9 @@ export const LoanPolicyModal: React.FC<{ open: boolean; onClose: () => void }> =
     if (saving) return;
     setSaving(true);
     try {
-      await saveAppSettings({ loan_default_rate: Number(rate) || 0, loan_default_method: method, loan_max_multiple: Number(mult) || 0, loan_late_fee: Number(fee) || 0, loan_consent_required: consent });
+      await saveAppSettings({ loan_default_rate: Number(rate) || 0, loan_default_method: method, loan_max_multiple: Number(mult) || 0, loan_late_fee: Number(fee) || 0, loan_consent_required: consent,
+        loan_max_active: Number(maxActive) || 0, loan_block_overdue: blockOverdue, loan_block_written_off: blockWO, loan_min_member_months: Number(minMonths) || 0, loan_max_arrears_months: Number(maxArrears) || 0,
+        loan_max_pct_of_fund: Number(maxPct) || 0, loan_cash_reserve: Number(reserve) || 0, loan_guarantor_max: Number(gMax) || 0 });
       showToast(t('loan.policy_saved', 'Loan policy saved.'));
       triggerRefresh();
       onClose();
@@ -45,7 +58,7 @@ export const LoanPolicyModal: React.FC<{ open: boolean; onClose: () => void }> =
     <Modal
       open={open} onClose={() => !saving && onClose()} locked={saving} size="md" icon={<SlidersHorizontal size={18} />}
       title={t('loan.policy_title', 'Loan policy')}
-      subtitle={t('loan.policy_sub', 'Defaults for new loans and the approval limit. Existing loans are not changed.')}
+      subtitle={t('loan.policy_sub', 'Defaults for new loans and the lending rules. Existing loans are not changed.')}
       footer={
         <div className="flex items-center justify-end gap-2">
           <button type="button" onClick={onClose} disabled={saving} className="btn btn-cancel">{t('common.cancel', 'Cancel')}</button>
@@ -84,6 +97,22 @@ export const LoanPolicyModal: React.FC<{ open: boolean; onClose: () => void }> =
           <label className="form-label">{t('loan.policy_late', 'Suggested penalty per late installment')}</label>
           <MoneyInput min="0" step="any" value={fee} onChange={e => setFee(e.target.value)} className="form-input font-bold tabular-nums" />
           <p className="mt-1 text-[10px] text-slate-500 dark:text-slate-400">{t('loan.policy_late_hint', 'Pre-fills the penalty when a payment is late. 0 = none. It can always be changed when recording the payment.')}</p>
+        </div>
+        <div className="rounded-2xl border border-slate-200 dark:border-slate-800 p-4 space-y-4">
+          <div>
+            <div className="text-[13px] font-black text-slate-900 dark:text-white">{t('loan.pol_title', 'Who may borrow, and how much the fund may lend')}</div>
+            <p className="mt-1 text-[11px] text-slate-500 dark:text-slate-400 leading-relaxed">{t('loan.pol_hint', 'These rules are checked every time a loan is saved. Only an Admin can approve an exception, and must write the reason; it is kept on the loan. 0 means "not checked".')}</p>
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div><label className="form-label">{t('loan.pol_max_active', 'Open loans per member')}</label><input type="number" min={0} step={1} value={maxActive} onChange={e => setMaxActive(e.target.value)} data-no-clear className="form-input font-bold tabular-nums" /></div>
+            <div><label className="form-label">{t('loan.pol_guarantor_max', 'Open loans one member may guarantee')}</label><input type="number" min={0} step={1} value={gMax} onChange={e => setGMax(e.target.value)} data-no-clear className="form-input font-bold tabular-nums" /></div>
+            <div><label className="form-label">{t('loan.pol_min_months', 'Minimum months of membership')}</label><input type="number" min={0} step={1} value={minMonths} onChange={e => setMinMonths(e.target.value)} data-no-clear className="form-input font-bold tabular-nums" /></div>
+            <div><label className="form-label">{t('loan.pol_max_arrears', 'Most unpaid contribution months allowed')}</label><input type="number" min={0} step={1} value={maxArrears} onChange={e => setMaxArrears(e.target.value)} data-no-clear className="form-input font-bold tabular-nums" /></div>
+            <div><label className="form-label">{t('loan.pol_max_pct', 'One loan may not exceed (% of the fund)')}</label><input type="number" min={0} max={100} step="any" value={maxPct} onChange={e => setMaxPct(e.target.value)} data-no-clear className="form-input font-bold tabular-nums" /></div>
+            <div><label className="form-label">{t('loan.pol_reserve', 'Cash that must stay in hand after a loan')}</label><MoneyInput min="0" step="any" value={reserve} onChange={e => setReserve(e.target.value)} className="form-input font-bold tabular-nums" /></div>
+          </div>
+          <label className="flex items-center gap-2 text-xs font-semibold text-slate-700 dark:text-slate-200 cursor-pointer select-none"><input type="checkbox" checked={blockOverdue} onChange={e => setBlockOverdue(e.target.checked)} className="w-4 h-4 accent-[#0f4a3c]" />{t('loan.pol_block_overdue', 'No new loan while the member has an overdue loan')}</label>
+          <label className="flex items-center gap-2 text-xs font-semibold text-slate-700 dark:text-slate-200 cursor-pointer select-none"><input type="checkbox" checked={blockWO} onChange={e => setBlockWO(e.target.checked)} className="w-4 h-4 accent-[#0f4a3c]" />{t('loan.pol_block_wo', 'No new loan for a member who has had a loan written off')}</label>
         </div>
       </form>
     </Modal>

@@ -67,7 +67,7 @@ function audit(step, unrealized = 0, portfolio = null) {
   throws(() => A.recordPayment({ member_id: m1, payment_month: '2026-03', payment_date: '2026-03-02', contribution_amount: 5, late_fee: -1, payment_method: 'Cash' }), /negative/, 'negative late fee refused');
 
   // same member + month again = correction, not a duplicate
-  A.recordPayment({ member_id: m2, payment_month: '2026-01', payment_date: '2026-01-08', contribution_amount: 2500, late_fee: 0, payment_method: 'Bank transfer' });
+  A.recordPayment({ member_id: m2, payment_month: '2026-01', payment_date: '2026-01-08', contribution_amount: 2500, late_fee: 0, payment_method: 'Bank transfer', replace: true });
   book.collected += 500; book.contributions += 500;
   ok(A.getMemberHistory(m2).length === 1, 'correcting a month does not create a second row');
   audit('payment corrected');
@@ -79,9 +79,9 @@ function audit(step, unrealized = 0, portfolio = null) {
   eq(col.stats.collectedAmount, 1000 + 2500, 'Collections screen: January collected');
 
   // ---------- expenses ----------
-  const e1 = A.addExpense({ title: 'Meeting', category: 'Meetup & Events', amount: 800, expense_date: '2026-03-10', payee: 'Venue' }); book.expenses += 800;
+  const e1 = A.addExpense({ allow_overdraft: true, title: 'Meeting', category: 'Meetup & Events', amount: 800, expense_date: '2026-03-10', payee: 'Venue' }); book.expenses += 800;
   ok(A.getExpenses().find(x => x.id === e1).status === 'Needs receipt', 'expense without receipt is flagged');
-  const e2 = A.addExpense({ title: 'Stationery', category: 'Office & Supplies', amount: 200, expense_date: '2026-03-11', payee: 'Shop', receipt_ref: 'V-1' }); book.expenses += 200;
+  const e2 = A.addExpense({ allow_overdraft: true, title: 'Stationery', category: 'Office & Supplies', amount: 200, expense_date: '2026-03-11', payee: 'Shop', receipt_ref: 'V-1' }); book.expenses += 200;
   ok(A.getExpenses().find(x => x.id === e2).status === 'Verified', 'expense with receipt is verified');
   audit('2 expenses');
   A.verifyExpenseReceipt(e1, 'V-2');
@@ -90,16 +90,16 @@ function audit(step, unrealized = 0, portfolio = null) {
   audit('expense edited');
   A.deleteExpense(e2); book.expenses -= 250;
   audit('expense deleted');
-  throws(() => A.addExpense({ title: 'Bad', category: 'Meetup & Events', amount: 0, expense_date: '2026-03-10', payee: 'x' }), /greater than zero|amount/i, 'zero expense refused');
+  throws(() => A.addExpense({ allow_overdraft: true, title: 'Bad', category: 'Meetup & Events', amount: 0, expense_date: '2026-03-10', payee: 'x' }), /greater than zero|amount/i, 'zero expense refused');
 
   // ---------- investments ----------
-  const i1 = A.addInvestment({ name: 'Plot A', sector: 'Plot', invested_amount: 3000, purchase_date: '2026-03-01' }); book.invested += 3000;
+  const i1 = A.addInvestment({ allow_overdraft: true, name: 'Plot A', sector: 'Plot', invested_amount: 3000, purchase_date: '2026-03-01' }); book.invested += 3000;
   audit('investment bought');
   A.updateInvestmentValuation(i1, 3500);
   audit('valuation up', 500);
   A.updateInvestmentValuation(i1, 2800);
   audit('valuation down', -200);
-  const i2 = A.addInvestment({ name: 'FDR B', sector: 'Fixed Deposit', invested_amount: 1000, purchase_date: '2026-04-01' }); book.invested += 1000;
+  const i2 = A.addInvestment({ allow_overdraft: true, name: 'FDR B', sector: 'Fixed Deposit', invested_amount: 1000, purchase_date: '2026-04-01' }); book.invested += 1000;
   A.updateInvestment(i2, { status: 'Sold', sold_amount: 1300, sold_date: '2026-06-01' });
   book.saleProceeds += 1300; book.soldCost += 1000;
   audit('investment sold at a gain', -200);

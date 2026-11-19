@@ -32,6 +32,7 @@ export const LoanDetailModal: React.FC<Props> = ({ loanId, onClose, onOpenLoan, 
   const [tab, setTab] = useState<Tab>('schedule');
   const [pay, setPay] = useState<null | 'Installment' | 'Closure'>(null);
   const [confirm, setConfirm] = useState<null | 'delete' | 'writeoff' | 'cancelwo' | { repayId: number }>(null);
+  const [delReason, setDelReason] = useState('');
   const [woDate, setWoDate] = useState(todayISO());
   const [woReason, setWoReason] = useState('');
   const [busy, setBusy] = useState(false);
@@ -92,7 +93,7 @@ export const LoanDetailModal: React.FC<Props> = ({ loanId, onClose, onOpenLoan, 
                 <button type="button" onClick={() => setConfirm('cancelwo')} className="btn btn-outline btn-sm"><Undo2 size={13} />{t('loan.cancel_writeoff', 'Cancel write-off')}</button>
               )}
               {!readOnly && loan.repayment_count === 0 && loan.status === 'Active' && (
-                <button type="button" onClick={() => setConfirm('delete')} className="btn btn-danger-outline btn-sm"><Trash2 size={13} />{t('loan.delete', 'Delete loan')}</button>
+                <button type="button" onClick={() => { setDelReason(''); setConfirm('delete'); }} className="btn btn-danger-outline btn-sm"><Trash2 size={13} />{t('loan.delete', 'Delete loan')}</button>
               )}
               {!readOnly && open && isAdmin && (
                 <button type="button" onClick={() => { setWoDate(todayISO()); setWoReason(''); setConfirm('writeoff'); }} className="btn btn-danger-outline btn-sm"><Ban size={13} />{t('loan.write_off', 'Write off')}</button>
@@ -248,7 +249,7 @@ export const LoanDetailModal: React.FC<Props> = ({ loanId, onClose, onOpenLoan, 
                           <td className={`${td} text-slate-500 dark:text-slate-400 max-w-[200px] truncate`} title={r.note || ''}>{r.note || '—'}</td>
                           <td className={`${td} text-right`}>
                             {!readOnly && r.id === d.latestRepaymentId && loan.status !== 'Written off' && (
-                              <button type="button" onClick={() => setConfirm({ repayId: r.id })} className="btn btn-danger-outline btn-sm btn-icon" title={t('loan.remove_payment', 'Remove this payment')} aria-label={t('loan.remove_payment', 'Remove this payment')}><Trash2 size={13} /></button>
+                              <button type="button" onClick={() => { setDelReason(''); setConfirm({ repayId: r.id }); }} className="btn btn-danger-outline btn-sm btn-icon" title={t('loan.remove_payment', 'Remove this payment')} aria-label={t('loan.remove_payment', 'Remove this payment')}><Trash2 size={13} /></button>
                             )}
                           </td>
                         </tr>
@@ -298,9 +299,9 @@ export const LoanDetailModal: React.FC<Props> = ({ loanId, onClose, onOpenLoan, 
         footer={
           <div className="flex items-center justify-end gap-2">
             <button type="button" onClick={() => setConfirm(null)} disabled={busy} className="btn btn-cancel">{t('common.cancel', 'Cancel')}</button>
-            <button type="button" disabled={busy} className="btn btn-danger" onClick={() => {
-              if (typeof confirm === 'object' && confirm) run(() => deleteLoanRepayment(confirm.repayId), t('loan.payment_removed', 'Payment removed.'));
-              else if (loan) run(() => deleteLoan(loan.id), t('loan.deleted', 'Loan deleted.'), onClose);
+            <button type="button" disabled={busy || delReason.trim().length < 5} className="btn btn-danger" onClick={() => {
+              if (typeof confirm === 'object' && confirm) run(() => deleteLoanRepayment(confirm.repayId, delReason.trim()), t('loan.payment_removed', 'Payment removed.'));
+              else if (loan) run(() => deleteLoan(loan.id, delReason.trim()), t('loan.deleted', 'Loan deleted.'), onClose);
             }}>{busy ? t('finance.deleting', 'Deleting…') : t('common.delete', 'Delete')}</button>
           </div>
         }
@@ -308,8 +309,13 @@ export const LoanDetailModal: React.FC<Props> = ({ loanId, onClose, onOpenLoan, 
         <p className="text-xs text-slate-600 dark:text-slate-300 leading-relaxed">
           {typeof confirm === 'object' && confirm
             ? t('loan.remove_payment_body', 'The latest payment will be removed and the loan goes back to how it was before it. Use this only to correct a mistake.')
-            : t('loan.delete_body', 'This loan has no payments. Deleting it removes the loan and its schedule, and the money goes back to the fund\'s cash. This cannot be undone.')}
+            : t('loan.delete_body', 'This loan has no payments. Deleting it removes the loan and its schedule, and the money goes back to the fund\'s cash. If it came from a draft, the draft waits again. Only an Admin can do this.')}
         </p>
+        <div className="mt-3">
+          <label className="form-label">{t('loan.del_reason', 'Reason')} <span className="text-rose-500">*</span></label>
+          <input type="text" value={delReason} onChange={e => setDelReason(e.target.value)} className="form-input" placeholder={t('loan.del_reason_ph', 'e.g. entered twice by mistake')} />
+          <p className="form-hint">{t('loan.del_reason_hint', 'At least 5 characters. It is kept in the activity log.')}</p>
+        </div>
       </Modal>
 
       <Modal

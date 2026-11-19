@@ -94,7 +94,7 @@ export const InvestmentReturnsView: React.FC = () => {
         <div className={`w-8 h-8 rounded-xl flex items-center justify-center shrink-0 ${iconCls}`}>{icon}</div>
       </div>
       <div className="mt-4 min-w-0">
-        <div className={`text-2xl font-black tracking-tight truncate ${valueCls}`} title={value}>{value}</div>
+        <div className={`text-2xl font-black tracking-tight break-words leading-tight ${valueCls}`} title={value}>{value}</div>
         <div className="text-[11px] text-slate-500 dark:text-slate-400 font-medium mt-1 truncate" title={sub}>{sub}</div>
       </div>
     </div>

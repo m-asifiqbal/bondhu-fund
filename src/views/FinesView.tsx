@@ -60,7 +60,7 @@ export const FinesView: React.FC = () => {
     <div className={`card-base p-5 border-l-4 ${accent} min-w-0`}>
       <div className="flex items-center justify-between gap-2"><span className="text-xs font-bold text-slate-500 dark:text-slate-400">{label}</span>
         <div className={`w-8 h-8 rounded-xl flex items-center justify-center shrink-0 ${iconCls}`}>{icon}</div></div>
-      <div className="text-2xl font-black tracking-tight mt-3 truncate text-slate-900 dark:text-white" title={value}>{value}</div>
+      <div className="text-2xl font-black tracking-tight mt-3 break-words leading-tight text-slate-900 dark:text-white" title={value}>{value}</div>
       {sub && <div className="text-[11px] font-semibold mt-1 text-slate-500 dark:text-slate-400">{sub}</div>}
     </div>
   );

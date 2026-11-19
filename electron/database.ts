@@ -150,7 +150,7 @@ export function toMonthKey(v: any): string | null {
   if (!v) return null;
   const s = String(v).trim();
   let m = s.match(/^(\d{4})-(\d{1,2})/);
-  if (m) return `${m[1]}-${pad(+m[2])}`;
+  if (m) return +m[2] >= 1 && +m[2] <= 12 ? `${m[1]}-${pad(+m[2])}` : null;    // 2025-13 is not a month
   m = s.match(/^([A-Za-z]+)[\s,-]+(\d{4})$/);
   if (m && monthIdx(m[1]) >= 0) return `${m[2]}-${pad(monthIdx(m[1]) + 1)}`;
   return null;
@@ -179,11 +179,11 @@ export function toISODate(v: any, fallbackYear?: number): string | null {
 }
 
 export function addMonths(key: string, n: number) {
-  const [y, m] = key.split('-').map(Number);
-  const d = new Date(y, m - 1 + n, 1);
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}`;
+  const y = +key.slice(0, 4), t = +key.slice(5, 7) - 1 + n;
+  return `${y + Math.floor(t / 12)}-${pad(((t % 12) + 12) % 12 + 1)}`;
 }
-const daysInMonth = (key: string) => { const [y, m] = key.split('-').map(Number); return new Date(y, m, 0).getDate(); };
+const DIM = [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+const daysInMonth = (key: string) => { const y = +key.slice(0, 4), m = +key.slice(5, 7); return m === 2 && ((y % 4 === 0 && y % 100 !== 0) || y % 400 === 0) ? 29 : DIM[m - 1]; };
 const dueDateOf = (key: string, dueDay: number) => `${key}-${pad(Math.min(Math.max(1, dueDay), daysInMonth(key)))}`;
 const monthEnd = (key: string) => `${key}-${pad(daysInMonth(key))}`;
 const monthArg = (v: any) => toMonthKey(v) || currentMonthKey();
@@ -322,6 +322,7 @@ CREATE INDEX IF NOT EXISTS idx_members_status_join ON members(status, join_date)
 CREATE INDEX IF NOT EXISTS idx_members_name ON members(name);
 CREATE INDEX IF NOT EXISTS idx_coll_month ON collections(payment_month);
 CREATE INDEX IF NOT EXISTS idx_coll_date ON collections(payment_date);
+CREATE INDEX IF NOT EXISTS idx_coll_cov ON collections(payment_date, total_amount);   -- covering: the fund-position sums read only this index
 CREATE INDEX IF NOT EXISTS idx_exp_date ON expenses(expense_date);
 CREATE INDEX IF NOT EXISTS idx_exp_cat ON expenses(category);
 CREATE INDEX IF NOT EXISTS idx_inv_status ON investments(status);
@@ -347,6 +348,14 @@ const DEFAULT_SETTINGS: Record<string, string> = {
   loan_default_method: 'reducing',
   loan_max_multiple: '0',     // 0 = no limit; otherwise a member's loans may not exceed this × their savings without a written reason
   loan_late_fee: '0',         // suggested penalty per installment paid late (0 = none)
+  loan_max_active: '1',           // most open loans one member may have (0 = no limit)
+  loan_block_overdue: '1',        // no new loan while the member has an overdue loan
+  loan_block_written_off: '1',    // no new loan for a member who has had a loan written off
+  loan_min_member_months: '0',    // months of membership required (0 = none)
+  loan_max_arrears_months: '0',   // most unpaid contribution months a borrower may have (0 = not checked)
+  loan_max_pct_of_fund: '0',      // one loan may not exceed this % of the fund (0 = not checked)
+  loan_cash_reserve: '0',         // cash that must still be in hand after the loan (0 = none)
+  loan_guarantor_max: '2',        // most open loans one member may guarantee (0 = no limit)
   loan_consent_required: '1', // 1 = a loan is a draft until its signed consent paper is uploaded; 0 = loans are disbursed immediately
 };
 
@@ -504,11 +513,12 @@ export async function openDatabase(file: string, wasmBinary: Buffer, fallbackFil
 }
 
 /** Synchronously writes the database to disk (atomic temp-file + rename). */
-export function flush() {
+export function flush(): Buffer | null {
   if (saveTimer) { clearTimeout(saveTimer); saveTimer = null; }
-  if (!db || !dbPath) return;
+  if (!db || !dbPath) return null;
   const tmp = `${dbPath}.tmp`;
-  fs.writeFileSync(tmp, Buffer.from(db.export()));
+  const bytes = Buffer.from(db.export());
+  fs.writeFileSync(tmp, bytes);
   try {
     fs.renameSync(tmp, dbPath);
   } catch {
@@ -518,9 +528,14 @@ export function flush() {
   dirty = false;
   // sql.js export() resets pragmas on some builds; re-assert
   run('PRAGMA foreign_keys = ON');
+  return bytes;
 }
 export const isDirty = () => dirty;
-export const exportBytes = (): Buffer => { flush(); return Buffer.from(db.export()); };
+export const exportBytes = (): Buffer => {
+  const saved = flush();                                   // writes the file and hands back the same bytes: one export, not two
+  if (saved) return saved;
+  const b = Buffer.from(db.export()); run('PRAGMA foreign_keys = ON'); return b;      // export() switches foreign-key enforcement off: switch it back on
+};
 
 /** Validates + migrates a backup, then swaps it in. Throws with a readable message. */
 export function replaceWith(bytes: Buffer) {
@@ -552,15 +567,16 @@ export function setActor(name: string, id?: number | null) { actor = name || 'Sy
 // ---------------------------------------------------------------------------
 // Settings
 // ---------------------------------------------------------------------------
-function settingsMap(): Record<string, string> {
+/** All settings. The big image values (the logo) are left out unless asked for: most callers only need a number or a short text. */
+function settingsMap(withImages = false): Record<string, string> {
   const m: Record<string, string> = { ...DEFAULT_SETTINGS };
-  for (const r of all('SELECT key, value FROM app_settings')) m[r.key] = r.value;
+  for (const r of all(withImages ? 'SELECT key, value FROM app_settings' : 'SELECT key, value FROM app_settings WHERE length(value) <= 20000')) m[r.key] = r.value;
   return m;
 }
 const dueDay = () => Number(settingsMap().monthly_due_day) || 10;
 
 function getAppSettings() {
-  const s = settingsMap();
+  const s = settingsMap(true);
   return {
     organization_name: s.organization_name,
     currency_symbol: s.currency_symbol,
@@ -579,6 +595,9 @@ function getAppSettings() {
     loan_default_method: (LOAN_METHODS as string[]).includes(s.loan_default_method) ? s.loan_default_method : 'reducing',
     loan_max_multiple: Number(s.loan_max_multiple) || 0,
     loan_late_fee: Number(s.loan_late_fee) || 0,
+    loan_max_active: Number(s.loan_max_active) || 0, loan_block_overdue: s.loan_block_overdue !== '0', loan_block_written_off: s.loan_block_written_off !== '0',
+    loan_min_member_months: Number(s.loan_min_member_months) || 0, loan_max_arrears_months: Number(s.loan_max_arrears_months) || 0,
+    loan_max_pct_of_fund: Number(s.loan_max_pct_of_fund) || 0, loan_cash_reserve: Number(s.loan_cash_reserve) || 0, loan_guarantor_max: Number(s.loan_guarantor_max) || 0,
     loan_consent_required: s.loan_consent_required !== '0',
   };
 }
@@ -596,6 +615,9 @@ function saveAppSettings(patch: Record<string, any>) {
       if (k === 'loan_default_method' && !(LOAN_METHODS as string[]).includes(val)) fail('Choose a valid default interest method.');
       if (k === 'loan_max_multiple' && !(Number.isFinite(+val) && +val >= 0 && +val <= 100)) fail('Loan limit must be 0 (no limit) or a positive multiple.');
       if (k === 'loan_late_fee' && !(Number.isFinite(+val) && +val >= 0)) fail('Loan late fee cannot be negative.');
+      if (['loan_max_active', 'loan_min_member_months', 'loan_max_arrears_months', 'loan_guarantor_max'].includes(k) && !(Number.isInteger(+val) && +val >= 0 && +val <= 1000)) fail('Loan policy numbers must be whole numbers, 0 or more (0 = not checked).');
+      if (k === 'loan_max_pct_of_fund' && !(Number.isFinite(+val) && +val >= 0 && +val <= 100)) fail('The share of the fund one loan may take must be 0 (not checked) to 100 percent.');
+      if (k === 'loan_cash_reserve' && !(Number.isFinite(+val) && +val >= 0 && +val <= MAX_AMOUNT)) fail('The cash reserve cannot be negative.');
       run('INSERT OR REPLACE INTO app_settings (key, value) VALUES (?,?)', [k, val]);
     }
     audit('update', 'settings', null, Object.keys(patch || {}).join(', '));
@@ -698,29 +720,35 @@ function benefitEvents(settleDate: string): BenefitEvent[] {
 function benefitAllocation(settleDate: string, own?: { id: number; date: string }) {
   const events = benefitEvents(settleDate);
   const members = all('SELECT id, opening_balance FROM members');
-  const pays = new Map<number, Array<{ d: string; a: number }>>();
-  for (const r of all('SELECT member_id, payment_date, contribution_amount FROM collections')) {
-    if (!pays.has(r.member_id)) pays.set(r.member_id, []);
-    pays.get(r.member_id)!.push({ d: String(r.payment_date), a: Number(r.contribution_amount) || 0 });
+  // each member's payments in date order with running totals in whole paisa: the savings on any date is one binary search
+  const pays = new Map<number, { ds: string[]; cum: number[] }>();
+  for (const r of all('SELECT member_id, payment_date, contribution_amount FROM collections ORDER BY member_id, payment_date')) {
+    let p = pays.get(r.member_id); if (!p) { p = { ds: [], cum: [] }; pays.set(r.member_id, p); }
+    p.ds.push(String(r.payment_date)); p.cum.push((p.cum.length ? p.cum[p.cum.length - 1] : 0) + Math.round((Number(r.contribution_amount) || 0) * 100));
   }
+  const memberById = new Map<number, any>(members.map(m => [Number(m.id), m]));
   const settledOn = new Map<number, string>(all('SELECT member_id, settlement_date FROM member_settlements' + (own ? ' WHERE member_id != ?' : ''), own ? [own.id] : [])
     .map(r => [Number(r.member_id), String(r.settlement_date)]));
   if (own) settledOn.set(own.id, own.date);
-  const principalAt = (id: number, opening: number, d: string) =>
-    opening + (pays.get(id) || []).reduce((s, p) => s + (p.d <= d ? p.a : 0), 0);
+  const principalAt = (id: number, opening: number, d: string) => {
+    const p = pays.get(id); if (!p) return opening;
+    let lo = 0, hi = p.ds.length;                                      // first index with date > d
+    while (lo < hi) { const mid = (lo + hi) >> 1; if (p.ds[mid] <= d) lo = mid + 1; else hi = mid; }
+    return opening + (lo ? p.cum[lo - 1] / 100 : 0);
+  };
 
   const total = new Map<number, number>();
   const lines = new Map<number, Array<{ date: string; label: string; amount: number; share: number }>>();
   let unallocated = 0;
   const give = (id: number, ev: BenefitEvent, share: number) => {
     total.set(id, (total.get(id) || 0) + share);
-    if (Math.abs(share) >= 0.005) { if (!lines.has(id)) lines.set(id, []); lines.get(id)!.push({ date: ev.date, label: ev.label, amount: ev.amount, share: r2(share) }); }
+    if (own && id === own.id && Math.abs(share) >= 0.005) { if (!lines.has(id)) lines.set(id, []); lines.get(id)!.push({ date: ev.date, label: ev.label, amount: ev.amount, share: r2(share) }); }   // lines are only ever shown for the one member being settled
   };
   for (const ev of events) {
     // A written-off loan is the borrower's own debt: their savings absorb it first; only what their savings cannot cover is shared by the other members.
     let bear = 0, rest = ev.amount;
     if (ev.borrower !== undefined) {
-      const bm = members.find(m => Number(m.id) === ev.borrower);
+      const bm = memberById.get(ev.borrower);
       const bsd = settledOn.get(ev.borrower);
       const pb = bm && !(bsd !== undefined && bsd < ev.date) ? principalAt(ev.borrower, Number(bm.opening_balance) || 0, ev.date) : 0;
       bear = Math.min(-ev.amount, pb);
@@ -752,7 +780,13 @@ function memberBenefitShare(memberId: number, settleDate: string) {
 // ---------------------------------------------------------------------------
 // Fines: late fees on contributions and penalties on loan installments, and the proof that the books balance
 // ---------------------------------------------------------------------------
-const dayDiff = (a: string, b: string) => Math.round((Date.parse(`${b}T12:00:00Z`) - Date.parse(`${a}T12:00:00Z`)) / 86400000);
+/** whole days since 1970-01-01 for a yyyy-mm-dd date (calendar arithmetic, no Date objects) */
+const dayNumber = (s: string) => {
+  const y0 = +s.slice(0, 4), m = +s.slice(5, 7), d = +s.slice(8, 10), y = m <= 2 ? y0 - 1 : y0;
+  const era = Math.floor(y / 400), yoe = y - era * 400, doy = Math.floor((153 * (m + (m > 2 ? -3 : 9)) + 2) / 5) + d - 1;
+  return era * 146097 + yoe * 365 + Math.floor(yoe / 4) - Math.floor(yoe / 100) + doy - 719468;
+};
+const dayDiff = (a: string, b: string) => dayNumber(b) - dayNumber(a);
 
 /**
  * Every fine that was collected, one row each. A contribution late fee belongs to the payment (the month it was for, the day it was paid, the day
@@ -1183,6 +1217,15 @@ function getLoanSummary() {
     dueNext30: sum(l => l.due_30),
     writtenOffAmount: sum(l => (l.status === 'Written off' ? l.written_off_amount : 0)),
     onTrackPct: dueToDate > 0 ? r2(Math.max(0, 100 * (dueToDate - overdue) / dueToDate)) : 100,
+    // portfolio quality: the open principal of loans by how long their oldest unpaid installment has been overdue, and the share of the portfolio at risk
+    aging: (() => {
+      const bucket = (lo: number, hi: number) => { const x = open.filter(l => l.derived_status === 'Overdue' && l.days_overdue >= lo && l.days_overdue <= hi); return { count: x.length, principal: r2(x.reduce((a, l) => a + l.outstanding_principal, 0)) }; };
+      const out = sum(l => (l.status === 'Active' ? l.outstanding_principal : 0));
+      const par = (days: number) => out > 0 ? r2(100 * open.filter(l => l.days_overdue > days).reduce((a, l) => a + l.outstanding_principal, 0) / out) : 0;
+      return { d1_30: bucket(1, 30), d31_60: bucket(31, 60), d61_90: bucket(61, 90), d90plus: bucket(91, 100000), par30: par(30), par60: par(60), par90: par(90) };
+    })(),
+    defaulters: open.filter(l => l.derived_status === 'Overdue').sort((a, b) => b.days_overdue - a.days_overdue).slice(0, 10)
+      .map(l => ({ loan_id: l.id, loan_no: l.loan_no, member_code: l.member_code, member_name: l.member_name, days_overdue: l.days_overdue, overdue_amount: l.overdue_amount, outstanding: l.outstanding_principal, guarantor: l.guarantor_member_name || l.guarantor_name || '' })),
     cashInHand: r2(pos.cashInHand),
     fundBalance: r2(pos.fundBalance),
     lentPctOfFund: pos.fundBalance > 0 ? r2(100 * pos.loansOutstanding / pos.fundBalance) : 0,
@@ -1222,6 +1265,8 @@ function guarantorFrom(d: any, borrowerId: number) {
     const g = get('SELECT id, member_code, name, status FROM members WHERE id = ?', [gid]);
     if (!g) fail('The guarantor member was not found.');
     if (g.status !== 'Active') fail(`${g.name} is not an active member, so cannot be a guarantor.`);
+    const gMax = Number(settingsMap().loan_guarantor_max) || 0, gOpen = num("SELECT COUNT(*) FROM personal_loans WHERE guarantor_member_id = ? AND status = 'Active'", [gid]);
+    if (gMax > 0 && gOpen >= gMax) fail(`${g.name} already guarantees ${gOpen} open loan(s); the policy allows ${gMax}. Choose another guarantor.`);
     return { cols: { guarantor_type: 'member', guarantor_member_id: gid, guarantor_name: null, guarantor_address: null, guarantor_nid: null, guarantor_phone: null, guarantor_relation: relation }, display: `${g.name} (${g.member_code})` };
   }
   if (type === 'outsider') {
@@ -1312,6 +1357,9 @@ function previewLoan(d: any) {
         const overdue = enrichLoans('WHERE l.member_id = ?', [mid]).filter(l => l.derived_status === 'Overdue');
         member = { ...m, savings, owed, limit, multiple: mult, available: limit === null ? null : Math.max(0, r2(limit - owed)), overdueLoans: overdue.length };
         if (m.status !== 'Active') warnings.push({ level: 'error', text: `${m.name} is not an active member.` });
+        const policyBlocks = loanPolicyBlocks(mid, terms.principal, disbursed), canOverride = isAdminSession();
+        (member as any).policyBlocks = policyBlocks; (member as any).canOverride = canOverride;
+        for (const b of policyBlocks) warnings.push({ level: canOverride ? 'warn' : 'error', text: `Loan policy: ${b}${canOverride ? ' An Admin approval reason is required.' : ' Only an Admin can approve an exception.'}` });
         if (limit !== null && terms.principal + owed > limit + 0.005)
           warnings.push({ level: 'warn', text: `Above the fund limit (${mult}× savings = TK ${limit}). A written approval reason is required.` });
         if (overdue.length) warnings.push({ level: 'warn', text: `${m.name} has ${overdue.length} overdue loan(s).` });
@@ -1346,7 +1394,7 @@ const consentRequired = () => settingsMap().loan_consent_required !== '0';
 
 /** Session may change data (everyone except a read-only Auditor). */
 export function requireWriter() {
-  const s = getSession();
+  const s = getSession(false);
   if (!s) fail('Please sign in.');
   if (s.user.role === 'Auditor') fail('Auditors have read-only access.');
 }
@@ -1355,6 +1403,43 @@ export function requireWriter() {
  * Everything that must be true to give — or draft — a loan, except the cash check and the consent paper.
  * Returns the cleaned values so the caller can store them.
  */
+const isAdminSession = () => !!session && (session.isSystem || session.role === 'Admin');
+/** unpaid contribution months of a member whose due date has already passed */
+function unpaidMonthsOf(m: { id: number; join_date: string }): number {
+  const paid = new Set(all('SELECT payment_month FROM collections WHERE member_id = ?', [m.id]).map(r => String(r.payment_month)));
+  const dd = dueDay(), today = todayISO(), mk = today.slice(0, 7);
+  let n = 0;
+  for (let k = String(m.join_date).slice(0, 7); k <= mk; k = addMonths(k, 1)) if (dueDateOf(k, dd) < today && !paid.has(k)) n++;
+  return n;
+}
+/**
+ * The lending policy (Loan policy dialog). Returns the reasons this loan breaks it; an empty list means it is within policy.
+ * Breaking it is not impossible: an Admin can approve the exception, in writing, and the reason is kept on the loan.
+ */
+function loanPolicyBlocks(memberId: number, principal: number, disbursed: string): string[] {
+  const s = settingsMap(), out: string[] = [];
+  const m = get('SELECT id, name, join_date FROM members WHERE id = ?', [memberId]);
+  if (!m) return out;
+  const open = enrichLoans('WHERE l.member_id = ?', [memberId]).filter(l => l.derived_status === 'Running' || l.derived_status === 'Overdue');
+  const maxActive = Number(s.loan_max_active) || 0;
+  if (maxActive > 0 && open.length >= maxActive) out.push(`${m.name} already has ${open.length} open loan(s); the policy allows ${maxActive} at a time.`);
+  if (s.loan_block_overdue !== '0' && open.some(l => l.derived_status === 'Overdue')) out.push(`${m.name} has an overdue loan.`);
+  if (s.loan_block_written_off !== '0' && num("SELECT COUNT(*) FROM personal_loans WHERE member_id = ? AND status = 'Written off'", [memberId]) > 0) out.push(`${m.name} has had a loan written off.`);
+  const minMonths = Number(s.loan_min_member_months) || 0;
+  if (minMonths > 0) {
+    const a = String(m.join_date).slice(0, 7), b = disbursed.slice(0, 7);
+    const months = (+b.slice(0, 4) - +a.slice(0, 4)) * 12 + (+b.slice(5, 7) - +a.slice(5, 7));
+    if (months < minMonths) out.push(`${m.name} has been a member for ${Math.max(0, months)} month(s); the policy requires ${minMonths}.`);
+  }
+  const maxArrears = Number(s.loan_max_arrears_months) || 0;
+  if (maxArrears > 0) { const u = unpaidMonthsOf(m as any); if (u > maxArrears) out.push(`${m.name} has ${u} unpaid contribution month(s); the policy allows ${maxArrears}.`); }
+  const pct = Number(s.loan_max_pct_of_fund) || 0;
+  if (pct > 0) { const fund = fundPosition(todayISO()).fundBalance; const cap = r2(fund * pct / 100); if (fund > 0 && principal > cap + 0.005) out.push(`One loan may not be more than ${pct}% of the fund (TK ${cap}).`); }
+  const reserve = Number(s.loan_cash_reserve) || 0;
+  if (reserve > 0) { const left = r2(lendableCash(disbursed) - principal); if (left < reserve - 0.005) out.push(`After this loan the fund would keep TK ${Math.max(0, left)} in cash, below the required reserve of TK ${reserve}.`); }
+  return out;
+}
+
 function prepareLoan(d: any) {
   const memberId = Number(d?.member_id);
   const m = get('SELECT * FROM members WHERE id = ?', [memberId]);
@@ -1371,7 +1456,16 @@ function prepareLoan(d: any) {
   const payMethod = String(d.payment_method || '').trim();
   if (!payMethod) fail('Choose how the money will be paid out (cash, bank, bKash…).');
   const mult = Number(settingsMap().loan_max_multiple) || 0;
-  const limitNote = String(d.limit_note || '').trim();
+  const rawLimitNote = String(d.limit_note || '').trim();
+  const pm = /(?:^|\s\|\s)POLICY EXCEPTION: (.+)$/.exec(rawLimitNote);                 // an exception approved on the draft travels with it
+  const limitNote = pm ? rawLimitNote.slice(0, pm.index).trim() : rawLimitNote;
+  const newPolicyNote = String(d.policy_override_note || '').trim();
+  const policyNote = newPolicyNote || (pm ? pm[1].trim() : '');
+  const blocks = loanPolicyBlocks(memberId, terms.principal, disbursed);
+  if (blocks.length) {
+    if (policyNote.length < 5) fail(`Loan policy: ${blocks.join(' ')} ${isAdminSession() ? 'Write the reason for approving this exception to continue.' : 'Only an Admin can approve an exception.'}`);
+    if (newPolicyNote && !isAdminSession()) fail(`Loan policy: ${blocks.join(' ')} Only an Admin can approve an exception.`);
+  }
   if (mult > 0) {
     const savings = memberSavings(memberId), owed = loansOwedBy(memberId);
     if (terms.principal + owed > mult * savings + 0.005 && !limitNote)
@@ -1379,7 +1473,7 @@ function prepareLoan(d: any) {
   }
   const guar = guarantorFrom(d, memberId);
   const plan = buildPlan(terms);
-  return { memberId, m, terms, disbursed, plan, guar, limitNote, payMethod, rawNotes: String(d.notes || '').trim(), reference: String(d.reference || '').trim(), purpose: String(d.purpose || '').trim() };
+  return { memberId, m, terms, disbursed, plan, guar, limitNote, policyNote: blocks.length ? policyNote : '', policyBlocks: blocks, storedNote: [limitNote, blocks.length && policyNote ? `POLICY EXCEPTION: ${policyNote}` : ''].filter(Boolean).join(' | '), payMethod, rawNotes: String(d.notes || '').trim(), reference: String(d.reference || '').trim(), purpose: String(d.purpose || '').trim() };
 }
 
 interface ConsentCarry { appId: number; appNo: string; consent: { file: string; name: string; size: number; sha256: string; at: string } | null }
@@ -1392,7 +1486,7 @@ function addLoanInternal(d: any, from: ConsentCarry | null) {
   if (from && required && !from.consent) fail('Upload the signed consent paper first; the loan is disbursed after that.');
   const cash = lendableCash(p.disbursed);
   if (p.terms.principal > cash + 0.005) fail(`The fund can lend only TK ${Math.max(0, cash)} (its cash in hand on ${p.disbursed} and today), so it cannot lend TK ${r2(p.terms.principal)}.`);
-  const notes = [p.rawNotes, p.limitNote ? `Over-limit approval: ${p.limitNote}` : ''].filter(Boolean).join(' | ');
+  const notes = [p.rawNotes, p.limitNote ? `Over-limit approval: ${p.limitNote}` : '', p.policyBlocks.length ? `Policy exception approved by ${actor}: ${p.policyBlocks.join(' ')} Reason: ${p.policyNote}` : ''].filter(Boolean).join(' | ');
   const { terms, plan, guar, m } = p;
   const id = tx(() => {
     const no = nextLoanNo();
@@ -1447,7 +1541,7 @@ function createLoanApplication(d: any) {
            payment_method, reference, purpose, notes, limit_note, guarantor, guarantor_type, guarantor_member_id, guarantor_name, guarantor_address, guarantor_nid, guarantor_phone, guarantor_relation, status, created_by)
          VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'Draft',?)`,
       [no, p.memberId, r2(p.terms.principal), p.terms.method, p.terms.annual_rate, p.plan.rows.length, p.disbursed, p.terms.first_due_date, p.plan.installment, p.plan.totalInterest, p.plan.totalPayable,
-        p.payMethod, p.reference, p.purpose, p.rawNotes, p.limitNote, p.guar.display,
+        p.payMethod, p.reference, p.purpose, p.rawNotes, p.storedNote, p.guar.display,
         c.guarantor_type, c.guarantor_member_id, c.guarantor_name, c.guarantor_address, c.guarantor_nid, c.guarantor_phone, c.guarantor_relation, actor]);
     const aid = lastId();
     audit('create', 'loan_application', aid, `${no} ${p.m.member_code} TK ${r2(p.terms.principal)} · ${p.plan.rows.length} months · draft: waiting for the signed consent paper`);
@@ -1600,12 +1694,20 @@ function updateLoan(id: number, d: any) {
 }
 
 /** Only a loan nobody has paid anything on can be deleted (to undo a mistake). */
-function deleteLoan(id: number) {
+function deleteLoan(id: number, reason?: string) {
   const l = get('SELECT * FROM personal_loans WHERE id = ?', [Number(id)]);
   if (!l) fail('Loan not found.');
+  const why = String(reason || '').trim();
+  if (why.length < 5) fail('Write the reason for deleting this loan (at least 5 characters). It is kept in the activity log.');
+  if (!isAdminSession()) fail('Only an Admin can delete a disbursed loan.');
   if (num('SELECT COUNT(*) FROM loan_repayments WHERE loan_id = ?', [l.id]) > 0) fail('This loan already has repayments. Remove them first (latest first), or close the loan instead.');
   if (l.status === 'Written off') fail('This loan was written off. Cancel the write-off first (Admin).');
-  tx(() => { run('DELETE FROM loan_schedule WHERE loan_id = ?', [l.id]); run('DELETE FROM personal_loans WHERE id = ?', [l.id]); audit('delete', 'loan', l.id, `${l.loan_no} TK ${l.principal}`); });
+  tx(() => {
+    run('DELETE FROM loan_schedule WHERE loan_id = ?', [l.id]); run('DELETE FROM personal_loans WHERE id = ?', [l.id]);
+    // the application the loan came from is not left pointing at a loan that no longer exists: it is a waiting draft again (its signed paper stays attached)
+    run("UPDATE loan_applications SET status = 'Draft', loan_id = NULL WHERE loan_id = ?", [l.id]);
+    audit('delete', 'loan', l.id, `${l.loan_no} TK ${l.principal} · reason: ${why}`);
+  });
   mutated();
 }
 
@@ -1697,9 +1799,12 @@ function recordLoanRepayment(d: any) {
 }
 
 /** Removes the most recent repayment of a loan (to correct a mistake). */
-function deleteLoanRepayment(id: number) {
+function deleteLoanRepayment(id: number, reason?: string) {
   const r = get('SELECT r.*, l.loan_no, l.status AS loan_status FROM loan_repayments r JOIN personal_loans l ON l.id = r.loan_id WHERE r.id = ?', [Number(id)]);
   if (!r) fail('Repayment not found.');
+  const why = String(reason || '').trim();
+  if (why.length < 5) fail('Write the reason for removing this payment (at least 5 characters). It is kept in the activity log.');
+  { const cash = r2(fundPosition(todayISO()).cashInHand); if (cash - Number(r.total_paid) < -0.004) fail(`Removing this payment (TK ${r.total_paid}) would make the fund's cash negative (cash in hand is TK ${cash}). The money has been spent or lent since.`); }
   if (r.loan_status === 'Written off') fail('This loan was written off. Cancel the write-off first (Admin).');
   if (num('SELECT MAX(id) FROM loan_repayments WHERE loan_id = ?', [r.loan_id]) !== Number(r.id)) fail('Only the most recent repayment of a loan can be removed. Remove the later ones first.');
   if (Number(r.interest_paid) > 0) assertAfterLastSettlement(String(r.paid_date), 'A repayment that included interest');
@@ -1707,7 +1812,7 @@ function deleteLoanRepayment(id: number) {
   tx(() => {
     run('DELETE FROM loan_repayments WHERE id = ?', [Number(id)]);
     if (r.loan_status === 'Closed') run(`UPDATE personal_loans SET status = 'Active', closed_date = NULL, updated_at = datetime('now','localtime') WHERE id = ?`, [r.loan_id]);
-    audit('void', 'loan_repayment', Number(id), `${r.loan_no} repayment ${r.total_paid} on ${r.paid_date}`);
+    audit('void', 'loan_repayment', Number(id), `${r.loan_no} repayment ${r.total_paid} on ${r.paid_date} · reason: ${why}`);
   });
   mutated();
 }
@@ -1831,9 +1936,51 @@ function getAllMembersLite() {
   return all(`SELECT id, member_code, name, name_bn, phone, nid, monthly_due, status, avatar_initials FROM members ORDER BY name COLLATE NOCASE`);
 }
 
+// ---- input checks shared by every entry --------------------------------------------------------------------------------
+const MAX_AMOUNT = 10_000_000_000;
+/** A money amount typed by a person: a real, finite number, within a sane ceiling, kept to 2 decimals (paisa). */
+function money(v: any, label: string, opts: { zero?: boolean } = {}): number {
+  const raw = typeof v === 'string' ? v.replace(/,/g, '').trim() : v;
+  const n = Number(raw);
+  if (raw === '' || raw === null || raw === undefined || !Number.isFinite(n)) fail(`${label} must be a number.`);
+  if (n < 0 || (n === 0 && !opts.zero)) fail(opts.zero ? `${label} cannot be negative.` : `${label} must be greater than zero.`);
+  if (n > MAX_AMOUNT) fail(`${label} is too large.`);
+  return Math.round((n + Number.EPSILON) * 100) / 100;
+}
+/** A date typed by a person. Empty = not given (null). A date that is not a real calendar date is refused, never quietly replaced by today. */
+function dateInput(v: any, label: string, opts: { notFuture?: boolean } = {}): string | null {
+  if (v === undefined || v === null || String(v).trim() === '') return null;
+  const d = toISODate(v);
+  if (!d) fail(`${label} is not a valid date. Use dd/mm/yyyy.`);
+  if (opts.notFuture && d! > todayISO()) fail(`${label} cannot be in the future.`);
+  return d;
+}
+/** Free text has a ceiling so one entry cannot bloat the database. */
+function limit(v: any, label: string, max: number) { if (v !== undefined && v !== null && String(v).length > max) fail(`${label} is too long (at most ${max} characters).`); }
+/** A value that comes from a Master Data list (expense category, investment sector, payment method) must be one of its active items. */
+function inMaster(type: string, value: any, label: string) {
+  if (value === undefined || value === null || String(value).trim() === '') return;
+  if (!num('SELECT COUNT(*) FROM master_data WHERE type = ? AND is_active = 1', [type])) return;      // a list the owner emptied is free text
+  if (!get('SELECT 1 FROM master_data WHERE type = ? AND is_active = 1 AND name = ? COLLATE NOCASE', [type, String(value).trim()])) fail(`${label} "${String(value).trim()}" is not in the Master Data list. Choose one from the list (or add it in Master Data).`);
+}
+/** Spending or investing more than the cash on hand needs an explicit "yes" (allow_overdraft): the screens ask the user and send it again. */
+function guardCash(d: any, amount: number, what: string) {
+  if (d?.allow_overdraft === true) return;
+  const cash = r2(fundPosition(todayISO()).cashInHand);
+  if (amount > cash + 0.004) fail(`OVERDRAFT: ${what} of ${amount} is more than the cash on hand (${cash}).`);
+}
+
+function validateMemberFields(d: any) {
+  if (d.monthly_due !== undefined && d.monthly_due !== '' && d.monthly_due !== null) { const n = Number(d.monthly_due); if (!Number.isFinite(n) || n <= 0 || n > MAX_AMOUNT) fail('Monthly due must be a positive number.'); }
+  const ob = d.opening_balance ?? d.total_contributed;
+  if (ob !== undefined && ob !== '' && ob !== null) { const n = Number(ob); if (!Number.isFinite(n) || n < 0 || n > MAX_AMOUNT) fail('Opening balance cannot be negative.'); }
+  if (d.join_date !== undefined && d.join_date !== null && String(d.join_date).trim() !== '') dateInput(d.join_date, 'Join date', { notFuture: true });
+  if (d.phone !== undefined && d.phone !== null && String(d.phone).trim() !== '' && !/^[0-9\u09E6-\u09EF+\-\s().]{5,20}$/.test(String(d.phone).trim())) fail('The phone number should have digits only (spaces, + and - are fine).');
+  limit(d.name, 'Member name', 200); limit(d.notes, 'Notes', 2000); limit(d.email, 'Email', 200); limit(d.designation, 'Designation', 100);
+}
 function validateMember(d: any) {
   if (!d?.name?.trim()) fail('Member name is required.');
-  if (d.monthly_due !== undefined && (isNaN(+d.monthly_due) || +d.monthly_due < 0)) fail('Monthly due must be a positive number.');
+  validateMemberFields(d);
 }
 
 function addMember(d: any) {
@@ -1860,7 +2007,7 @@ function addMember(d: any) {
 
 function updateMember(id: number, d: any) {
   if (!get('SELECT 1 FROM members WHERE id = ?', [id])) fail('Member not found.');
-  if (d.name !== undefined) validateMember(d);
+  if (d.name !== undefined) validateMember(d); else validateMemberFields(d);
   const fields: Record<string, any> = {
     name: d.name?.trim(), name_bn: d.name_bn !== undefined ? (String(d.name_bn).trim() || null) : undefined, phone: d.phone, email: d.email, designation: d.designation, status: d.status,
     monthly_due: d.monthly_due !== undefined ? Number(d.monthly_due) : undefined,
@@ -2292,17 +2439,24 @@ function getCollections(month?: string, statusTab = 'All', startDate?: string, e
 
 function recordPayment(d: any) {
   const memberId = Number(d?.member_id);
-  const member = get('SELECT id, name, member_code, monthly_due, status FROM members WHERE id = ?', [memberId]);
+  const member = get('SELECT id, name, member_code, monthly_due, status, join_date FROM members WHERE id = ?', [memberId]);
   if (!member) fail('Please select a valid member.');
   if (member.status !== 'Active') fail(`${member.name} is inactive. Payments can only be recorded for active members.`);
   const mk = toMonthKey(d.payment_month);
   if (!mk) fail('Please select the month this payment is for.');
-  const contribution = Number(d.contribution_amount);
-  const lateFee = Number(d.late_fee) || 0;
-  if (!(contribution > 0)) fail('Contribution amount must be greater than zero.');
-  if (lateFee < 0) fail('Late fee cannot be negative.');
-  const payDate = toISODate(d.payment_date) || todayISO();
-  if (payDate > todayISO()) fail('Payment date cannot be in the future.');
+  const contribution = money(d.contribution_amount, 'Contribution amount');
+  const lateFee = d.late_fee === undefined || d.late_fee === null || d.late_fee === '' ? 0 : money(d.late_fee, 'Late fee', { zero: true });
+  const payDate = dateInput(d.payment_date, 'Payment date', { notFuture: true }) || todayISO();
+  limit(d.note, 'Note', 2000); limit(d.trx_id, 'Transaction ID', 100); inMaster('payment_method', d.payment_method, 'Payment method');
+  // the month and the date must make sense for this member
+  const joinMonth = String(member.join_date || '').slice(0, 7);
+  if (joinMonth && mk < joinMonth) fail(`${member.name} joined in ${joinMonth}, so a payment cannot be recorded for the earlier month ${mk}.`);
+  const lastAllowed = (() => { const t = new Date(); t.setMonth(t.getMonth() + 12); return todayISO(t).slice(0, 7); })();
+  if (mk > lastAllowed) fail(`A payment cannot be recorded for ${mk}: that is more than a year ahead.`);
+  if (member.join_date && payDate < String(member.join_date)) fail(`The payment date is before ${member.name} joined (${member.join_date}).`);
+  // one payment per member and month: a second one replaces the first only when the user said so (replace: true), and the old amount goes to the audit log
+  const already = get('SELECT total_amount, payment_date FROM collections WHERE member_id = ? AND payment_month = ?', [memberId, mk]);
+  if (already && d.replace !== true) fail(`DUPLICATE: A payment for ${mk} is already recorded for ${member.name} (${already.total_amount} on ${already.payment_date}).`);
 
   const id = tx(() => {
     run(`INSERT INTO collections (member_id, payment_month, payment_date, contribution_amount, late_fee, total_amount, payment_method, trx_id, note, created_by)
@@ -2313,7 +2467,7 @@ function recordPayment(d: any) {
            trx_id = excluded.trx_id, note = excluded.note`,
       [memberId, mk, payDate, contribution, lateFee, contribution + lateFee, d.payment_method || 'Cash', d.trx_id || '', d.note || '', actor]);
     const pid = num('SELECT id FROM collections WHERE member_id = ? AND payment_month = ?', [memberId, mk]);
-    audit('payment', 'collection', pid, `${member.member_code} ${mk} ${contribution + lateFee}`);
+    audit(already ? 'replace' : 'payment', 'collection', pid, already ? `${member.member_code} ${mk} ${already.total_amount} (${already.payment_date}) replaced by ${contribution + lateFee} (${payDate})` : `${member.member_code} ${mk} ${contribution + lateFee}`);
     return pid;
   });
   mutated();
@@ -2364,17 +2518,21 @@ function getInvestments(sortBy = 'newest', status = 'All', startDate?: string, e
 function validateInvestment(d: any) {
   if (!d?.name?.trim()) fail('Investment name is required.');
   if (!d.sector) fail('Please choose a sector.');
-  if (!(Number(d.invested_amount) > 0)) fail('Invested amount must be greater than zero.');
-  if (d.current_estimated_value !== undefined && d.current_estimated_value !== '' && Number(d.current_estimated_value) < 0) fail('Estimated value cannot be negative.');
+  money(d.invested_amount, 'Invested amount'); inMaster('investment_sector', d.sector, 'Sector');
+  if (d.current_estimated_value !== undefined && d.current_estimated_value !== '' && d.current_estimated_value !== null) money(d.current_estimated_value, 'Estimated value', { zero: true });
+  dateInput(d.purchase_date, 'Purchase date', { notFuture: true });
+  dateInput(d.review_date, 'Review date');
+  limit(d.name, 'Investment name', 200); limit(d.location_details, 'Location', 300); limit(d.notes, 'Notes', 2000);
 }
 
 function addInvestment(d: any) {
   validateInvestment(d);
+  guardCash(d, money(d.invested_amount, 'Invested amount'), 'This investment');
   const id = tx(() => {
     run(`INSERT INTO investments (name, sector, purchase_date, invested_amount, current_estimated_value, status, review_date, location_details, notes, created_by)
          VALUES (?,?,?,?,?,?,?,?,?,?)`,
-      [d.name.trim(), d.sector, toISODate(d.purchase_date) || todayISO(), Number(d.invested_amount),
-        Number(d.current_estimated_value) || Number(d.invested_amount), d.status || 'Growing',
+      [d.name.trim(), d.sector, toISODate(d.purchase_date) || todayISO(), money(d.invested_amount, 'Invested amount'),
+        (d.current_estimated_value !== undefined && d.current_estimated_value !== '' && d.current_estimated_value !== null ? money(d.current_estimated_value, 'Estimated value', { zero: true }) : 0) || money(d.invested_amount, 'Invested amount'), d.status || 'Growing',
         toISODate(d.review_date), d.location_details || '', d.notes || '', actor]);
     const nid = lastId();
     audit('create', 'investment', nid, `${d.name} ${d.invested_amount}`);
@@ -2501,12 +2659,14 @@ function getExpenses(category = 'All', status = 'All', startDate?: string, endDa
 function addExpense(d: any) {
   if (!d?.title?.trim()) fail('Expense title is required.');
   if (!d.category) fail('Please choose an expense category.');
-  if (!(Number(d.amount) > 0)) fail('Amount must be greater than zero.');
-  const date = toISODate(d.expense_date) || todayISO();
-  if (date > todayISO()) fail('Expense date cannot be in the future.');
+  const amount = money(d.amount, 'Amount');
+  const date = dateInput(d.expense_date, 'Expense date', { notFuture: true }) || todayISO();
+  limit(d.title, 'Title', 200); limit(d.payee, 'Payee', 200); limit(d.receipt_ref, 'Receipt reference', 100); limit(d.notes, 'Notes', 2000);
+  inMaster('expense_category', d.category, 'Expense category');
+  guardCash(d, amount, 'This expense');
   const id = tx(() => {
     run(`INSERT INTO expenses (title, category, amount, expense_date, payee, receipt_ref, status, notes, created_by) VALUES (?,?,?,?,?,?,?,?,?)`,
-      [d.title.trim(), d.category, Number(d.amount), date, d.payee || '', d.receipt_ref || '',
+      [d.title.trim(), d.category, amount, date, d.payee || '', d.receipt_ref || '',
         d.status || (d.receipt_ref ? 'Verified' : 'Needs receipt'), d.notes || '', actor]);
     const nid = lastId();
     audit('create', 'expense', nid, `${d.title} ${d.amount}`);
@@ -2520,9 +2680,9 @@ function updateExpense(id: number, d: any) {
   if (!get('SELECT 1 FROM expenses WHERE id = ?', [id])) fail('Expense not found.');
   const f: Record<string, any> = {
     title: d.title?.trim(), category: d.category, payee: d.payee, receipt_ref: d.receipt_ref, status: d.status, notes: d.notes,
-    amount: d.amount !== undefined ? Number(d.amount) : undefined, expense_date: d.expense_date ? toISODate(d.expense_date) : undefined,
+    amount: d.amount !== undefined ? money(d.amount, 'Amount') : undefined, expense_date: d.expense_date ? dateInput(d.expense_date, 'Expense date', { notFuture: true }) : undefined,
   };
-  if (f.amount !== undefined && !(f.amount > 0)) fail('Amount must be greater than zero.');
+  limit(d.title, 'Title', 200); limit(d.payee, 'Payee', 200); limit(d.notes, 'Notes', 2000);
   // receipt reference drives verification status unless the caller sets it explicitly
   if (f.status === undefined && d.receipt_ref !== undefined) f.status = String(d.receipt_ref).trim() ? 'Verified' : 'Needs receipt';
   const keys = Object.keys(f).filter(k => f[k] !== undefined);
@@ -2545,10 +2705,11 @@ function deleteExpense(id: number) {
 // Users & master data
 // ---------------------------------------------------------------------------
 // Never send credential columns to the renderer.
+const USER_COLS_LITE = `id, username, full_name, email, role, avatar_initials, status, is_system, permissions`;     // what an access check needs: no avatar image
 const USER_COLS = `id, username, full_name, full_name_bn, email, role, avatar_initials, status, created_at, phone, designation, address, bio, avatar,
   last_login_at, updated_at, is_system, permissions, (password_hash IS NOT NULL) AS has_password`;
 /** The protected iqbal_labs super-user account is visible only to itself. */
-const seesSystem = () => !!getSession()?.canUpload;
+const seesSystem = () => !!getSession(false)?.canUpload;
 const getUsers = () => all(`SELECT ${USER_COLS} FROM users ${seesSystem() ? '' : 'WHERE is_system = 0'} ORDER BY id`);
 
 /** Profile page: user + activity statistics from the audit log. */
@@ -2697,6 +2858,7 @@ function login(username: string, password: string) {
   if (u.status !== 'Active') fail('This account is inactive. Ask an administrator to activate it.');
   if (!u.password_hash) fail('No password has been set for this account yet. Ask an administrator to set one.');
   const lockedUntil = u.failed_logins >= 5 && u.last_login_at ? Date.parse(u.last_login_at.replace(' ', 'T')) + 5 * 60_000 : 0;
+  if (u.failed_logins >= 5 && lockedUntil && lockedUntil <= Date.now()) { run('UPDATE users SET failed_logins = 0 WHERE id = ?', [u.id]); u.failed_logins = 0; }   // the lock has run out: a fresh start, not one more strike
   if (lockedUntil > Date.now()) fail('Too many wrong attempts. Please wait 5 minutes and try again.');
   if (!verifyPassword(String(password || ''), u.password_salt, u.password_hash)) {
     run(`UPDATE users SET failed_logins = failed_logins + 1, last_login_at = CASE WHEN failed_logins + 1 >= 5 THEN datetime('now','localtime') ELSE last_login_at END WHERE id = ?`, [u.id]);
@@ -2733,10 +2895,10 @@ function logout() {
   setActor('System', null);
 }
 
-function getSession() {
+function getSession(full = true) {
   if (!session) return null;
   if (!session.isSystem && accessGate && accessGate(session.username)) { session = null; setActor('System', null); return null; }   // locked by the licence
-  const u = get(`SELECT ${USER_COLS}, must_change_password, is_system FROM users WHERE id = ?`, [session.id]);
+  const u = get(`SELECT ${full ? USER_COLS : USER_COLS_LITE}, must_change_password, is_system FROM users WHERE id = ?`, [session.id]);
   if (!u || u.status !== 'Active') { session = null; return null; }      // e.g. after a restore
   session.role = u.role;
   return { user: u, canUpload: !!u.is_system, isAdmin: u.role === 'Admin', mustChangePassword: !!u.must_change_password && !u.is_system, permissions: effectivePermissions(u) };
@@ -2855,7 +3017,7 @@ const labelsOf = (ms: ModuleKey[]) => ms.map(m => MODULE_LABEL[m]).join(' / ');
 
 /** Throws unless the signed-in user has at least `level` in one of `modules`. Used by the main process for file, backup and Google operations. */
 export function requireModule(modules: ModuleKey | ModuleKey[], level: 'view' | 'edit' = 'view') {
-  const s = getSession();
+  const s = getSession(false);
   if (!s) fail('Please sign in.');
   const ms = Array.isArray(modules) ? modules : [modules];
   if (!ms.some(m => levelOf(s, m) >= LV[level])) fail(`You do not have ${level === 'edit' ? 'edit' : 'view'} access to ${labelsOf(ms)}. Ask the Super User to grant it.`);
@@ -2868,7 +3030,7 @@ export function can(modules: ModuleKey | ModuleKey[], level: 'view' | 'edit' = '
 /** Throws unless the signed-in user may call `method` with `args`. Called by main.ts for every IPC call. */
 export function authorize(method: string, args: any[] = []) {
   if (PUBLIC.has(method)) return;
-  const s = getSession();
+  const s = getSession(false);
   if (!s) fail('Your session has ended. Please sign in again.');
   if (SYSTEM_ONLY.has(method) && !s.canUpload) fail('This is available only to the iqbal_labs account.');
   if (UPLOAD.has(method) && !s.canUpload) fail('Data upload is only available to the iqbal_labs account.');
@@ -2909,9 +3071,9 @@ export function authorize(method: string, args: any[] = []) {
 /** Every operation the renderer may call is either mapped to a module or deliberately shared (the tests check this list stays complete). */
 export const accessCoverage = (method: string) => PUBLIC.has(method) || SHARED.has(method) || method in NEEDS || SYSTEM_ONLY.has(method) || method === 'getUserPermissions' || method === 'checkAccountingHealth' || method === 'loadDemoData';
 
-export function requireUpload() { const s = getSession(); if (!s?.canUpload) fail('Data upload is only available to the iqbal_labs account.'); }
-export function requireAdmin() { const s = getSession(); if (!s) fail('Please sign in.'); if (!s.isAdmin) fail('Only an Admin can do this.'); }
-export function requireSession() { if (!getSession()) fail('Please sign in.'); }
+export function requireUpload() { const s = getSession(false); if (!s?.canUpload) fail('Data upload is only available to the iqbal_labs account.'); }
+export function requireAdmin() { const s = getSession(false); if (!s) fail('Please sign in.'); if (!s.isAdmin) fail('Only an Admin can do this.'); }
+export function requireSession() { if (!getSession(false)) fail('Please sign in.'); }
 
 /** The default access of every role (the permission editor starts from these). */
 function getRoleDefaults() { return Object.fromEntries(Object.keys(ROLE_DEFAULTS).map(r => [r, defaultPermissions(r)])); }

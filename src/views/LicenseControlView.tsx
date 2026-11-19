@@ -30,6 +30,8 @@ const BADGE: Record<Key, string> = {
   revoked: 'bg-slate-100 text-slate-700 border-slate-300 dark:bg-slate-800 dark:text-slate-300 dark:border-slate-700',
 };
 const lastSeenOf = (r: LicenseRecord) => r.devices.reduce<string | null>((m, d) => (!m || Date.parse(d.last_seen) > Date.parse(m) ? d.last_seen : m), null);
+/** running time in seconds shown as "3d 4h", "2h 10m" or "12m" */
+const runTime = (sec: number) => { const m = Math.round(sec / 60); if (m < 60) return `${m}m`; const h = Math.floor(m / 60); if (h < 24) return `${h}h ${m % 60}m`; return `${Math.floor(h / 24)}d ${h % 24}h`; };
 const todayIso = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; };
 const addPeriod = (from: number, months: number, days: number) => { const d = new Date(from); d.setMonth(d.getMonth() + months); d.setDate(d.getDate() + days); return d.toISOString(); };
 
@@ -490,7 +492,13 @@ const DevicesDialog: React.FC<{ t: T; row: LicenseRecord; busy: boolean; err: Re
               <tbody className="divide-y divide-slate-100 dark:divide-slate-800/80 font-medium">{devices.map(d => { const sn = seen(d.last_seen); return (
                 <tr key={d.id}><td className="py-2 px-3"><div className="font-bold text-slate-900 dark:text-white">{d.device_name || '—'}</div><div className="text-[10px] text-slate-500">v{d.app_version || '?'} · {t('license.since', 'since')} {formatDate(d.first_seen)}</div></td>
                   <td className="py-2 px-3">{d.last_user || '—'}</td>
-                  <td className="py-2 px-3 whitespace-nowrap"><span className={`inline-block w-1.5 h-1.5 rounded-full mr-1.5 ${sn.online ? 'bg-emerald-500' : 'bg-slate-300 dark:bg-slate-600'}`} />{sn.text}</td>
+                  <td className="py-2 px-3 whitespace-nowrap"><span className={`inline-block w-1.5 h-1.5 rounded-full mr-1.5 ${sn.online ? 'bg-emerald-500' : 'bg-slate-300 dark:bg-slate-600'}`} />{sn.text}
+                    <div className="text-[10px] text-slate-500 mt-0.5 font-semibold" title={t('license.offline_title', 'Offline use')}>
+                      {(d.offline_stretches || 0) === 0 && !(d.clock_rollbacks || 0)
+                        ? t('license.offline_none', 'Always online so far')
+                        : <>{(d.offline_stretches || 0) > 0 && <>{t('license.offline_total', 'total offline')} {runTime(d.offline_seconds_total || 0)} · {t('license.offline_last', 'last stretch')} {runTime(d.last_offline_seconds || 0)} · {t('license.offline_longest', 'longest')} {runTime(d.longest_offline_seconds || 0)}</>}
+                          {(d.clock_rollbacks || 0) > 0 && <span className="text-rose-600 dark:text-rose-400 font-bold"> · {t('license.clock_changes', 'clock set back {n}×').replace('{n}', String(d.clock_rollbacks))}</span>}</>}
+                    </div></td>
                   <td className="py-2 px-3 text-right"><button type="button" disabled={busy} className="btn btn-danger-outline btn-sm" onClick={() => setAsk({ kind: 'device', id: d.id, label: d.device_name || '—' })}><Trash2 size={12} />{t('license.remove', 'Remove')}</button></td></tr>); })}</tbody>
             </table></div>
           )}

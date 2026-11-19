@@ -1,10 +1,10 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { Cloud, CloudUpload, CloudDownload, RefreshCw, LogOut, LogIn, ShieldCheck, Lock, KeyRound, AlertTriangle, CheckCircle2, Info, Settings2, Laptop } from 'lucide-react';
+import { Cloud, CloudUpload, CloudDownload, RefreshCw, LogOut, LogIn, ShieldCheck, Lock, KeyRound, AlertTriangle, CheckCircle2, Info, Settings2, Laptop, Sparkles } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 import { Modal } from './common/Modal';
 import { PasswordInput } from './common/PasswordInput';
 import { PinDialog } from './modals/PinDialog';
-import { googleStatus, googleSaveConfig, googleClearConfig, googleConnect, googleDisconnect, googleCheck, googleSync, googleSetAuto, googleSetEncryption } from '../services/db';
+import { googleStatus, googleSaveConfig, googleClearConfig, googleConnect, googleDisconnect, googleCheck, googleSync, googleSetAuto, googleSetPremium, googleSetEncryption } from '../services/db';
 import type { GoogleStatus, RemoteCheck, SyncResult, SyncCounts } from '../types';
 
 const when = (iso?: string | null) => { if (!iso) return ''; const d = new Date(iso); return Number.isNaN(d.getTime()) ? String(iso) : d.toLocaleString(); };
@@ -37,6 +37,9 @@ export const GoogleSyncCard: React.FC = () => {
     } catch (e: any) { setMsg({ tone: 'err', text: e.message }); }
   }, []);
   useEffect(() => { void load(); }, [load]);
+  // while the app is retrying a failed backup, keep the screen up to date (the next try is 10 seconds away)
+  const retrying = /^retrying:/.test(st?.sync.lastResult || '');
+  useEffect(() => { if (!retrying) return; const id = setInterval(() => { void load(); }, 5000); return () => clearInterval(id); }, [retrying, load]);
 
   const counts = (c: SyncCounts) => `${n(c.members ?? 0)} ${t('google.c_members', 'members')} · ${n(c.collections ?? 0)} ${t('google.c_payments', 'payments')} · ${n(c.loans ?? 0)} ${t('google.c_loans', 'loans')}`;
 
@@ -59,7 +62,12 @@ export const GoogleSyncCard: React.FC = () => {
 
   const connect = async () => {
     setBusy('connect'); setMsg({ tone: 'ok', text: t('google.browser_opened', 'Your browser opened Google\'s sign-in page. Finish there, then come back here…') });
-    try { const a = await googleConnect(); showToast(t('google.connected_as', 'Connected as {email}').replace('{email}', a.email)); setMsg(null); }
+    try {
+      const a = await googleConnect(); showToast(t('google.connected_as', 'Connected as {email}').replace('{email}', a.email)); setMsg(null);
+      // signing in already did the first sync: a new computer got the data back, an empty Drive got this computer's data, or both have data and the user chooses
+      if (a.sync) handle(a.sync);
+      else if (a.syncError) setMsg({ tone: 'warn', text: `${a.syncError} ${t('google.first_sync_failed', 'Press Sync now to try again.')}` });
+    }
     catch (e: any) { setMsg({ tone: 'err', text: e.message }); }
     finally { setBusy(null); void load(); }
   };
@@ -73,6 +81,12 @@ export const GoogleSyncCard: React.FC = () => {
     e?.preventDefault(); setCfgBusy(true);
     try { await googleSaveConfig(cfgId, cfgSecret); showToast(t('google.cfg_saved', 'Google credentials saved on this computer.')); setCfgOpen(false); setCfgId(''); setCfgSecret(''); void load(); }
     catch (err: any) { showToast(err.message, 'error'); } finally { setCfgBusy(false); }
+  };
+
+  const setPremium = async (on: boolean) => {
+    if (!on && !window.confirm(t('google.premium_off_confirm', 'Switch Google sync off for this computer? Nobody will be able to use it and background uploads stop. The data in Google Drive is not touched.'))) return;
+    try { await googleSetPremium(on); showToast(on ? t('google.premium_on_toast', 'Google sync is switched on for this computer.') : t('google.premium_off_toast', 'Google sync is switched off for this computer.')); void load(); }
+    catch (e: any) { showToast(e.message, 'error'); }
   };
 
   const toggleAuto = async (on: boolean) => { try { await googleSetAuto(on); void load(); } catch (e: any) { showToast(e.message, 'error'); } };
@@ -101,6 +115,12 @@ export const GoogleSyncCard: React.FC = () => {
 
           {!st ? (
             <p className="mt-4 text-xs text-slate-400">{t('common.loading', 'Loading…')}</p>
+          ) : !st.premium ? (
+            <div className="mt-4 rounded-xl border border-violet-200 dark:border-violet-900 bg-violet-50 dark:bg-violet-950/30 p-4 text-xs text-violet-900 dark:text-violet-200 leading-relaxed">
+              <div className="font-black flex items-center gap-1.5 mb-1"><Lock size={14} />{t('google.premium_title', 'Premium feature')}</div>
+              {t('google.premium_locked', 'Google sync and Google Drive backup are a premium feature and are not switched on for this computer. Ask the software provider (iqbal_labs) to enable them.')}
+              {st.canConfigure && <div className="mt-3"><button type="button" onClick={() => setPremium(true)} className="btn btn-primary btn-sm"><Sparkles size={13} />{t('google.premium_enable', 'Switch on for this computer')}</button></div>}
+            </div>
           ) : !st.configured ? (
             <div className="mt-4 rounded-xl border border-amber-200 dark:border-amber-900 bg-amber-50 dark:bg-amber-950/30 p-4 text-xs text-amber-900 dark:text-amber-200 leading-relaxed">
               <div className="font-black flex items-center gap-1.5 mb-1"><Info size={14} />{t('google.not_set_title', 'Google is not set up on this computer yet')}</div>
@@ -158,17 +178,26 @@ export const GoogleSyncCard: React.FC = () => {
               <div className="flex flex-wrap items-center gap-x-6 gap-y-2 pt-1">
                 <label className="flex items-center gap-2 text-xs font-semibold text-slate-700 dark:text-slate-200 cursor-pointer select-none">
                   <input type="checkbox" checked={st.sync.auto} disabled={!canEdit} onChange={e => toggleAuto(e.target.checked)} className="w-4 h-4 accent-[#0f4a3c]" />
-                  {t('google.auto', 'Upload my changes automatically in the background (and sync when the app starts)')}
+                  {t('google.auto', 'Back up my changes to Google Drive automatically (in the background, and when the app starts). If an attempt fails it is tried again after 10 seconds. The newest 10 copies are kept.')}
                 </label>
                 <label className="flex items-center gap-2 text-xs font-semibold text-slate-700 dark:text-slate-200 cursor-pointer select-none">
                   <input type="checkbox" checked={st.sync.encrypt} disabled={!canEdit} onChange={e => setEncDlg(e.target.checked ? 'on' : 'off')} className="w-4 h-4 accent-[#0f4a3c]" />
                   <ShieldCheck size={14} className="text-emerald-700 dark:text-emerald-400" />{t('google.pin_protect', 'Protect the cloud copy with a sync PIN')}
                 </label>
               </div>
+              {st.sync.lastResult && /^(retrying|failed):/.test(st.sync.lastResult) && (
+                <p className="flex items-start gap-1.5 text-[11px] font-semibold text-amber-700 dark:text-amber-300"><AlertTriangle size={13} className="shrink-0 mt-0.5" />{t('google.last_attempt', 'Last attempt:')} {st.sync.lastResult.replace(/^(retrying|failed):\s*/, '')}</p>
+              )}
             </div>
           )}
 
           {msg && <div className={`mt-4 flex items-start gap-2 rounded-xl border p-3 text-xs font-semibold ${tone(msg.tone)}`}>{msg.tone === 'ok' ? <CheckCircle2 size={15} className="shrink-0 mt-0.5" /> : <AlertTriangle size={15} className="shrink-0 mt-0.5" />}<span>{msg.text}</span></div>}
+          {st?.premium && st.canConfigure && (
+            <div className="mt-4 flex flex-wrap items-center gap-3 text-[11px] text-slate-500 dark:text-slate-400 border-t border-slate-100 dark:border-slate-800 pt-3">
+              <Sparkles size={13} className="text-violet-600 dark:text-violet-400" />{t('google.premium_is_on', 'Premium: Google sync is switched on for this computer (only you, iqbal_labs, can change this).')}
+              <button type="button" onClick={() => setPremium(false)} className="btn btn-outline btn-sm">{t('google.premium_disable', 'Switch off')}</button>
+            </div>
+          )}
           {st && !st.secureStorage && <p className="mt-3 text-[11px] text-rose-600 dark:text-rose-400 font-semibold">{t('google.no_secure', 'This computer cannot protect the Google sign-in with Windows secure storage, so Google sync is unavailable here.')}</p>}
         </div>
       </div>

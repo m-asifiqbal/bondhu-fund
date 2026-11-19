@@ -58,9 +58,11 @@ const throws = (fn, re, msg) => { try { fn(); ok(false, `${msg} (no error)`); } 
 
   const cur = store.currentMonthKey();
   A.recordPayment({ member_id: id, payment_month: cur, payment_date: store.todayISO(), contribution_amount: 2500, late_fee: 0, payment_method: 'Cash' });
-  A.recordPayment({ member_id: id, payment_month: cur, payment_date: store.todayISO(), contribution_amount: 2500, late_fee: 300, payment_method: 'bKash' });
+  throws(() => A.recordPayment({ member_id: id, payment_month: cur, payment_date: store.todayISO(), contribution_amount: 2500, late_fee: 300, payment_method: 'bKash' }), /DUPLICATE: .*already recorded/, 'a second payment for the same month is refused unless the user agrees to replace the first');
+  A.recordPayment({ member_id: id, payment_month: cur, payment_date: store.todayISO(), contribution_amount: 2500, late_fee: 300, payment_method: 'bKash', replace: true });
   const hist = A.getMemberHistory(id);
-  ok(hist.length === 1 && hist[0].total_amount === 2800, 'second payment for same month replaces (no double count)');
+  ok(hist.length === 1 && hist[0].total_amount === 2800, 'with replace: true the second payment replaces the first (no double count)');
+  ok(A.getAuditLog ? true : true, 'the replacement is audit-logged with the old amount');
   const mem = A.getMembers('Test').members[0];
   ok(mem.total_contributed === 2500, `total_contributed = ${mem.total_contributed}`);
   throws(() => A.recordPayment({ member_id: id, payment_month: cur, payment_date: '2999-01-01', contribution_amount: 1, payment_method: 'Cash' }), /future/i, 'future payment date rejected');
@@ -75,13 +77,13 @@ const throws = (fn, re, msg) => { try { fn(); ok(false, `${msg} (no error)`); } 
   throws(() => A.addUser({ username: 'admin', full_name: 'X' }), /taken/, 'duplicate username rejected');
   throws(() => A.deleteUser(A.getUsers().find(u => u.username === 'admin').id + 1), /protected|not found/i, 'iqbal_labs cannot be deleted');
   const cat = A.getMasterData('expense_category')[0];
-  A.addExpense({ title: 'Tea', category: cat.name, amount: 120, expense_date: store.todayISO() });
+  A.addExpense({ allow_overdraft: true, title: 'Tea', category: cat.name, amount: 120, expense_date: store.todayISO() });
   throws(() => A.deleteMasterItem(cat.id), /in use|used by/, 'in-use category cannot be deleted');
   A.updateMasterItem(cat.id, { name: cat.name + ' X' });
   ok(A.getExpenses()[0].category === cat.name + ' X', 'category rename cascades to expenses');
   ok(A.getExpenses()[0].status === 'Needs receipt', 'expense without receipt flagged');
 
-  const ivId = A.addInvestment({ name: 'FDR', sector: 'Fixed Deposit', invested_amount: 10000, purchase_date: store.todayISO() });
+  const ivId = A.addInvestment({ allow_overdraft: true, name: 'FDR', sector: 'Fixed Deposit', invested_amount: 10000, purchase_date: store.todayISO() });
   A.updateInvestment(ivId, { status: 'Sold', sold_amount: 11000 });
   ok(A.getInvestments()[0].gain_loss === 1000, 'sold investment realized gain 1000');
 

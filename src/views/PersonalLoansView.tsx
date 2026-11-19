@@ -22,6 +22,7 @@ import { LoanStatusBadge, ProgressBar, useMoney, useNum, useRateText, useMethodT
 const EMPTY: LoanSummary = {
   loans: 0, running: 0, overdueLoans: 0, closed: 0, writtenOff: 0, borrowers: 0, totalLent: 0, outstanding: 0, principalRepaid: 0, interestEarned: 0, penaltyEarned: 0,
   drafts: 0, draftsAmount: 0, interestExpected: 0, totalCollected: 0, overdueAmount: 0, overduePrincipal: 0, dueNext30: 0, writtenOffAmount: 0, onTrackPct: 100, cashInHand: 0, fundBalance: 0, lentPctOfFund: 0, avgRate: 0,
+  aging: { d1_30: { count: 0, principal: 0 }, d31_60: { count: 0, principal: 0 }, d61_90: { count: 0, principal: 0 }, d90plus: { count: 0, principal: 0 }, par30: 0, par60: 0, par90: 0 }, defaulters: [],
 };
 
 function useDebounced<T>(value: T, ms = 250): T {
@@ -128,7 +129,7 @@ export const PersonalLoansView: React.FC = () => {
         <span className="text-xs font-bold text-slate-500 dark:text-slate-400">{label}</span>
         <div className={`w-8 h-8 rounded-xl flex items-center justify-center shrink-0 ${iconCls}`}>{icon}</div>
       </div>
-      <div className={`text-2xl font-black tracking-tight mt-3 truncate ${valueCls}`} title={value}>{value}</div>
+      <div className={`text-2xl font-black tracking-tight mt-3 break-words leading-tight ${valueCls}`} title={value}>{value}</div>
       <div className="text-[11px] font-semibold mt-1 text-slate-500 dark:text-slate-400 truncate">{sub}</div>
     </div>
   );
@@ -253,6 +254,50 @@ export const PersonalLoansView: React.FC = () => {
           formatCurrency(sum.cashInHand), sum.cashInHand < 0 ? 'text-rose-600 dark:text-rose-400' : 'text-slate-900 dark:text-white',
           sum.avgRate > 0 ? t('loan.kpi_cash_sub', 'average rate on loans: {r}%').replace('{r}', n(sum.avgRate)) : t('loan.kpi_cash_sub0', 'cash in hand today'))}
       </div>
+
+      {/* portfolio quality: how late the overdue money is, and who is behind */}
+      {sum.overdueLoans > 0 && (
+        <div className="card-base p-5">
+          <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
+            <h3 className="text-sm font-bold text-slate-900 dark:text-white">{t('loan.quality', 'Portfolio quality: overdue loans by age')}</h3>
+            <div className="flex flex-wrap gap-2 text-[11px] font-bold">
+              {([['par30', 30], ['par60', 60], ['par90', 90]] as const).map(([k, d]) => (
+                <span key={k} className={`px-2.5 py-1 rounded-full border ${sum.aging[k] > 0 ? 'bg-rose-50 dark:bg-rose-950/40 border-rose-200 dark:border-rose-900 text-rose-700 dark:text-rose-300' : 'bg-emerald-50 dark:bg-emerald-950/40 border-emerald-200 dark:border-emerald-900 text-emerald-700 dark:text-emerald-300'}`}
+                  title={t('loan.par_hint', 'Portfolio at risk: the share of the money still owed that sits in loans more than {d} days overdue').replace('{d}', n(d))}>
+                  {t('loan.par', 'At risk {d}+ days').replace('{d}', n(d))}: {n(+sum.aging[k].toFixed(1))}%
+                </span>
+              ))}
+            </div>
+          </div>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+            {([['d1_30', t('loan.age_1_30', '1–30 days')], ['d31_60', t('loan.age_31_60', '31–60 days')], ['d61_90', t('loan.age_61_90', '61–90 days')], ['d90plus', t('loan.age_90', 'Over 90 days')]] as const).map(([k, label]) => (
+              <div key={k} className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-[#142026] p-3">
+                <div className="text-[10px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">{label}</div>
+                <div className={`text-sm font-black mt-1 ${sum.aging[k].count ? 'text-rose-600 dark:text-rose-400' : 'text-slate-400'}`}>{formatCurrency(sum.aging[k].principal)}</div>
+                <div className="text-[10px] text-slate-500 dark:text-slate-400">{t('loan.age_loans', '{n} loan(s)').replace('{n}', n(sum.aging[k].count))}</div>
+              </div>
+            ))}
+          </div>
+          {sum.defaulters.length > 0 && (
+            <div className="mt-4 overflow-x-auto rounded-xl border border-slate-200 dark:border-slate-800">
+              <table className="w-full text-left text-xs">
+                <thead className="bg-slate-50 dark:bg-[#111e24] text-[10px] uppercase tracking-wider text-slate-500"><tr>
+                  <th className="py-2 px-3 font-bold">{t('loan.col_loan', 'Loan')}</th><th className="py-2 px-3 font-bold">{t('loan.col_member', 'Member')}</th>
+                  <th className="py-2 px-3 font-bold text-right">{t('loan.col_days', 'Days late')}</th><th className="py-2 px-3 font-bold text-right">{t('loan.col_overdue', 'Overdue')}</th><th className="py-2 px-3 font-bold">{t('loan.col_guarantor', 'Guarantor')}</th>
+                </tr></thead>
+                <tbody className="divide-y divide-slate-100 dark:divide-slate-800/80 font-medium">
+                  {sum.defaulters.slice(0, 5).map(d => (
+                    <tr key={d.loan_id}>
+                      <td className="py-2 px-3 font-bold">{d.loan_no}</td><td className="py-2 px-3">{d.member_name} <span className="text-slate-400">{d.member_code}</span></td>
+                      <td className="py-2 px-3 text-right tabular-nums text-rose-600 dark:text-rose-400 font-bold">{n(d.days_overdue)}</td><td className="py-2 px-3 text-right tabular-nums">{formatCurrency(d.overdue_amount)}</td><td className="py-2 px-3">{d.guarantor || '—'}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      )}
 
       {/* where the lent money stands */}
       {sum.totalLent > 0 && (

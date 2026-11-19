@@ -20,6 +20,16 @@ Everything runs on your free Supabase project (`bondhu_app`). The desktop app ne
   Anything a user had typed but not saved is lost when they are signed out, so suspend outside working hours.
 - **Offline copies** keep working until their paid-until date, but not longer than 14 days after the last successful check. Turning the PC clock back
   does not help (the app remembers the latest time it has seen, and the server's clock wins whenever it is online).
+- **Offline monitoring.** Each copy keeps an **offline counter**: how long the app has actually been running since it last reached the server. It is measured
+  with the computer's own timer, not the date, so changing the date cannot reduce it. After **14 days of use** without a successful check-in the copy locks
+  until it has been online once. Every time the computer is online again it reports the counter (and then restarts it from zero). **License Control → Computers and users**
+  shows, per computer, the total offline time, the last stretch and the longest stretch.
+- **Clock set back / record edited.** If the app finds the date set back by more than 10 minutes, or the saved licence record altered by hand, it locks (reason
+  "The date on this computer or the licence record was changed") and goes online at once; one successful check-in clears it. The panel shows "clock set back N×".
+  The record is signed with a key held by Windows secure storage. The first start after upgrading an older install needs one online check-in for the same reason.
+- Limits: the numbers a copy reports come from the customer's PC, so they are for monitoring, not proof. The rules themselves are enforced inside the app.
+  Someone with administrator skills who restores an old copy of the whole app data folder can still replay old state; the 14-day rule and the server clock bound that.
+- Run the latest `docs/supabase/license.sql` again once (it adds the offline columns and a new `bf_check`); copies built before this version keep working against it.
 
 ## One-time setup (about 5 minutes)
 1. Supabase → project → **SQL Editor** → New query → paste all of `docs/supabase/license.sql` → **Run**.

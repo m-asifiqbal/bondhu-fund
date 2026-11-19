@@ -3,11 +3,13 @@
  * check-in, and the gate that keeps non-owner accounts out while a copy is locked (see license.ts for the rules).
  */
 import * as fs from 'fs';
+import * as crypto from 'crypto';
+import { performance } from 'perf_hooks';
 import * as os from 'os';
 import * as path from 'path';
 import type { IpcMain, App, SafeStorage, Net } from 'electron';
 import * as store from './database';
-import { LicenseClient, LicenseAdmin, CHECK_EVERY_MS, freshState, groupPin, type LicenseState, type LicenseConfig, type AdminSession } from './license';
+import { LicenseClient, LicenseAdmin, CHECK_EVERY_MS, TICK_MS, freshState, packState, unpackState, groupPin, type LicenseState, type LicenseConfig, type AdminSession } from './license';
 
 // Build-time settings (config/supabase.json, git-ignored). The publishable key is designed to be public: it can only call bf_activate and bf_check.
 const BUILT_URL = process.env.BF_SUPABASE_URL_BUILT || '';
@@ -41,8 +43,21 @@ export function setupLicense(ctx: LicenseCtx) {
   const netFetch = ((u: any, i: any) => ctx.net.fetch(u, i)) as typeof fetch;
   const device = () => os.hostname() || 'This computer';
 
+  // The licence record (when it was last confirmed, the offline counter, ...) is signed with a key that only Windows secure storage can open,
+  // so editing the file by hand is noticed: a record whose signature does not match is not trusted until the next successful online check-in.
+  const macKey = (): string | null => {
+    let k = secret.get('state-key');
+    if (!k) { try { k = crypto.randomBytes(32).toString('hex'); secret.set('state-key', k); } catch { return null; } }
+    return k;
+  };
+  const loadState = (): LicenseState => {
+    const existingKey = secret.get('state-key');                   // a missing key (deleted) can never verify an old signature
+    const s = unpackState(readJson<any>('state.json', null), existingKey);
+    if (s) { macKey(); return s; }                                 // makes sure a key exists for the next save
+    const f = freshState(); writeJson('state.json', packState(f, macKey())); return f;
+  };
   const client = new LicenseClient(cfg, BUILT_ENFORCE && !!cfg, netFetch,
-    { load: () => { const s = readJson<LicenseState | null>('state.json', null); if (s?.installId) return { ...freshState(), ...s, slots: s.slots || {} }; const f = freshState(); writeJson('state.json', f); return f; }, save: s => writeJson('state.json', s) },
+    { load: loadState, save: s => writeJson('state.json', packState(s, macKey())) },
     { get: slot => secret.get(`device-token:${slot}`), set: (slot, t) => secret.set(`device-token:${slot}`, t), clear: slot => secret.del(`device-token:${slot}`) },
     device, () => app.getVersion());
   const admin = new LicenseAdmin(cfg, netFetch, {
@@ -60,10 +75,10 @@ export function setupLicense(ctx: LicenseCtx) {
   const announce = () => {
     const u = sessionUser();
     const v = client.view(u);
-    const key = `${u}|${v.locked}|${v.reason}|${v.status}|${v.paidUntil}|${v.message}`;
+    const key = `${u}|${v.locked}|${v.reason}|${v.status}|${v.paidUntil}|${v.message}|${v.offlineDaysLeft}|${v.clockIssue}|${!!v.lastError}`;
     if (key !== lastKey) { lastKey = key; ctx.broadcast('license:changed'); }
   };
-  lastKey = (() => { const u = sessionUser(); const v = client.view(u); return `${u}|${v.locked}|${v.reason}|${v.status}|${v.paidUntil}|${v.message}`; })();
+  lastKey = (() => { const u = sessionUser(); const v = client.view(u); return `${u}|${v.locked}|${v.reason}|${v.status}|${v.paidUntil}|${v.message}|${v.offlineDaysLeft}|${v.clockIssue}|${!!v.lastError}`; })();
 
   const publicView = () => client.view(sessionUser());
   const sysOnly = () => store.requireUpload();
@@ -105,6 +120,15 @@ export function setupLicense(ctx: LicenseCtx) {
       const tick = () => { client.check().then(announce).catch(() => undefined); };
       setTimeout(tick, 3000);
       setInterval(tick, CHECK_EVERY_MS).unref?.();
+      // The offline counter: every half minute add the time the app has been running (monotonic timer: the date cannot change it),
+      // lock as soon as the allowance is used up, and go online at once when the clock was changed instead of waiting for the next check.
+      let lastForced = 0;
+      client.tick(performance.now());
+      setInterval(() => {
+        client.tick(performance.now());
+        announce();
+        if (client.needsOnlineCheck() && Date.now() - lastForced > 60_000) { lastForced = Date.now(); tick(); }
+      }, TICK_MS).unref?.();
     },
     client,
   };

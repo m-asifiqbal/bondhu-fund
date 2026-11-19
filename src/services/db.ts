@@ -90,17 +90,34 @@ export const bulkAddMembers = (list: Array<{ name: string; nid?: string; phone?:
 // Collections ----------------------------------------------------------------
 export const getCollections = (month?: string, statusTab = 'All', startDate?: string, endDate?: string, search = '', sortBy = 'newest') =>
   call<{ records: CollectionRecord[]; stats: CollectionStats }>('getCollections', month, statusTab, startDate, endDate, search, sortBy);
+/**
+ * Two questions the program asks before it does something unusual, instead of doing it silently:
+ *   "a payment for this member and month already exists: replace it?"   and   "this spends more than the cash on hand: record it anyway?"
+ * The main process refuses with DUPLICATE: / OVERDRAFT: and the same call is repeated with replace / allow_overdraft once the user agrees.
+ */
+async function callConfirmed<T>(method: string, d: object): Promise<T> {
+  try { return await call<T>(method, d); }
+  catch (e: any) {
+    const m = String(e?.message || '');
+    const dup = m.startsWith('DUPLICATE: '), over = m.startsWith('OVERDRAFT: ');
+    if (!dup && !over) throw e;
+    const text = m.replace(/^(DUPLICATE|OVERDRAFT): /, '');
+    const yes = window.confirm(dup ? `${text}\n\nReplace the earlier payment with this one? (The earlier amount stays in the activity log.)` : `${text}\n\nThe books will then show negative cash. Record it anyway?`);
+    if (!yes) throw new Error(dup ? 'Nothing was changed: the earlier payment is kept.' : 'Nothing was recorded.');
+    return call<T>(method, { ...d, ...(dup ? { replace: true } : { allow_overdraft: true }) });
+  }
+}
 export const recordPayment = (d: {
   member_id: number; payment_month: string; payment_date: string; contribution_amount: number;
   late_fee: number; payment_method: string; trx_id?: string; note?: string;
-}) => call<number>('recordPayment', d);
+}) => callConfirmed<number>('recordPayment', d);
 export const deletePayment = (id: number) => call<void>('deletePayment', id);
 export const suggestLateFee = (month: string, paymentDate?: string) => call<number>('suggestLateFee', month, paymentDate);
 
 // Investments ----------------------------------------------------------------
 export const getInvestments = (sortBy = 'newest', status = 'All', startDate?: string, endDate?: string, search = '') =>
   call<Investment[]>('getInvestments', sortBy, status, startDate, endDate, search);
-export const addInvestment = (d: Partial<Investment>) => call<number>('addInvestment', d);
+export const addInvestment = (d: Partial<Investment>) => callConfirmed<number>('addInvestment', d);
 export const updateInvestment = (id: number, d: Partial<Investment>) => call<void>('updateInvestment', id, d);
 export const updateInvestmentValuation = (id: number, value: number) => call<void>('updateInvestmentValuation', id, value);
 /** The Fines page: every late fee and loan penalty, the totals, who is late without a fine, who is overdue, and where the money sits. */
@@ -116,7 +133,7 @@ export const deleteInvestment = (id: number) => call<void>('deleteInvestment', i
 // Expenses -------------------------------------------------------------------
 export const getExpenses = (category = 'All', status = 'All', startDate?: string, endDate?: string, search = '', sortBy = 'newest') =>
   call<Expense[]>('getExpenses', category, status, startDate, endDate, search, sortBy);
-export const addExpense = (d: Partial<Expense>) => call<number>('addExpense', d);
+export const addExpense = (d: Partial<Expense>) => callConfirmed<number>('addExpense', d);
 export const updateExpense = (id: number, d: Partial<Expense>) => call<void>('updateExpense', id, d);
 export const verifyExpenseReceipt = (id: number, receiptRef: string) => call<void>('verifyExpenseReceipt', id, receiptRef);
 export const deleteExpense = (id: number) => call<void>('deleteExpense', id);
@@ -298,12 +315,12 @@ export const activateLoanApplication = (d: { id: number; disbursed_date: string 
 /** Same rules as saving: tells the form whether the guarantor details are complete and valid. */
 export const previewGuarantor = (d: Partial<LoanInput> & { member_id?: number }) => call<GuarantorCheck>('previewGuarantor', d);
 export const updateLoan = (id: number, d: { purpose?: string; notes?: string; reference?: string }) => call<void>('updateLoan', id, d);
-export const deleteLoan = (id: number) => call<void>('deleteLoan', id);
+export const deleteLoan = (id: number, reason: string) => call<void>('deleteLoan', id, reason);
 export const previewLoanRepayment = (loanId: number, paidDate?: string, amount?: number | string, kind?: 'Installment' | 'Closure', interest?: number | string) =>
   call<LoanRepaymentQuote>('previewLoanRepayment', loanId, paidDate, amount, kind, interest);
 export const recordLoanRepayment = (d: { loan_id: number; paid_date: string; kind?: 'Installment' | 'Closure'; amount?: number; interest?: number; penalty?: number; payment_method: string; trx_id?: string; note?: string }) =>
   call<number>('recordLoanRepayment', d);
-export const deleteLoanRepayment = (id: number) => call<void>('deleteLoanRepayment', id);
+export const deleteLoanRepayment = (id: number, reason: string) => call<void>('deleteLoanRepayment', id, reason);
 /** Admin only. */
 export const writeOffLoan = (d: { loan_id: number; date: string; reason: string }) => call<void>('writeOffLoan', d);
 export const cancelLoanWriteOff = (loanId: number) => call<void>('cancelLoanWriteOff', loanId);
@@ -340,13 +357,14 @@ export const googleStatus = () => google<GoogleStatus>('status');
 export const googleSaveConfig = (clientId: string, clientSecret: string) => google<boolean>('saveConfig', { clientId, clientSecret });
 export const googleClearConfig = () => google<boolean>('clearConfig');
 /** Opens the Google sign-in page in the browser and waits for it to finish. */
-export const googleConnect = () => google<{ email: string; name: string; picture: string }>('connect');
+export const googleConnect = () => google<{ email: string; name: string; picture: string; sync?: SyncResult | null; syncError?: string | null }>('connect');
 export const googleDisconnect = () => google<boolean>('disconnect');
 /** Looks at Google Drive (changes nothing): is there newer data? */
 export const googleCheck = () => google<RemoteCheck>('check');
 /** Two-way sync. resolve = which side to keep when both changed; pin = the sync PIN of an encrypted cloud copy. */
 export const googleSync = (opts?: { resolve?: 'local' | 'remote'; pin?: string }) => google<SyncResult>('sync', opts || {});
 export const googleSetAuto = (on: boolean) => google<boolean>('setAuto', on);
+export const googleSetPremium = (on: boolean) => google<boolean>('setPremium', on);
 export const googleSetEncryption = (enabled: boolean, pin?: string) => google<boolean>('setEncryption', enabled, pin);
 export const driveBackups = () => google<DriveBackupItem[]>('driveList');
 export const driveBackupNow = (pin: string) => google<{ name: string; size: number }>('driveBackup', pin);

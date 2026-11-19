@@ -3,7 +3,7 @@ import { licenseStatus, onLicenseChanged } from '../services/db';
 import type { LicenseView } from '../types';
 
 /** What the app assumes when it cannot ask (for example in a browser): no licence rules. */
-const OFF: LicenseView = { enforced: false, configured: false, locked: false, reason: 'none', message: '', scope: null, username: '', customer: '', paidUntil: null, daysLeft: null, status: null, installId: '', lastCheckAt: null, lastError: null };
+const OFF: LicenseView = { enforced: false, configured: false, locked: false, reason: 'none', message: '', scope: null, username: '', customer: '', paidUntil: null, daysLeft: null, status: null, installId: '', lastCheckAt: null, lastError: null, offlineDaysUsed: 0, offlineDaysLeft: null, clockIssue: false };
 
 let view: LicenseView | null = null;      // null = not asked yet
 const subs = new Set<() => void>();
@@ -14,7 +14,10 @@ export async function refreshLicense() {
   try { view = await licenseStatus(); } catch { view = view ?? OFF; }
   emit();
 }
-export function setLicenseView(v: LicenseView) { view = v; emit(); }
+export function setLicenseView(v: LicenseView) {
+  if (view && JSON.stringify(view) === JSON.stringify(v)) return;       // nothing changed: keep the same object, no re-render
+  view = v; emit();
+}
 
 function start() {
   if (started) return;

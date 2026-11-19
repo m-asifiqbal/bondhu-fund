@@ -274,7 +274,7 @@ export const CollectionsView: React.FC = () => {
       <div className={`w-11 h-11 rounded-xl flex items-center justify-center shrink-0 ${iconCls}`}>{icon}</div>
       <div className="min-w-0">
         <div className="text-[11px] font-bold text-slate-500 dark:text-slate-400 truncate">{label}</div>
-        <div className={`text-xl font-black tracking-tight truncate ${valueCls}`}>{value}</div>
+        <div className={`text-xl font-black tracking-tight break-words leading-tight ${valueCls}`}>{value}</div>
         <div className={`text-[11px] truncate ${subCls}`}>{sub}</div>
       </div>
     </div>

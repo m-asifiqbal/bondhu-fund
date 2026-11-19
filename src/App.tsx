@@ -1,5 +1,5 @@
 import React from 'react';
-import { AlertTriangle, Copy, RotateCw, Lock } from 'lucide-react';
+import { AlertTriangle, Copy, RotateCw, Lock, WifiOff } from 'lucide-react';
 import { AppProvider, useApp } from './context/AppContext';
 import { Sidebar } from './components/layout/Sidebar';
 import { TopBar } from './components/layout/TopBar';
@@ -99,6 +99,8 @@ const MainLayout: React.FC = () => {
   const who = session?.user?.username;
   React.useEffect(() => { void refreshLicense(); }, [who]);      // the notice below is about the signed-in user's own licence
   const expiring = !!lic && lic.enforced && !lic.locked && !canUpload && lic.daysLeft !== null && lic.daysLeft <= 7;
+  // the licence server cannot be reached: tell the user how long this computer may keep working offline
+  const offline = !!lic && lic.enforced && !lic.locked && !canUpload && !!lic.lastError && lic.offlineDaysLeft !== null;
   const tabModules = TAB_MODULE[activeTab] ?? null;
   const noAccess = !!tabModules && !can(tabModules, 'view');
   // Overview and Reports only read and export, so their buttons stay visible for everyone who can open them
@@ -158,6 +160,11 @@ const MainLayout: React.FC = () => {
           {expiring && lic && (
             <div className="sticky top-0 z-30 px-6 lg:px-8 py-2 bg-rose-50 dark:bg-rose-950/60 border-b border-rose-200 dark:border-rose-900 text-[11px] font-bold text-rose-800 dark:text-rose-200 flex items-center gap-2">
               <Lock size={13} />{t('license.expiring', 'The licence ends in {n} day(s) ({date}). Please renew it with the software provider.').replace('{n}', language === 'bn' ? toBanglaDigits(Math.max(lic.daysLeft ?? 0, 0)) : String(Math.max(lic.daysLeft ?? 0, 0))).replace('{date}', formatDate(lic.paidUntil))}
+            </div>
+          )}
+          {offline && lic && (
+            <div className="sticky top-0 z-30 px-6 lg:px-8 py-2 bg-amber-50 dark:bg-amber-950/60 border-b border-amber-200 dark:border-amber-900 text-[11px] font-bold text-amber-800 dark:text-amber-200 flex items-center gap-2">
+              <WifiOff size={13} />{t('license.offline_bar', 'Working offline. This computer must connect to the internet within {n} day(s) of use so the licence can be confirmed.').replace('{n}', language === 'bn' ? toBanglaDigits(lic.offlineDaysLeft ?? 0) : String(lic.offlineDaysLeft ?? 0))}
             </div>
           )}
           {viewOnly && (

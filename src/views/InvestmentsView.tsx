@@ -429,7 +429,7 @@ export const InvestmentsView: React.FC = () => {
         <span className="text-xs font-bold text-slate-500 dark:text-slate-400">{label}</span>
         <div className={`w-8 h-8 rounded-xl flex items-center justify-center shrink-0 ${iconCls}`}>{icon}</div>
       </div>
-      <div className={`text-2xl font-black tracking-tight mt-3 truncate ${valueCls}`} title={value}>{value}</div>
+      <div className={`text-2xl font-black tracking-tight mt-3 break-words leading-tight ${valueCls}`} title={value}>{value}</div>
       <div className="text-[11px] font-semibold mt-1">{sub}</div>
     </div>
   );

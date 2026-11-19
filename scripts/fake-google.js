@@ -14,7 +14,7 @@ module.exports = function startFakeGoogle(opts = {}) {
     files: new Map(),        // id -> { id, name, bytes, props, created, modified }
     accounts: { 'asif@example.com': { name: 'Asif Iqbal', picture: 'https://example.com/a.png' }, 'other@example.com': { name: 'Someone Else', picture: '' } },
     nextEmail: 'asif@example.com',
-    maxPage: 1000, quotaFull: false, grantDrive: true, requests: 0, tokenCalls: 0,
+    maxPage: 1000, failNext: 0, quotaFull: false, grantDrive: true, requests: 0, tokenCalls: 0,
   };
   const filesOf = email => [...state.files.values()].filter(f => f.owner === email);
   const id = () => crypto.randomBytes(8).toString('hex');
@@ -81,6 +81,8 @@ module.exports = function startFakeGoogle(opts = {}) {
       if (!email) return send(res, 401, { error: { code: 401, message: 'Invalid Credentials' } });
       if (p === '/userinfo') return send(res, 200, { sub: '1', email, name: state.accounts[email]?.name, picture: state.accounts[email]?.picture });
       // ---- Drive ----
+      // failNext = n: the next n Drive requests fail with a Google "service unavailable" (a hiccup that goes away by itself)
+      if (state.failNext > 0 && (p.startsWith('/drive') || p.startsWith('/upload'))) { state.failNext--; return send(res, 503, { error: { code: 503, message: 'backend unavailable' } }); }
       if (p === '/drive/files' && req.method === 'GET') {
         let list = filesOf(email);
         const q = u.searchParams.get('q') || '';

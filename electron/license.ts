@@ -17,13 +17,19 @@ import * as crypto from 'crypto';
 
 export const CHECK_EVERY_MS = 10 * 60_000;
 export const OFFLINE_GRACE_DAYS = 14;
+/** how often the app adds the time it has been running to the offline counter (see LicenseClient.tick) */
+export const TICK_MS = 30_000;
+/** running time since the last successful check-in only counts as an "offline stretch" (and is reported) once it is longer than this */
+export const OFFLINE_REPORT_AFTER_MS = 30 * 60_000;
+/** the clock may be corrected backwards by a few minutes (time sync) without being treated as tampering */
+export const ROLLBACK_TOLERANCE_MS = 10 * 60_000;
 const DAY = 86_400_000;
 /** the slot of an untagged (whole-computer) licence */
 export const COMPUTER = '*';
 
 export interface LicenseConfig { url: string; key: string }
 export type LicenseStatus = 'active' | 'suspended' | 'revoked';
-export type LockReason = 'none' | 'not_activated' | 'suspended' | 'revoked' | 'expired' | 'needs_check' | 'invalid' | 'not_registered' | 'not_allowed';
+export type LockReason = 'none' | 'not_activated' | 'suspended' | 'revoked' | 'expired' | 'needs_check' | 'clock' | 'invalid' | 'not_registered' | 'not_allowed';
 
 export interface LicenseSnapshot {
   customer: string; username: string | null; status: LicenseStatus; paidUntil: string | null; message: string; serverTime: string; okAt: number;
@@ -41,6 +47,16 @@ export interface LicenseState {
   /** server time minus this computer's clock at the last successful check: online, the server decides what time it is */
   skew: number;
   slots: Record<string, Slot>;
+  /**
+   * The offline counter: how long the app has actually been running since the last successful check-in. It is measured with the
+   * computer's monotonic timer, never the calendar clock, so changing the date cannot reduce it. It is reported to the vendor and
+   * reset on every successful check-in; past OFFLINE_GRACE_DAYS the licence waits for an online check.
+   */
+  unsyncedMs: number;
+  /** times the clock was found set back since the last successful check-in (reported, then reset) */
+  rollbacks: number;
+  /** the clock was set back, or this record was found altered: nothing is trusted until the next successful online check-in */
+  tampered: boolean;
 }
 export interface StateStore { load(): LicenseState; save(s: LicenseState): void }
 export interface TokenVault { get(slot: string): string | null; set(slot: string, t: string): void; clear(slot: string): void }
@@ -52,9 +68,32 @@ export interface LicenseView {
   scope: 'user' | 'computer' | null; username: string;
   customer: string; paidUntil: string | null; daysLeft: number | null; status: LicenseStatus | null;
   installId: string; lastCheckAt: number | null; lastError: string | null;
+  /** the offline counter: whole running days since the last successful check-in, and how many of the allowed days are left (null when not enforced) */
+  offlineDaysUsed: number; offlineDaysLeft: number | null;
+  /** the clock was changed or the saved licence record was altered: an online check-in is needed */
+  clockIssue: boolean;
 }
 
-export const freshState = (): LicenseState => ({ installId: crypto.randomUUID(), maxSeen: 0, skew: 0, slots: {} });
+/**
+ * How the licence record is saved: the JSON plus an HMAC made with a key that only the computer's secure storage can open, so that
+ * editing the file by hand is noticed. A record that does not verify (edited, unsigned, or the key is gone) is still read, but is
+ * marked as not trusted: the copy stays locked until it has been confirmed online once.
+ */
+export interface PackedState { v: 2; data: string; mac: string }
+const hmac = (key: string, data: string) => crypto.createHmac('sha256', key).update(data).digest('hex');
+export function packState(s: LicenseState, key: string | null): PackedState { const data = JSON.stringify(s); return { v: 2, data, mac: key ? hmac(key, data) : '' }; }
+export function unpackState(raw: any, key: string | null): LicenseState | null {
+  if (raw && raw.v === 2 && typeof raw.data === 'string' && raw.data) {
+    let s: LicenseState | null = null; try { s = JSON.parse(raw.data); } catch { /* damaged */ }
+    if (!s || typeof s !== 'object' || !s.installId) return null;
+    const good = !!key && typeof raw.mac === 'string' && raw.mac !== '' && raw.mac === hmac(key, raw.data);
+    return { ...freshState(), ...s, slots: s.slots || {}, tampered: !good || !!s.tampered };
+  }
+  if (raw && typeof raw === 'object' && raw.installId) return { ...freshState(), ...raw, slots: raw.slots || {}, tampered: true };   // an older, unsigned record
+  return null;
+}
+
+export const freshState = (): LicenseState => ({ installId: crypto.randomUUID(), maxSeen: 0, skew: 0, slots: {}, unsyncedMs: 0, rollbacks: 0, tampered: false });
 const emptySlot = (): Slot => ({ activated: false, snapshot: null, invalid: false, lastError: null, lastTryAt: null });
 export const slotKey = (username?: string | null) => (username ? String(username).trim().toLowerCase() : COMPUTER);
 
@@ -107,14 +146,58 @@ export class LicenseClient {
     private device: () => string,
     private version: () => string,
     private clock: () => number = Date.now,
-  ) { this.st = store.load(); if (!this.st.slots) this.st.slots = {}; this.persistedMax = this.st.maxSeen; }
+  ) {
+    this.st = store.load();
+    if (!this.st.slots) this.st.slots = {};
+    this.st.unsyncedMs = Number.isFinite(this.st.unsyncedMs) && this.st.unsyncedMs > 0 ? this.st.unsyncedMs : 0;
+    this.st.rollbacks = Number.isFinite(this.st.rollbacks) && this.st.rollbacks > 0 ? this.st.rollbacks : 0;
+    this.st.tampered = !!this.st.tampered;
+    this.persistedMax = this.st.maxSeen;
+  }
+
+  private lastMono: number | null = null;
+  private unsavedMs = 0;
+  private rollbackLatched = false;
 
   private now(): number {
-    const t = Math.max(this.clock() + (this.st.skew || 0), this.st.maxSeen);
+    const raw = this.clock() + (this.st.skew || 0);
+    // The clock is behind the latest time this computer has already seen: it was set back. Nothing is trusted until an online check-in.
+    if (this.st.maxSeen > 0 && raw < this.st.maxSeen - ROLLBACK_TOLERANCE_MS) {
+      // counted once per episode: restarting the app while the clock is still wrong (already distrusted) is not a new change
+      if (!this.rollbackLatched) { this.rollbackLatched = true; if (!this.st.tampered) this.st.rollbacks += 1; this.st.tampered = true; this.save(); }
+    } else this.rollbackLatched = false;
+    const t = Math.max(raw, this.st.maxSeen);
     if (t > this.st.maxSeen) { this.st.maxSeen = t; if (t - this.persistedMax > 60_000) this.save(); }
     return t;
   }
-  private save() { this.persistedMax = this.st.maxSeen; this.store.save(this.st); }
+  private save() { this.persistedMax = this.st.maxSeen; this.unsavedMs = 0; this.store.save(this.st); }
+
+  /** Is anything on this computer a reason to demand an online check-in? */
+  private anyActivated(): boolean { return Object.values(this.st.slots).some(s => s.activated); }
+
+  /**
+   * The offline counter. Call it regularly (every TICK_MS) with a monotonic timer reading in milliseconds (never the calendar clock).
+   * It adds the time the app has been running since the last call, capped per call so that a sleeping computer is not counted.
+   * It is reset by a successful check-in; the saved total is what the vendor is told when the computer is next online.
+   */
+  tick(monotonicMs: number) {
+    const last = this.lastMono; this.lastMono = monotonicMs;
+    if (last == null || !this.cfg || !this.enforce || !this.anyActivated()) return;
+    const d = Math.min(Math.max(monotonicMs - last, 0), TICK_MS * 4);
+    this.now();                                           // also notices a clock that was set back while the app was running
+    if (d <= 0) return;
+    this.st.unsyncedMs += d; this.unsavedMs += d;
+    if (this.unsavedMs >= 60_000) this.save();
+  }
+
+  /** True when the app should reach the server as soon as it can (the clock was changed or the record was altered), not wait for the next regular check. */
+  needsOnlineCheck(): boolean { return !!this.cfg && this.enforce && this.anyActivated() && this.st.tampered; }
+
+  /** running time since the last check-in that has been spent without a successful check-in, in milliseconds */
+  get offlineMs(): number { return this.st.unsyncedMs; }
+
+  /** Mark the saved record as not to be trusted (it was altered, was unreadable, or has no valid signature). Cleared by the next successful check-in. */
+  distrust() { if (!this.st.tampered) { this.st.tampered = true; this.save(); } }
 
   private slotReason(slot: Slot, now: number): LockReason {
     const snap = slot.snapshot;
@@ -122,7 +205,8 @@ export class LicenseClient {
     if (snap.status === 'revoked') return 'revoked';
     if (snap.status === 'suspended') return 'suspended';
     if (snap.paidUntil && Date.parse(snap.paidUntil) < now) return 'expired';
-    if (now - snap.okAt > OFFLINE_GRACE_DAYS * DAY) return 'needs_check';
+    if (this.st.tampered) return 'clock';
+    if (this.st.unsyncedMs > OFFLINE_GRACE_DAYS * DAY || now - snap.okAt > OFFLINE_GRACE_DAYS * DAY) return 'needs_check';
     return 'none';
   }
 
@@ -155,6 +239,9 @@ export class LicenseClient {
       customer: snap?.customer ?? '', paidUntil: snap?.paidUntil ?? null, status: snap?.status ?? null, installId: s.installId,
       daysLeft: snap?.paidUntil ? Math.ceil((Date.parse(snap.paidUntil) - now) / DAY) : null,
       lastCheckAt: snap?.okAt ?? null, lastError: pick.slot?.lastError ?? null,
+      offlineDaysUsed: Math.floor(s.unsyncedMs / DAY),
+      offlineDaysLeft: this.enforce && this.cfg && snap ? Math.max(0, Math.ceil(OFFLINE_GRACE_DAYS - Math.max(s.unsyncedMs, snap.okAt ? now - snap.okAt : 0) / DAY)) : null,
+      clockIssue: this.enforce && !!this.cfg && s.tampered,
     };
   }
 
@@ -191,14 +278,24 @@ export class LicenseClient {
     const key = slotKey(r?.ok === true ? r.username : null);
     this.apply(key, r);
     this.vault.set(key, String(r.token));
+    this.st.tampered = false; this.rollbackLatched = false; this.save();      // the server's clock has just been used
     return this.view(username);
   }
 
   /** Ask the server about every licence on this computer. A failed attempt (no internet) keeps what is known and is reported in lastError. */
-  async check(): Promise<void> {
+  private checking: Promise<void> | null = null;
+  /** One check-in at a time: a second request while one is running (timer + "Check again", say) waits for it, so nothing is reported to the vendor twice. */
+  check(): Promise<void> {
+    if (!this.checking) this.checking = this.doCheck().finally(() => { this.checking = null; });
+    return this.checking;
+  }
+  private async doCheck(): Promise<void> {
     if (!this.cfg) return;
     const seen = [...this.recent];
     let allOk = true;
+    // The offline counter is told to the vendor once, with the first licence that answers, and only then reset: a failed attempt keeps it.
+    const asked = { ms: this.st.unsyncedMs, rollbacks: this.st.rollbacks };
+    let reported = false;
     for (const key of Object.keys(this.st.slots)) {
       const slot = this.st.slots[key];
       const token = this.vault.get(key);
@@ -206,16 +303,23 @@ export class LicenseClient {
       slot.lastTryAt = this.now();
       // a user's own licence hears about that user only; the customer licence hears about everybody who has no licence of their own
       const mine = key === COMPUTER ? seen.filter(u => !this.st.slots[u]) : seen.filter(u => u === key);
+      const offlineSeconds = !reported && asked.ms > OFFLINE_REPORT_AFTER_MS ? Math.round(asked.ms / 1000) : 0;
       try {
-        const r = await rpc(this.cfg, this.fetchFn, 'bf_check', { p_token: token, p_device: this.device(), p_version: this.version(), p_users: mine });
+        const r = await rpc(this.cfg, this.fetchFn, 'bf_check', { p_token: token, p_device: this.device(), p_version: this.version(), p_users: mine,
+          p_offline_seconds: offlineSeconds, p_rollbacks: reported ? 0 : asked.rollbacks });
         if (r?.ok === false && r.error === 'invalid_token') {
           this.vault.clear(key); this.st.slots[key] = { ...emptySlot(), invalid: true }; this.save();
-        } else this.apply(key, r);
+        } else {
+          this.apply(key, r);
+          if (!reported) { reported = true; this.st.unsyncedMs = Math.max(0, this.st.unsyncedMs - asked.ms); this.st.rollbacks = Math.max(0, this.st.rollbacks - asked.rollbacks); }
+        }
       } catch (e: any) {
         allOk = false;
         slot.lastError = e?.message || 'The licence check failed.'; this.save();
       }
     }
+    // the server's own clock has just been used and the counter reported: what was in doubt is settled
+    if (reported && allOk) { this.st.tampered = false; this.rollbackLatched = false; this.save(); }
     if (allOk) for (const u of seen) this.recent.delete(u);
   }
 
@@ -227,6 +331,7 @@ export class LicenseClient {
     const r = await rpc(this.cfg, this.fetchFn, 'bf_register_user', { p_token: token, p_username: username });
     if (r?.ok === false && r.error === 'invalid_token') { this.vault.clear(COMPUTER); this.st.slots[COMPUTER] = { ...emptySlot(), invalid: true }; this.save(); throw new LicenseFailure('invalid_token', TEXT.invalid_token); }
     this.apply(COMPUTER, r);
+    this.st.tampered = false; this.rollbackLatched = false; this.save();
     return this.view(username);
   }
 }
@@ -234,7 +339,7 @@ export class LicenseClient {
 // ---------------------------------------------------------------------------------------------- vendor panel
 export interface AdminSession { email: string; access: string; refresh: string; expiresAt: number }
 export interface SessionStore { load(): AdminSession | null; save(s: AdminSession): void; clear(): void }
-export interface DeviceRow { id: string; license_id: string; install_id: string; device_name: string | null; app_version: string | null; last_user: string | null; first_seen: string; last_seen: string }
+export interface DeviceRow { id: string; license_id: string; install_id: string; device_name: string | null; app_version: string | null; last_user: string | null; first_seen: string; last_seen: string; offline_seconds_total?: number; offline_stretches?: number; longest_offline_seconds?: number; last_offline_seconds?: number; last_offline_at?: string | null; clock_rollbacks?: number }
 export interface UserRow { id: string; license_id: string; username: string; note: string | null; first_seen: string; last_seen: string | null }
 export interface LicenseRow {
   id: string; customer: string; username: string | null; contact: string | null; notes: string | null; pin: string; status: LicenseStatus; paid_until: string | null; monthly_fee: number;
@@ -311,7 +416,7 @@ export class LicenseAdmin {
   private one(r: any) { const row = Array.isArray(r) ? r[0] : r; if (!row) throw new LicenseFailure('denied', 'Nothing was changed. This Supabase user is probably not listed in bf_admins (see the last lines of docs/supabase/license.sql).'); return row; }
 
   async list(): Promise<LicenseRow[]> {
-    const rows: any[] = await this.api('/rest/v1/bf_licenses?select=*,bf_devices(id,license_id,install_id,device_name,app_version,last_user,first_seen,last_seen),bf_license_users(*)&order=created_at.desc');
+    const rows: any[] = await this.api('/rest/v1/bf_licenses?select=*,bf_devices(id,license_id,install_id,device_name,app_version,last_user,first_seen,last_seen,offline_seconds_total,offline_stretches,longest_offline_seconds,last_offline_seconds,last_offline_at,clock_rollbacks),bf_license_users(*)&order=created_at.desc');
     return rows.map(({ bf_devices, bf_license_users, ...l }) => ({ ...l, devices: bf_devices || [], users: bf_license_users || [] })) as LicenseRow[];
   }
   /** a computer is released: it is locked at its next check and its place is free again */

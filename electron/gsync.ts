@@ -22,8 +22,23 @@ export const HEAD_NAME = 'bondhu-sync-head.json';
 export const SNAP_PREFIX = 'bondhu-snap-';
 export const DOC_PREFIX = 'bondhu-doc-';
 export const BACKUP_PREFIX = 'bondhu-backup-';
-export const KEEP_SNAPSHOTS = 5;
-export const KEEP_BACKUPS = 30;
+/** Only the newest 10 are kept in Google Drive (synced copies and backup files, each counted separately); the oldest is deleted when an 11th is saved. */
+export const KEEP_SNAPSHOTS = 10;
+export const KEEP_BACKUPS = 10;
+/** A sync or backup that fails (no connection, a Google hiccup) is tried again automatically after this long, up to RETRY_MAX more times. */
+export const RETRY_DELAY_MS = 10_000;
+export const RETRY_MAX = 5;
+export interface RetryPolicy { delayMs: number; max: number; sleep?: (ms: number) => Promise<void> }
+/**
+ * Google sync and Drive backup are a PREMIUM feature. Only the iqbal_labs account switches them on (or off) for a computer; while off, every Google
+ * operation except these is refused for everybody, and the background sync does not run. The per-user permissions (Users & Roles → Access) still apply on top.
+ */
+export const PREMIUM_FREE_OPS = new Set(['status', 'setPremium', 'disconnect']);
+export const PREMIUM_MESSAGE = 'Google sync and Drive backup are a premium feature that is not switched on for this computer. Ask the software provider (iqbal_labs) to enable it.';
+export const premiumGate = (on: boolean, method: string): string | null => (on || PREMIUM_FREE_OPS.has(method) ? null : PREMIUM_MESSAGE);
+
+/** Worth trying again: no connection, or Google did not accept the request this time. Not worth it: expired sign-in, full Drive, not signed in, cancelled. */
+export const isTransient = (e: unknown): boolean => { const k = (e as { kind?: string } | null)?.kind; return k === 'offline' || k === 'unknown'; };   // by kind, not by class, so it holds however the code is bundled
 
 /** Records that real data changed on this computer. Works whether or not Google is connected, so edits made while disconnected are never missed. */
 export function markDirtyIn(store: { load(): SyncState; save(s: SyncState): void }) {
@@ -77,7 +92,22 @@ export class SyncEngine {
   constructor(
     private drive: DriveApi, private local: LocalPort, private store: StateStore, private vault: SecretVault, private cx: CryptoPort,
     private account: () => string | null,
+    private retry: RetryPolicy = { delayMs: RETRY_DELAY_MS, max: RETRY_MAX },
   ) {}
+
+  /** Run one attempt after another: a transient failure waits retry.delayMs and tries again (the screen shows "retrying…"), anything else stops at once. */
+  private async withRetry<T>(what: string, fn: () => Promise<T>): Promise<T> {
+    const sleep = this.retry.sleep || ((ms: number) => new Promise<void>(r => setTimeout(r, ms)));
+    for (let attempt = 0; ; attempt++) {
+      try { return await fn(); }
+      catch (e: any) {
+        const msg = String(e?.message || `${what} failed`);
+        if (!isTransient(e) || attempt >= this.retry.max) { this.patch({ lastResult: `failed: ${msg}` }); throw e; }
+        this.patch({ lastResult: `retrying: ${msg} Trying again in ${Math.round(this.retry.delayMs / 1000)} seconds (${attempt + 1} of ${this.retry.max}).` });
+        await sleep(this.retry.delayMs);
+      }
+    }
+  }
 
   // ---- state ------------------------------------------------------------------------------------------------
   state(): SyncState {
@@ -126,7 +156,7 @@ export class SyncEngine {
   async syncNow(opts: { resolve?: 'local' | 'remote'; pin?: string; auto?: boolean; pushOnly?: boolean } = {}): Promise<SyncResult> {
     if (this.busy) throw failure('unknown', 'busy', 'A sync is already running. Wait a moment.');
     this.busy = true;
-    try { const r = await this.run(opts); this.patch({ lastResult: `${r.status}: ${r.message}` }); return r; }
+    try { const r = await this.withRetry('The sync', () => this.run(opts)); this.patch({ lastResult: `${r.status}: ${r.message}` }); return r; }
     finally { this.busy = false; }
   }
 
@@ -169,24 +199,26 @@ export class SyncEngine {
     const rev = (head?.revision || 0) + 1;
     const snapName = `${SNAP_PREFIX}${String(rev).padStart(6, '0')}-${st.deviceId.slice(0, 6)}.bfsnap`;
     const snap = await this.drive.create(snapName, blob, { kind: 'snap', rev: String(rev), enc: encrypted ? '1' : '0' });
-
-    // signed papers: upload those the cloud does not have yet
-    const have = new Map((head?.docs || []).map(d => [d.sha256, d.id]));
-    const docs: Head['docs'] = [];
-    for (const d of this.local.docs()) {
-      let id = have.get(d.sha256);
-      if (!id) { const f = await this.drive.create(`${DOC_PREFIX}${d.sha256}`, d.read(), { kind: 'doc', name: d.name }); id = f.id; have.set(d.sha256, id); }
-      docs.push({ name: d.name, sha256: d.sha256, size: d.size, id });
-    }
-
-    // another computer may have pushed while this one was uploading: never overwrite a revision we have not seen
-    const again = await this.readHead();
-    if ((again?.revision || 0) !== (head?.revision || 0)) {
-      try { await this.drive.remove(snap.id); } catch { /* best effort */ }
-      return { status: 'conflict', message: 'Another computer synced a moment ago. Press Sync again.', conflict: undefined };
-    }
-    const newHead: Head = { format: 1, revision: rev, snapshotId: snap.id, snapshotName: snapName, snapshotSha: sha(blob), encrypted, size: blob.length, at: nowIso(), deviceId: st.deviceId, deviceName: st.deviceName, counts: this.local.counts(), docs };
-    await this.writeHead(newHead);
+    // anything that goes wrong from here on removes the half-uploaded snapshot, so a retry starts clean and no stray copy is left in Drive
+    const newHead: Head = await (async () => {
+      try {
+        // signed papers: upload those the cloud does not have yet
+        const have = new Map((head?.docs || []).map(d => [d.sha256, d.id]));
+        const docs: Head['docs'] = [];
+        for (const d of this.local.docs()) {
+          let id = have.get(d.sha256);
+          if (!id) { const f = await this.drive.create(`${DOC_PREFIX}${d.sha256}`, d.read(), { kind: 'doc', name: d.name }); id = f.id; have.set(d.sha256, id); }
+          docs.push({ name: d.name, sha256: d.sha256, size: d.size, id });
+        }
+        // another computer may have pushed while this one was uploading: never overwrite a revision we have not seen
+        const again = await this.readHead();
+        if ((again?.revision || 0) !== (head?.revision || 0)) { await this.drive.remove(snap.id).catch(() => undefined); return null as unknown as Head; }
+        const h: Head = { format: 1, revision: rev, snapshotId: snap.id, snapshotName: snapName, snapshotSha: sha(blob), encrypted, size: blob.length, at: nowIso(), deviceId: st.deviceId, deviceName: st.deviceName, counts: this.local.counts(), docs };
+        await this.writeHead(h);
+        return h;
+      } catch (e) { try { await this.drive.remove(snap.id); } catch { /* best effort */ } throw e; }
+    })();
+    if (!newHead) return { status: 'conflict', message: 'Another computer synced a moment ago. Press Sync again.', conflict: undefined };
     this.patch({ lastRev: rev, lastHash: newHead.snapshotSha, lastSyncAt: newHead.at, dirty: false, dirtyAt: null, account: this.account() });
     await this.prune(newHead);
     return { status: 'pushed', message: `Your data was uploaded to Google Drive (revision ${rev}).`, revision: rev };
@@ -233,8 +265,9 @@ export class SyncEngine {
 
   // ---- manual Drive backups (the normal PIN-encrypted backup file, kept in Drive) -----------------------------------
   async uploadBackup(bytes: Buffer, meta: { device: string; encrypted: boolean }): Promise<DriveFile> {
-    const stamp = new Date().toISOString().replace(/[-:]/g, '').replace('T', '-').slice(0, 15);
-    const f = await this.drive.create(`${BACKUP_PREFIX}${stamp}-${crypto.randomBytes(2).toString('hex')}.bfbak`, bytes, { kind: 'backup', device: meta.device, enc: meta.encrypted ? '1' : '0', at: nowIso() });
+    const stamp = new Date().toISOString().replace(/[-:]/g, '').replace('T', '-').slice(0, 19);   // to the millisecond, so "oldest" is always the really oldest
+    const name = `${BACKUP_PREFIX}${stamp}-${crypto.randomBytes(2).toString('hex')}.bfbak`;
+    const f = await this.withRetry('The backup', () => this.drive.create(name, bytes, { kind: 'backup', device: meta.device, enc: meta.encrypted ? '1' : '0', at: nowIso() }));
     try {
       const all = (await this.drive.list({ prefix: BACKUP_PREFIX })).sort((a, b) => b.name.localeCompare(a.name));
       for (const old of all.slice(KEEP_BACKUPS)) await this.drive.remove(old.id);

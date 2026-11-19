@@ -80,8 +80,15 @@ interface Props {
   totalLabel: string;
 }
 
+/** A preview of thousands of rows would freeze the screen; the first rows are shown, the totals and every export always use ALL rows. */
+const PREVIEW_ROWS = 300;
+
 export const ReportTableView: React.FC<Props> = ({ columns, rows, f, totalLabel }) => {
+  const [showAll, setShowAll] = React.useState(false);
+  React.useEffect(() => { setShowAll(false); }, [rows]);
   const totals = useMemo(() => totalsFor(columns, rows), [columns, rows]);
+  const shown = showAll || rows.length <= PREVIEW_ROWS * 1.2 ? rows : rows.slice(0, PREVIEW_ROWS);
+  const cut = rows.length - shown.length;
   const hasTotals = columns.some(c => c.total) && rows.length > 0;
   return (
     <div className="overflow-x-auto rounded-xl border border-slate-200 dark:border-[#22353f] report-table-wrap">
@@ -97,7 +104,7 @@ export const ReportTableView: React.FC<Props> = ({ columns, rows, f, totalLabel 
           </tr>
         </thead>
         <tbody className="divide-y divide-slate-100 dark:divide-[#1d2e36]">
-          {rows.map((r, i) => (
+          {shown.map((r, i) => (
             <tr key={i} className="hover:bg-slate-50/70 dark:hover:bg-[#1a2b34] text-slate-800 dark:text-slate-200">
               <td className="px-3 py-3 text-center text-slate-400 font-semibold tabular-nums">{f.bn ? f.toBanglaDigits(i + 1) : i + 1}</td>
               {columns.map(c => (
@@ -109,6 +116,14 @@ export const ReportTableView: React.FC<Props> = ({ columns, rows, f, totalLabel 
             </tr>
           ))}
         </tbody>
+        {cut > 0 && (
+          <tfoot>
+            <tr><td colSpan={columns.length + 1} className="px-3 py-3 text-center text-[11px] font-semibold text-slate-500 dark:text-slate-400 bg-slate-50 dark:bg-[#101b21]">
+              {f.bn ? `প্রথম ${f.toBanglaDigits(shown.length)}টি সারি দেখানো হচ্ছে, মোট ${f.toBanglaDigits(rows.length)}টি। মোট ও এক্সপোর্টে সব সারি আছে।` : `Showing the first ${shown.length} of ${rows.length} rows. The totals and every export include all ${rows.length} rows.`}{' '}
+              <button type="button" onClick={() => setShowAll(true)} className="text-emerald-700 dark:text-emerald-400 font-bold underline">{f.bn ? 'সব সারি দেখান' : 'Show all rows'}</button>
+            </td></tr>
+          </tfoot>
+        )}
         {hasTotals && (
           <tfoot>
             <tr className="bg-emerald-50/70 dark:bg-emerald-950/30 font-black text-slate-900 dark:text-white border-t-2 border-[#0f4a3c]/30">

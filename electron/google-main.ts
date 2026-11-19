@@ -11,7 +11,7 @@ import type { IpcMain, App, Shell, SafeStorage, Net } from 'electron';
 import * as store from './database';
 import type { ModuleKey } from './database';
 import { GoogleAuth, GoogleDrive, type AccountStore, type GoogleClient } from './google';
-import { SyncEngine, markDirtyIn, type StateStore, type SyncState, type SecretVault, type CryptoPort } from './gsync';
+import { SyncEngine, markDirtyIn, premiumGate, type StateStore, type SyncState, type SecretVault, type CryptoPort } from './gsync';
 import { encryptBackup, decryptBackup, isEncryptedBackup, validatePin, hasMasterRecovery } from './backup-crypto';
 
 // Build-time credentials (from config/google.json, git-ignored). The same values can also be entered by the Super User inside the app.
@@ -87,6 +87,9 @@ export function setupGoogle(ctx: GoogleCtx) {
     afterPull: () => { store.rebaseConsentFiles(ctx.docsDir()); store.revalidateSession(); },
   }, stateStore, vault, cx, () => auth.account()?.email || null);
 
+  // The premium switch lives in the encrypted vault of this computer (a customer cannot flip it by editing a file); only iqbal_labs sets it.
+  const premiumOn = () => { try { return vault.get('premium') === '1'; } catch { return false; } };
+
   // ---- operations, with the module that guards each ---------------------------------------------------------------
   const deviceName = () => os.hostname() || 'This computer';
   const ops: Record<string, { need: ModuleKey[]; level: 'view' | 'edit'; system?: boolean; fn: (...a: any[]) => any }> = {
@@ -94,10 +97,11 @@ export function setupGoogle(ctx: GoogleCtx) {
       const st = engine.state();
       return {
         configured: auth.isConfigured(), clientSource: clientSource(), canConfigure: !!store.api.getSession()?.canUpload, secureStorage: safeStorage.isEncryptionAvailable(),
-        account: auth.account(), device: deviceName(), hasPin: engine.hasPin(),
+        account: auth.account(), device: deviceName(), hasPin: engine.hasPin(), premium: premiumOn(),
         sync: { lastSyncAt: st.lastSyncAt, lastRev: st.lastRev, dirty: st.dirty, dirtyAt: st.dirtyAt, auto: st.auto, encrypt: st.encrypt, lastResult: st.lastResult },
       };
     } },
+    setPremium: { need: [], level: 'view', system: true, fn: (on: boolean) => { if (on) vault.set('premium', '1'); else vault.delete('premium'); return premiumOn(); } },
     saveConfig: { need: ['google_sync'], level: 'edit', system: true, fn: (cfg: { clientId: string; clientSecret: string }) => {
       const id = String(cfg?.clientId || '').trim(), secret = String(cfg?.clientSecret || '').trim();
       if (!/^[0-9]+-[a-z0-9]+\.apps\.googleusercontent\.com$/i.test(id)) throw new Error('The client ID should look like 123456789012-abcdef….apps.googleusercontent.com');
@@ -106,7 +110,15 @@ export function setupGoogle(ctx: GoogleCtx) {
       return true;
     } },
     clearConfig: { need: ['google_sync'], level: 'edit', system: true, fn: () => { try { fs.unlinkSync(path.join(dir(), 'config.json')); } catch { /* none */ } return true; } },
-    connect: { need: ['google_sync'], level: 'edit', fn: async () => { const a = await auth.signIn(); engine.state(); return a; } },
+    // Signing in also does the first sync at once, so a new computer (or one after a lost PC) gets everything back without a second step:
+    //   this computer has no data, Drive has → the data is pulled;  this computer has data, Drive is empty → it is uploaded;
+    //   both have data → the usual "which one to keep" question (nothing is overwritten).
+    connect: { need: ['google_sync'], level: 'edit', fn: async () => {
+      const a = await auth.signIn(); engine.state();
+      let sync = null as Awaited<ReturnType<typeof engine.syncNow>> | null, syncError: string | null = null;
+      try { sync = await engine.syncNow(); } catch (e: any) { syncError = String(e?.message || 'The first sync did not finish.'); }
+      return { ...a, sync, syncError };
+    } },
     disconnect: { need: ['google_sync'], level: 'edit', fn: async () => { await auth.signOut(); return true; } },
     check: { need: ['google_sync'], level: 'view', fn: () => engine.checkRemote() },
     sync: { need: ['google_sync'], level: 'edit', fn: (opts?: { resolve?: 'local' | 'remote'; pin?: string }) => engine.syncNow({ resolve: opts?.resolve, pin: opts?.pin }) },
@@ -139,13 +151,15 @@ export function setupGoogle(ctx: GoogleCtx) {
   ctx.ipcMain.handle('google:call', (_e, method: string, args: any[]) => ctx.wrap(async () => {
     const op = ops[method];
     if (!op) throw new Error(`Unknown Google operation: ${method}`);
-    store.requireModule(op.need, op.level);
+    const locked = premiumGate(premiumOn(), method);              // a premium feature: off unless iqbal_labs switched it on for this computer
+    if (locked) throw new Error(locked);
+    if (op.need.length) store.requireModule(op.need, op.level);
     if (op.system) store.requireUpload();
     return await op.fn(...(Array.isArray(args) ? args : []));
   }));
 
   // ---- quiet background sync ----------------------------------------------------------------------------------------
-  const autoOn = () => { try { return !!auth.account() && engine.state().auto; } catch { return false; } };
+  const autoOn = () => { try { return premiumOn() && !!auth.account() && engine.state().auto; } catch { return false; } };
   return {
     /** at start-up (nobody is signed in yet) a full safe sync; afterwards only uploads of changes, every 10 minutes */
     startAuto() {

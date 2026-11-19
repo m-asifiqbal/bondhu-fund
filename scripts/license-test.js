@@ -145,6 +145,96 @@ const adminPw = process.env.BONDHU_ADMIN_PASSWORD, sysPw = process.env.BONDHU_SY
     const ahead = mkClient({ state, vault });
     ok(!(await ahead.c.check()).locked, 'a renewal still unlocks it after all that');
 
+    // ---- the offline counter: running time is measured without the calendar clock, reported when online, and capped
+    {
+      const o = mkClient({ state, vault }), oc = o.c;
+      ok(!(await oc.check()).locked, 'offline counter: starts from an open, checked copy');
+      const dev = async () => (await admin.list()).find(r => r.id === lic.id).devices[0];
+      const run = (n, ms = 30000, from = 1_000_000) => { for (let i = 0; i <= n; i++) oc.tick(from + i * ms); };   // n ticks of ms each, using the monotonic timer
+      const base = await dev();
+      run(100);                                                                       // 100 x 30 s = 50 minutes of use, not yet checked in
+      ok(oc.offlineMs === 100 * 30000, `the counter adds the time the app has been running (${Math.round(oc.offlineMs / 60000)} min)`);
+      srv.ctl.down = true;
+      await oc.check();
+      ok(oc.offlineMs === 100 * 30000 && oc.view().offlineDaysLeft !== null, 'a failed check-in (no internet) keeps the counter');
+      srv.ctl.down = false;
+      await oc.check();
+      const d1 = await dev();
+      ok(oc.offlineMs === 0, 'the counter is reset after a successful check-in');
+      ok((d1.offline_stretches || 0) === (base.offline_stretches || 0) + 1 && (d1.offline_seconds_total || 0) - (base.offline_seconds_total || 0) === 3000 && d1.last_offline_seconds === 3000 && d1.last_offline_at, 'the vendor is told: one offline stretch of 50 minutes');
+      run(20, 30000, 9_000_000);                                                      // 10 minutes: an ordinary gap between two check-ins
+      await oc.check();
+      ok((await dev()).offline_stretches === d1.offline_stretches && oc.offlineMs === 0, 'a normal 10-minute gap is not reported as an offline stretch');
+      // a long pause (sleep, or the app hung) is not counted as use
+      oc.tick(50_000_000); oc.tick(50_000_000 + 10 * 3600_000);
+      ok(oc.offlineMs === 2 * 120000, 'long jumps of the timer (computer asleep) count only 2 minutes each');
+      await oc.check();
+
+      // the allowance runs out by use alone: the calendar clock is never touched
+      srv.ctl.down = true;
+      await oc.check();
+      oc.tick(100_000_000);
+      for (let i = 1; i <= 7000; i++) oc.tick(100_000_000 + i * 120_000);              // about 9.7 days of running
+      ok(!oc.view().locked && oc.view().offlineDaysUsed === 9 && oc.view().offlineDaysLeft <= 5 && oc.view().offlineDaysLeft >= 4, `9 days of offline use: still open, ${oc.view().offlineDaysLeft} day(s) left`);
+      for (let i = 7001; i <= 10200; i++) oc.tick(100_000_000 + i * 120_000);          // past 14 days
+      v = oc.view();
+      ok(v.locked && v.reason === 'needs_check' && v.offlineDaysLeft === 0 && /^LICENSE_LOCKED:needs_check\|/.test(oc.gate('alice')), 'OFFLINE ALLOWANCE: more than 14 days of use without internet locks it, with the date unchanged');
+      srv.ctl.down = false;
+      v = await oc.check();
+      const d2 = await dev();
+      ok(!v.locked && oc.offlineMs === 0 && d2.longest_offline_seconds > 14 * 86400 && d2.offline_stretches === d1.offline_stretches + 1, 'online again: it opens, the counter restarts and the long stretch is on record');
+
+      // two check-ins at the same moment (the start-up check and "Check again") must report the offline stretch only once
+      {
+        const st0 = await dev();
+        oc.tick(200_000_000); for (let i = 1; i <= 100; i++) oc.tick(200_000_000 + i * 30000);      // 50 minutes of use
+        await Promise.all([oc.check(), oc.check(), oc.check()]);
+        const st1 = await dev();
+        ok((st1.offline_stretches || 0) === (st0.offline_stretches || 0) + 1 && (st1.offline_seconds_total || 0) - (st0.offline_seconds_total || 0) === 3000, 'three check-ins at once report the 50-minute stretch only once');
+      }
+
+      // the calendar clock set back
+      const rb0 = (await dev()).clock_rollbacks || 0;
+      clockOff = -2 * DAY;
+      v = oc.view();
+      ok(v.locked && v.reason === 'clock' && v.clockIssue && oc.needsOnlineCheck() && /^LICENSE_LOCKED:clock\|/.test(oc.gate('alice')), 'CLOCK SET BACK two days: locked until it checks in online');
+      oc.view(); oc.view(); oc.tick(300_000_000);
+      ok(o.state.raw().rollbacks === 1, 'one change of the clock is counted once however often it is looked at');
+      const restarted = mkClient({ state, vault }).c;                                 // the program is closed and opened again while the clock is still wrong
+      restarted.view(); restarted.view();
+      ok(state.raw().rollbacks === 1 && restarted.view().reason === 'clock', 'a restart with the clock still wrong is the same episode: counted once, still locked');
+      srv.ctl.down = true;
+      v = await oc.check();
+      ok(v.locked && v.reason === 'clock', 'offline, the lock stays (the server clock is the only thing that can clear it)');
+      srv.ctl.down = false;
+      v = await oc.check();
+      ok(!v.locked && !v.clockIssue && !oc.needsOnlineCheck() && o.state.raw().rollbacks === 0, 'online: the server confirms the time, it opens again');
+      ok((await dev()).clock_rollbacks === rb0 + 1, 'and the vendor sees that the clock was set back');
+      clockOff = 0;
+      v = await oc.check();
+      ok(!v.locked, 'putting the clock right again does not lock an online computer for long');
+      clockOff = -5 * 60_000;
+      ok(!oc.view().locked, 'a correction of a few minutes (time sync) is not treated as tampering');
+      clockOff = 0;
+
+      // an altered or unsigned record
+      oc.distrust();
+      ok(oc.view().locked && oc.view().reason === 'clock', 'a record that fails its signature is not trusted');
+      ok(!(await oc.check()).locked, 'one online check-in settles it');
+    }
+    {
+      const key = 'k'.repeat(64), s = L.freshState();
+      s.installId = 'install-123456'; s.unsyncedMs = 5000;
+      ok(L.unpackState(L.packState(s, key), key).tampered === false && L.unpackState(L.packState(s, key), key).unsyncedMs === 5000, 'SIGNED RECORD: an untouched record is trusted');
+      const edited = L.packState(s, key); edited.data = edited.data.replace('"unsyncedMs":5000', '"unsyncedMs":0');
+      ok(L.unpackState(edited, key).tampered === true, 'editing the counter by hand is noticed');
+      ok(L.unpackState(L.packState(s, key), 'other-key').tampered === true && L.unpackState(L.packState(s, key), null).tampered === true, 'a missing or different key cannot verify it');
+      const legacy = { installId: 'install-123456', maxSeen: 0, skew: 0, slots: {} };
+      const lg = L.unpackState(legacy, key);
+      ok(lg.tampered === true && lg.installId === 'install-123456' && lg.unsyncedMs === 0, 'an older unsigned record is read but must be confirmed online once');
+      ok(L.unpackState(null, key) === null && L.unpackState({ v: 2, data: 'not json', mac: 'x' }, key) === null, 'nothing usable gives a fresh start');
+    }
+
     // ---- the vendor releases the computer (lost PC): new PIN, old computer locks
     const reset = await admin.resetDevice(lic.id);
     ok(reset.pin !== lic.pin && reset.devices.length === 0 && (await admin.list()).find(r => r.id === lic.id).devices.length === 0, 'RESET: every computer is released and the licence gets a new PIN');

@@ -59,6 +59,7 @@ export const LoanFormModal: React.FC<Props> = ({ open, onClose, onSaved, presetM
   const [reference, setReference] = useState('');
   const [notes, setNotes] = useState('');
   const [limitNote, setLimitNote] = useState('');
+  const [policyNote, setPolicyNote] = useState('');
   const [pv, setPv] = useState<LoanPreview | null>(null);
   const [calculating, setCalculating] = useState(false);
   const [showAll, setShowAll] = useState(false);
@@ -80,14 +81,14 @@ export const LoanFormModal: React.FC<Props> = ({ open, onClose, onSaved, presetM
       setLoanDate(a.disbursed_date); setFirstDue(a.first_due_date); setPayMethod(a.payment_method || ''); setPurpose(a.purpose || ''); setReference(a.reference || '');
       setGMember(a.guarantor_type !== 'outsider'); setGMemberId(a.guarantor_member_id || ''); setGName(a.guarantor_name || ''); setGAddress(a.guarantor_address || '');
       setGNid(a.guarantor_nid || ''); setGPhone(a.guarantor_phone || ''); setGRelation(a.guarantor_relation || ''); setGCheck(null); setGShowErr(false);
-      setNotes(a.notes || ''); setLimitNote(a.limit_note || '');
+      { const pm = /(?:^|\s\|\s)POLICY EXCEPTION: (.+)$/.exec(a.limit_note || ''); setNotes(a.notes || ''); setLimitNote(pm ? String(a.limit_note).slice(0, pm.index).trim() : (a.limit_note || '')); setPolicyNote(pm ? pm[1] : ''); }
     } else {
     setMemberId(presetMemberId || ''); setPrincipal(''); setTerm('12');
     setMethod((settings?.loan_default_method as LoanMethod) || 'reducing');
     setRate(String(settings?.loan_default_rate ?? 12));
     setLoanDate(todayISO()); setFirstDue(''); setPayMethod(''); setPurpose(''); setReference('');
     setGMember(true); setGMemberId(''); setGName(''); setGAddress(''); setGNid(''); setGPhone(''); setGRelation(''); setGCheck(null); setGShowErr(false);
-    setNotes(''); setLimitNote('');
+    setNotes(''); setLimitNote(''); setPolicyNote('');
     }
     setPv(null); setShowAll(false);
     getAllMembersLite().then(l => setMembers(l as LiteMember[])).catch((e: any) => showToast(e.message, 'error'));
@@ -147,11 +148,12 @@ export const LoanFormModal: React.FC<Props> = ({ open, onClose, onSaved, presetM
   const plan = pv?.valid ? pv.plan : undefined;
   const mem = pv?.valid ? pv.member : null;
   const errors = (pv?.warnings || []).filter(w => w.level === 'error');
+  const needsPolicyNote = !!(mem && mem.policyBlocks && mem.policyBlocks.length > 0 && mem.canOverride);
   const needsLimitNote = !!(mem && mem.limit !== null && principalN + mem.owed > mem.limit + 0.005);
   const rows = plan?.rows || [];
   const shown = showAll ? rows : rows.slice(0, 6);
   const gOk = !!gCheck?.ok;
-  const canSave = !saving && memberId !== '' && !!plan && errors.length === 0 && !!payMethod && gOk && (!needsLimitNote || limitNote.trim().length > 0);
+  const canSave = !saving && memberId !== '' && !!plan && errors.length === 0 && !!payMethod && gOk && (!needsLimitNote || limitNote.trim().length > 0) && (!needsPolicyNote || policyNote.trim().length >= 5);
   const payName = payMethod ? tv(payMethod) : '';
   const makePaperNow = () => {
     if (!plan || !pv?.terms || !gCheck?.info || !mem) return;
@@ -178,7 +180,7 @@ export const LoanFormModal: React.FC<Props> = ({ open, onClose, onSaved, presetM
       const payload = {
         member_id: Number(memberId), principal: principalN, method, annual_rate: method === 'free' ? 0 : rateN, term_months: termN,
         disbursed_date: loanDate, first_due_date: firstDue || undefined, payment_method: payMethod,
-        reference: reference.trim(), purpose: purpose.trim(), notes: notes.trim(), limit_note: limitNote.trim(),
+        reference: reference.trim(), purpose: purpose.trim(), notes: notes.trim(), limit_note: limitNote.trim(), policy_override_note: needsPolicyNote ? policyNote.trim() : undefined,
         guarantor_type: (gMember ? 'member' : 'outsider') as 'member' | 'outsider', guarantor_member_id: gMember && gMemberId !== '' ? Number(gMemberId) : undefined,
         guarantor_name: gName, guarantor_address: gAddress, guarantor_nid: gNid, guarantor_phone: gPhone, guarantor_relation: gRelation,
       };
@@ -381,6 +383,13 @@ export const LoanFormModal: React.FC<Props> = ({ open, onClose, onSaved, presetM
             </div>
           </div>
 
+          {needsPolicyNote && (
+            <div>
+              <label className="form-label text-rose-700 dark:text-rose-400">{t('loan.policy_note', 'Admin approval reason (this loan breaks the lending policy)')} <span className="text-rose-500">*</span></label>
+              <input type="text" value={policyNote} onChange={e => setPolicyNote(e.target.value)} className="form-input border-rose-400" placeholder={t('loan.policy_note_ph', 'e.g. Committee approved the exception on 12 May')} />
+              <p className="form-hint">{t('loan.policy_note_hint', 'At least 5 characters. It is kept on the loan.')}</p>
+            </div>
+          )}
           {needsLimitNote && (
             <div>
               <label className="form-label text-amber-700 dark:text-amber-400">{t('loan.limit_note', 'Approval reason (loan is above the fund limit)')} <span className="text-rose-500">*</span></label>

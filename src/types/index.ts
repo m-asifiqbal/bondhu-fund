@@ -180,6 +180,9 @@ export interface AppSettings {
   loan_default_method?: LoanMethod;
   loan_max_multiple?: number;
   loan_late_fee?: number;
+  /** lending policy: whoever may borrow, and how much of the fund may be lent (0 = not checked) */
+  loan_max_active?: number; loan_block_overdue?: boolean; loan_block_written_off?: boolean; loan_min_member_months?: number;
+  loan_max_arrears_months?: number; loan_max_pct_of_fund?: number; loan_cash_reserve?: number; loan_guarantor_max?: number;
   /** 1 = a loan stays a draft until its signed consent paper is uploaded */
   loan_consent_required?: boolean;
 }
@@ -382,7 +385,11 @@ export interface LoanSummary {
   overdueAmount: number; overduePrincipal: number; dueNext30: number; writtenOffAmount: number; onTrackPct: number;
   cashInHand: number; fundBalance: number; lentPctOfFund: number; avgRate: number;
   drafts: number; draftsAmount: number;
+  /** portfolio quality: open principal of overdue loans by age, and the share of the portfolio at risk */
+  aging: { d1_30: AgingBucket; d31_60: AgingBucket; d61_90: AgingBucket; d90plus: AgingBucket; par30: number; par60: number; par90: number };
+  defaulters: Array<{ loan_id: number; loan_no: string; member_code: string; member_name: string; days_overdue: number; overdue_amount: number; outstanding: number; guarantor: string }>;
 }
+export interface AgingBucket { count: number; principal: number }
 export interface LoanPlanRow { no: number; due_date: string; principal: number; interest: number; total: number; balance: number }
 export interface LoanTermOption { term: number; installment: number; totalInterest: number; totalPayable: number; effectiveRate: number }
 export interface LoanPreview {
@@ -392,7 +399,7 @@ export interface LoanPreview {
   options?: LoanTermOption[];
   warnings?: Array<{ level: 'error' | 'warn' | 'info'; text: string }>;
   cash?: number; nextLoanNo?: string; nextAppNo?: string; autoReference?: string;
-  member?: { id: number; member_code: string; name: string; name_bn?: string | null; nid?: string | null; phone?: string | null; status: string; monthly_due: number; savings: number; owed: number; limit: number | null; multiple: number; available: number | null; overdueLoans: number } | null;
+  member?: { id: number; member_code: string; name: string; name_bn?: string | null; nid?: string | null; phone?: string | null; status: string; monthly_due: number; savings: number; owed: number; limit: number | null; multiple: number; available: number | null; overdueLoans: number; policyBlocks?: string[]; canOverride?: boolean } | null;
 }
 export interface LoanInstallment { no: number; due_date: string; principal: number; interest: number; total: number; paid: number; status: 'Paid' | 'Partial' | 'Due' | 'Overdue' | 'Waived' | 'Written off'; balance_after: number }
 export interface LoanRepayment {
@@ -441,6 +448,8 @@ export interface LoanApplicationDetail {
 export interface GoogleStatus {
   configured: boolean; clientSource: 'app' | 'build' | null; canConfigure: boolean; secureStorage: boolean;
   account: { email: string; name: string; picture: string } | null; device: string; hasPin: boolean;
+  /** a premium feature: false until iqbal_labs switches it on for this computer */
+  premium: boolean;
   sync: { lastSyncAt: string | null; lastRev: number; dirty: boolean; dirtyAt: string | null; auto: boolean; encrypt: boolean; lastResult: string | null };
 }
 export type SyncOutcome = 'up-to-date' | 'pushed' | 'pulled' | 'conflict' | 'needs-pin' | 'nothing' | 'wrong-pin';
@@ -453,19 +462,20 @@ export interface RemoteCheck { remote: { revision: number; at: string; deviceNam
 export interface DriveBackupItem { id: string; name: string; size: number; at: string; device: string; encrypted: boolean }
 
 // Software licence (activation PIN, monthly payments, remote lock) ---------------------------------
-export type LockReason = 'none' | 'not_activated' | 'suspended' | 'revoked' | 'expired' | 'needs_check' | 'invalid' | 'not_registered' | 'not_allowed';
+export type LockReason = 'none' | 'not_activated' | 'suspended' | 'revoked' | 'expired' | 'needs_check' | 'clock' | 'invalid' | 'not_registered' | 'not_allowed';
 export interface LicenseView {
   enforced: boolean; configured: boolean; locked: boolean; reason: LockReason; message: string;
   scope: 'user' | 'computer' | null; username: string;
   customer: string; paidUntil: string | null; daysLeft: number | null; status: 'active' | 'suspended' | 'revoked' | null;
   installId: string; lastCheckAt: number | null; lastError: string | null;
+  offlineDaysUsed: number; offlineDaysLeft: number | null; clockIssue: boolean;
 }
 export interface LicenseRecord {
   id: string; customer: string; username: string | null; contact: string | null; notes: string | null; pin: string; pin_display: string; status: 'active' | 'suspended' | 'revoked';
   paid_until: string | null; monthly_fee: number; message: string | null; max_devices: number; max_users: number | null; restrict_users: boolean; created_at: string;
   devices: LicenseDevice[]; users: LicenseUser[];
 }
-export interface LicenseDevice { id: string; license_id: string; install_id: string; device_name: string | null; app_version: string | null; last_user: string | null; first_seen: string; last_seen: string }
+export interface LicenseDevice { id: string; license_id: string; install_id: string; device_name: string | null; app_version: string | null; last_user: string | null; first_seen: string; last_seen: string; offline_seconds_total?: number; offline_stretches?: number; longest_offline_seconds?: number; last_offline_seconds?: number; last_offline_at?: string | null; clock_rollbacks?: number }
 export interface LicenseUser { id: string; license_id: string; username: string; note: string | null; first_seen: string; last_seen: string | null }
 export interface LicensePayment { id: string; license_id: string; amount: number; months: number; days: number; paid_on: string; method: string | null; note: string | null; period_from: string | null; period_to: string | null; created_at: string }
 export interface LicenseAdminState { configured: boolean; enforced: boolean; url: string; account: string | null }

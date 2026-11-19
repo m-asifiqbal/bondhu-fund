@@ -1,6 +1,6 @@
 {
   "name": "bondhu-fund-desktop",
-  "version": "2.8.0",
+  "version": "2.9.0",
   "description": "Bondhu Fund - offline fund management for member savings groups",
   "author": "Bondhu Fund",
   "homepage": "https://www.iqballabs.com",
@@ -95,13 +95,25 @@
       "icon": "build/icon-mac.png",
       "category": "public.app-category.finance",
       "target": [
-        { "target": "dmg", "arch": ["arm64"] },
-        { "target": "zip", "arch": ["arm64"] }
+        {
+          "target": "dmg",
+          "arch": [
+            "arm64"
+          ]
+        },
+        {
+          "target": "zip",
+          "arch": [
+            "arm64"
+          ]
+        }
       ],
       "identity": null,
       "artifactName": "BondhuFund-macOS-${version}-${arch}.${ext}"
     },
-    "dmg": { "title": "Bondhu Fund ${version}" },
+    "dmg": {
+      "title": "Bondhu Fund ${version}"
+    },
     "nsis": {
       "oneClick": false,
       "perMachine": false,

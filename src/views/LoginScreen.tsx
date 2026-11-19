@@ -53,6 +53,7 @@ export const LoginScreen: React.FC = () => {
       suspended: t('license.t_suspended', 'This copy has been suspended'), revoked: t('license.t_revoked', 'This licence has been withdrawn'),
       not_allowed: t('license.t_not_allowed', 'This user is not on the licence'),
       expired: t('license.t_expired', 'The licence period has ended'), needs_check: t('license.t_needs_check', 'The licence needs to be confirmed online'),
+      clock: t('license.t_clock', 'The date on this computer or the licence record was changed'),
     };
     const body: Record<string, string> = {
       suspended: t('license.b_suspended', 'The software provider has paused this licence. It opens again by itself once the provider resumes it.'),
@@ -60,6 +61,7 @@ export const LoginScreen: React.FC = () => {
       not_allowed: t('license.b_not_allowed', 'Ask the software provider to add your username to the licence.'),
       expired: t('license.b_expired', 'Please renew the monthly licence with the software provider. The app opens again by itself a few minutes after the renewal, or press "Check again".'),
       needs_check: t('license.b_needs_check', 'This computer has not been able to reach the licence server for a long time. Connect to the internet and press "Check again".'),
+      clock: t('license.b_clock', 'The date on this computer was set back, or the saved licence record was changed. Connect to the internet and press "Check again" to confirm the licence.'),
     };
     return [head[reason], body[reason], vendor].filter(Boolean).join(' · ');
   };
