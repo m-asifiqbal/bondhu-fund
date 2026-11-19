@@ -67,7 +67,7 @@ Get the latest files from **[Releases](https://github.com/m-asifiqbal/bondhu-fun
 | `BondhuFund-Setup-<version>.exe` | **Recommended.** Installs for the current Windows user. No admin rights needed. Creates desktop and Start-menu shortcuts. |
 | `BondhuFund-Portable-<version>.exe` | You want to run it without installing, for example from a USB drive. |
 
-- **Pre-releases:** versions marked *pre-release* on the Releases page (for example `2.9.0 test 1`) are test builds; **Latest** always points to the newest finished release. A build made with licensing switched on asks non-owner accounts for an activation PIN ([docs/LICENSING.md](docs/LICENSING.md)).
+- **Pre-releases:** a version marked *pre-release* on the Releases page is a test build; **Latest** always points to the newest finished release. A build made with licensing switched on asks non-owner accounts for an activation PIN ([docs/LICENSING.md](docs/LICENSING.md)).
 - **Requirements:** Windows 10 or 11, 64-bit. No internet, server, database engine or runtime to install.
 - **First start:** sign in with `admin` / `admin` (you'll be asked to set a new password). The database starts empty. Add your first member, **restore a backup** (Backup & Restore → Restore from file), or click **Explore with demo data** to look around.
 - **Upgrading:** run the newer Setup file. Your data is kept, and older databases and backups are upgraded automatically.

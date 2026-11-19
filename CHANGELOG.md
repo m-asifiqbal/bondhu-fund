@@ -2,9 +2,11 @@
 
 All notable changes, newest first. Dates are commit dates. Detailed notes for the newest versions are in [docs/](docs/); the 2.9.0 review is in [docs/AUDIT_2026-11.md](docs/AUDIT_2026-11.md).
 
-Versions marked *pre-release* are test builds; the database format is unchanged (schema 9) since 2.8.0.
+The database format is unchanged (schema 9) since 2.8.0.
 
-## 2.9.0 test 1 (pre-release), 2026-11-19
+## 2.9.0, 2026-11-19
+
+First built and tested as *2.9.0 test 1*, then published as the final 2.9.0.
 
 **Licence: offline and online both monitored** ([docs/LICENSING.md](docs/LICENSING.md))
 - An **offline counter** measures how long the app has actually been running without reaching the licence server, using the computer's monotonic timer (changing the date cannot reduce it). After 14 days of use without a check-in the copy locks until it has been online once.
