@@ -30,7 +30,8 @@
     "test:license": "node scripts/bundle-electron.js && node scripts/license-test.js",
     "test:review": "node scripts/bundle-electron.js && node scripts/review-test.js",
     "test:fines": "node scripts/bundle-electron.js && node scripts/fines-test.js",
-    "test:fuzz": "node scripts/bundle-electron.js && node scripts/books-fuzz-test.js"
+    "test:fuzz": "node scripts/bundle-electron.js && node scripts/books-fuzz-test.js",
+    "bench": "node scripts/bundle-electron.js && node scripts/perf-bench.js"
   },
   "build": {
     "appId": "org.bondhufund.desktop",

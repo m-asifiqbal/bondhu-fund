@@ -23,19 +23,38 @@ monthly dues, late fees, expenses, investments, reports and backups. Fully bilin
 ---
 
 ## Contents
-1. [Download & install](#-download--install)
-2. [Features](#-features)
-3. [Screenshots](#-screenshots)
-4. [Architecture](#-architecture)
-5. [Database](#-database)
-6. [Project structure](#-project-structure)
-7. [Development setup](#-development-setup)
-8. [Adding a feature](#-adding-a-feature) (step-by-step recipe)
-9. [Testing](#-testing)
-10. [Building & releasing](#-building--releasing)
-11. [Data, backups & recovery](#-data-backups--recovery)
-12. [Troubleshooting](#-troubleshooting)
-13. [Roadmap](#-roadmap)
+1. [Documentation](#-documentation)
+2. [Download & install](#-download--install)
+3. [Features](#-features)
+4. [Screenshots](#-screenshots)
+5. [Architecture](#-architecture)
+6. [Database](#-database)
+7. [Project structure](#-project-structure)
+8. [Development setup](#-development-setup)
+9. [Adding a feature](#-adding-a-feature) (step-by-step recipe)
+10. [Testing](#-testing)
+11. [Building & releasing](#-building--releasing)
+12. [Data, backups & recovery](#-data-backups--recovery)
+13. [Troubleshooting](#-troubleshooting)
+14. [Roadmap](#-roadmap)
+
+---
+
+## 📚 Documentation
+
+| Document | What it covers |
+|---|---|
+| [CHANGELOG.md](CHANGELOG.md) | what changed in every version |
+| [docs/LICENSING.md](docs/LICENSING.md) | the licence system: PINs, monthly payments, remote lock, **offline rules and the offline counter**, clock tricks, the vendor panel, the Supabase tables |
+| [docs/license_setup.md](docs/license_setup.md) | one-time Supabase setup for licensing |
+| [docs/GOOGLE_SYNC.md](docs/GOOGLE_SYNC.md) | Google account sync and Drive backup: the premium switch, restoring on a new PC, retention of 10, retry after 10 s, conflicts |
+| [docs/google_setup.md](docs/google_setup.md) | one-time Google Cloud setup (Desktop client, consent screen) |
+| [docs/LOANS.md](docs/LOANS.md) | personal loans: lifecycle, interest maths, the **lending policy**, exceptions, deletions, portfolio quality, what is not built yet |
+| [docs/ENTRY_RULES.md](docs/ENTRY_RULES.md) | exactly what the program accepts and refuses when money, dates and lists are entered |
+| [docs/PERFORMANCE.md](docs/PERFORMANCE.md) | how speed is measured, the numbers, what was changed, what is still open |
+| [docs/TESTING.md](docs/TESTING.md) | every test suite, the password variables, the fake servers, the benchmark, testing the real app |
+| [docs/AUDIT_2026-11.md](docs/AUDIT_2026-11.md) | the November 2026 audit: findings, fixes, open items |
+| [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) · [docs/UI_GUIDE.md](docs/UI_GUIDE.md) · [docs/RELEASE.md](docs/RELEASE.md) | architecture and data contract, UI conventions, building and releasing |
 
 ---
 
@@ -48,6 +67,7 @@ Get the latest files from **[Releases](https://github.com/m-asifiqbal/bondhu-fun
 | `BondhuFund-Setup-<version>.exe` | **Recommended.** Installs for the current Windows user. No admin rights needed. Creates desktop and Start-menu shortcuts. |
 | `BondhuFund-Portable-<version>.exe` | You want to run it without installing, for example from a USB drive. |
 
+- **Pre-releases:** versions marked *pre-release* on the Releases page (for example `2.9.0 test 1`) are test builds; **Latest** always points to the newest finished release. A build made with licensing switched on asks non-owner accounts for an activation PIN ([docs/LICENSING.md](docs/LICENSING.md)).
 - **Requirements:** Windows 10 or 11, 64-bit. No internet, server, database engine or runtime to install.
 - **First start:** sign in with `admin` / `admin` (you'll be asked to set a new password). The database starts empty. Add your first member, **restore a backup** (Backup & Restore → Restore from file), or click **Explore with demo data** to look around.
 - **Upgrading:** run the newer Setup file. Your data is kept, and older databases and backups are upgraded automatically.
@@ -123,11 +143,26 @@ Get the latest files from **[Releases](https://github.com/m-asifiqbal/bondhu-fun
 - sold investments have their sale details;
 - the settings;
 - **reconciliation:** opening balances + money in − money out must equal cash in hand, and member totals must equal total contributions.
+### Personal loans
+Loans to members with a calculator (reducing, flat or interest-free), a draft that moves no money until the **signed consent paper** is uploaded, guarantors (member or outsider with National ID), repayments, early closure and write-off, all booked into the fund's accounts. New in 2.9.0: an **enforced lending policy** (open loans per member, no loan for an overdue or written-off borrower, minimum membership, arrears limit, share of the fund, cash reserve, guarantees per member) where **only an Admin can approve an exception** with a written reason; deletions need a reason (and an Admin for a whole loan); and a **portfolio quality** card (overdue by age, PAR 30/60/90, defaulters with guarantor). Details: [docs/LOANS.md](docs/LOANS.md).
+
+### Fines
+A separate screen for every late fee and loan penalty: who paid, when, how late, and where the fine money sits (the fund's own reserve), with a proof that the books balance.
+
+### Licence and remote lock (for the vendor)
+Activation PINs, monthly or day-based paid-until dates, remote suspend, limits on computers and users, an allow-list of usernames, and an `iqbal_labs`-only **License Control** panel on a free Supabase project. Offline copies keep working, but an **offline counter** (a timer that changing the date cannot reduce) locks a copy after 14 days of use without a check-in, a PC clock set back or an edited licence record locks it until one online check-in, and offline stretches are reported to the panel. Details: [docs/LICENSING.md](docs/LICENSING.md).
+
+### Google account sync and Drive backup (premium)
+Keeps the fund in the user's own Google Drive (a hidden app-data folder): automatic backup, a **new PC restores everything by signing in**, only the newest 10 copies are kept, failed uploads retry after 10 seconds, conflicts never overwrite, and an optional sync PIN encrypts the cloud copy. Only `iqbal_labs` can switch the feature on or off for a computer. Details: [docs/GOOGLE_SYNC.md](docs/GOOGLE_SYNC.md).
+
+### Entry checks
+Impossible or future dates, infinite or absurd amounts, a payment for a month before the member joined, and values outside the Master Data lists are refused in the main process; a second payment for the same month and spending more than the cash in hand **ask before they proceed**. Details: [docs/ENTRY_RULES.md](docs/ENTRY_RULES.md).
+
 ### Experience
 - **English / বাংলা** everywhere: labels, data values (statuses, categories, methods), dates, months and digits (০১২৩…).
 - **Light / dark** themes, a collapsible sidebar, and layouts that work down to 960 px wide.
 - **Searchable dropdowns** everywhere, a **click-anywhere date picker** (dd/mm/yyyy, Saturday-first weeks), and soft frosted dialogs.
-- Works **100% offline**. Fonts are bundled, and there are no network calls.
+- Works **100% offline**. Fonts are bundled. The only features that use the network are optional: the licence check (licensed builds) and Google sync (premium, off by default); neither is needed to use the fund's books.
 
 ---
 
@@ -314,27 +349,28 @@ bondhu-fund/
 ├─ electron/
 │  ├─ main.ts            # app lifecycle, window, IPC, backup/restore/snapshots, file save (CSV/PDF)
 │  ├─ preload.ts         # window.electronAPI (contextBridge)
-│  └─ database.ts        # schema, migrations, all queries & business rules, demo data
+│  ├─ database.ts        # schema, migrations, all queries & business rules, entry checks, loan policy, demo data
+│  ├─ loans.ts           # pure loan maths (schedules, interest methods)
+│  ├─ exporter.ts · excel.ts · backup-crypto.ts   # PDFs / consent paper, Excel import & export, encrypted backups
+│  ├─ license.ts         # licence client + vendor panel logic (offline counter, signed record) - no Electron imports
+│  ├─ license-main.ts    # licence glue: secure storage, counter timer, sign-in gate
+│  ├─ google.ts · gsync.ts · google-main.ts   # Google sign-in & Drive, the sync engine (retry, retention), IPC + premium switch
 ├─ src/
 │  ├─ main.tsx · App.tsx # entry, lazy routes, error boundary
 │  ├─ context/AppContext.tsx
-│  ├─ services/db.ts     # renderer API client (typed)
+│  ├─ services/db.ts     # renderer API client (typed), incl. the "replace? / record anyway?" confirmations
 │  ├─ types/index.ts     # shared TypeScript types
-│  ├─ views/             # Overview, Members, Collections, Expenses, Investments, EntryCenter,
-│  │                     # Reports, MasterData, UserManagement, UserProfile, BackupRestore, Settings
-│  ├─ components/
-│  │  ├─ common/         # SearchableSelect, DatePicker, Modal, MonthPicker, CustomChartTooltip
-│  │  ├─ charts/         # EChart + ChartCard, palette
-│  │  ├─ layout/         # Sidebar, TopBar
-│  │  ├─ modals/         # RecordPaymentModal
-│  │  └─ reports/        # report builders + table view
-│  ├─ locales/           # common, shell, members, finance, reports, admin (EN/BN dictionaries)
-│  └─ utils/             # date.ts, i18n.ts, image.ts
-├─ scripts/
-│  ├─ db-test.js              # database test suite (npm run test:db)
-│  └─ capture-screenshots.js  # regenerates the 3 docs/screenshots (npm run screenshots)
-├─ build/                # icon.ico / icon.png (installer + app icon)
-├─ docs/                 # ARCHITECTURE.md · UI_GUIDE.md · RELEASE.md · screenshots/
+│  ├─ views/             # Overview, Members, Collections, Fines, Expenses, Investments, InvestmentReturns, PersonalLoans,
+│  │                     # EntryCenter, Reports, MasterData, UserManagement, UserProfile, BackupRestore, Settings, LicenseControl
+│  ├─ components/        # common, charts, layout, modals, reports, loans, access, GoogleSyncCard, DriveBackupCard
+│  ├─ locales/           # EN/BN dictionaries (common, shell, members, finance, reports, admin, loans, fines, google, license, ...)
+│  └─ utils/             # date.ts, i18n.ts, image.ts, licenseStore.ts
+├─ scripts/              # test suites (*-test.js), fake-supabase.js, fake-google.js, perf-bench.js, capture-*.js, bundle-electron.js
+├─ config/               # *.example.json (copy to supabase.json / google.json; those are git-ignored)
+├─ build/                # icons, code-signing trust files
+├─ docs/                 # LICENSING · GOOGLE_SYNC · LOANS · ENTRY_RULES · PERFORMANCE · TESTING · AUDIT · ARCHITECTURE · UI_GUIDE · RELEASE
+│  └─ supabase/license.sql   # the licence server schema and functions
+├─ CHANGELOG.md
 └─ package.json          # scripts + electron-builder config ("build")
 ```
 
@@ -447,20 +483,20 @@ npm run electron:dev                     # try it in both English and বাং�
 
 ## 🧪 Testing
 
-- **`npm run test:db`** runs the compiled database layer in plain Node. It checks 25+ items, among them:
-  - a fresh database starts empty with defaults;
-  - adding members, including duplicate-code handling;
-  - a second payment for the same month replaces the first, so nothing is counted twice;
-  - future dates are rejected;
-  - deleting a member who has payments is blocked;
-  - category renames update existing records, and categories in use can't be deleted;
-  - realized gain on sold investments;
-  - demo data, performance budgets (overview under 1.5 s), and **ledger = cash in hand reconciliation**;
-  - backup → reset → restore round trip, and rejecting an invalid file while leaving data intact.
+Every suite runs in plain Node against the compiled main-process code, with fake Supabase and Google servers; nothing touches your data or the internet. Full guide: **[docs/TESTING.md](docs/TESTING.md)**.
 
-  Pass an old `.db` to also test migration.
-- **`npm run screenshots`** is also a smoke test of the main screens: it signs in, loads demo data, and logs any console errors.
-- **Manual checklist before a release:** see [docs/RELEASE.md](docs/RELEASE.md).
+| Command | Covers |
+|---|---|
+| `npm run test:db` | members, payments, master data, demo data, **ledger = cash in hand**, backup/restore |
+| `npm run test:loans` | loan maths, books, repayments, write-off, consent, **lending policy**, deletions, portfolio ageing |
+| `npm run test:fines` · `test:settle` · `test:review` | the fine register and books proof · member settlement to the paisa · committee reviews |
+| `npm run test:fuzz` | hundreds of random operations; the **books balance after every step** |
+| `npm run test:audit` · `test:nid` · `test:import` · `test:backup` · `test:access` | account audit · National IDs · Excel import · encrypted backups · roles and permissions |
+| `npm run test:gsync` | Google sync: push, pull, conflicts, retention of 10, retry after 10 s, premium rule |
+| `npm run test:license` | licensing: every lock reason, offline counter, clock tricks, signed record |
+| `npm run bench` | **performance targets** on a 500-member, 33,000-payment fund ([docs/PERFORMANCE.md](docs/PERFORMANCE.md)) |
+
+Some checks sign in as the built-in accounts and need `BONDHU_SYSTEM_PASSWORD` / `BONDHU_ADMIN_PASSWORD` in the environment (never in a file); without them those checks print `SKIP`. `npm run screenshots` is also a smoke test of the main screens. Manual checklist before a release: [docs/RELEASE.md](docs/RELEASE.md).
 
 ---
 
@@ -526,8 +562,10 @@ Then create a GitHub Release with tag `vX.Y.Z` and attach both `.exe` files.
 ---
 
 ## 🗺 Roadmap
+- [ ] Loan **approval workflow** (rejected / withdrawn states, a second approver) and printable repayment receipts, schedules and borrower statements ([docs/LOANS.md](docs/LOANS.md), section 10).
+- [ ] A loan **penalty engine** (grace period, rate, cap, waivers), recovery after write-off, rescheduling and early-closure interest.
+- [ ] Faster Overview trend and reports on very large funds ([docs/PERFORMANCE.md](docs/PERFORMANCE.md), section 7).
 - [ ] Bangla text in the downloadable payment voucher (`.txt`).
-- [ ] Optional encrypted backups.
 - [ ] Auto-update from GitHub Releases.
 - [ ] SMS or WhatsApp due reminders.
 

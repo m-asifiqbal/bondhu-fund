@@ -81,3 +81,38 @@ Files: `saveTextFile(name, content, filters?)` (native Save dialog; CSV gets UTF
 - `.../database/backups/Auto_YYYY-MM-DD.db` — daily automatic snapshot (rotated, default keep 14).
 - `.../database/backups/PreRestore_*.db` — taken automatically before every restore (keep 10).
 - Old backups (including prototype/schema v0 files) are upgraded automatically on restore.
+
+## Modules added in 2.8 and 2.9
+
+| Module | Process | Files | Reference |
+|---|---|---|---|
+| Licence client and gate | main | `electron/license.ts` (pure), `electron/license-main.ts` (secure storage, timers, IPC `license:call`) | [LICENSING.md](LICENSING.md) |
+| Licence vendor panel | renderer + main | `src/views/LicenseControlView.tsx`, `LicenseAdmin` in `license.ts` | [LICENSING.md](LICENSING.md) |
+| Google sign-in and Drive | main | `electron/google.ts` (OAuth with PKCE, Drive appDataFolder) | [GOOGLE_SYNC.md](GOOGLE_SYNC.md) |
+| Sync engine | main | `electron/gsync.ts` (push / pull / conflict, retention, retry; no Electron imports, fully tested) | [GOOGLE_SYNC.md](GOOGLE_SYNC.md) |
+| Google IPC and premium switch | main | `electron/google-main.ts` (IPC `google:call`, background sync) | [GOOGLE_SYNC.md](GOOGLE_SYNC.md) |
+| Loan engine | main | `electron/loans.ts` (pure maths), loan section of `database.ts` (policy, booking) | [LOANS.md](LOANS.md) |
+| Entry checks | main | helpers before `validateMember` in `database.ts` | [ENTRY_RULES.md](ENTRY_RULES.md) |
+
+### Three IPC entry points
+- `db:call` (the fund's data): every call goes through `authorize(method, args)` (session, role, module permission) before the function runs.
+- `license:call`: `status`, `activate`, `register`, `check` are open to any window (the lock screen needs them); every `admin…` operation is `iqbal_labs` only.
+- `google:call`: first the **premium gate** (`premiumGate`), then the user's module permission (`google_sync` / `drive_backup`), then `iqbal_labs` for system operations.
+
+### What is kept on the computer (`%APPDATA%\Bondhu Fund`)
+
+| Path | Content |
+|---|---|
+| `database/` | the SQLite file, automatic backups and snapshots |
+| `license/state.json` | the licence record (HMAC-signed): last confirmed time, the offline counter, per-licence snapshots |
+| `license/vault.json` | sealed (Windows DPAPI): device tokens, the record's signing key, the vendor's Supabase session |
+| `google/` | `account.json`, `config.json`, `sync-state.json`, `vault.json` (sync PIN, premium switch) |
+| `loan-documents/` | uploaded signed consent papers |
+
+### Business rules live in the main process
+The screens only ask. Validation, permissions, the lending policy, premium and licence decisions are all enforced in `electron/`, so no screen can bypass them. Two flows ask the user a question and repeat the call with a flag (`replace`, `allow_overdraft`); see [ENTRY_RULES.md](ENTRY_RULES.md) section 9.
+
+### Accounting invariants (checked by tests)
+- Fund balance at cost = what members are owed + the fund's own reserve; the reserve = fines + penalties − expenses − settlement adjustments + unshared benefit.
+- Ledger = cash in hand; the fine register = the fines in payments and loan repayments; every loan schedule sums exactly (Σ principal = amount, Σ installments = principal + interest).
+- The randomised stress test checks all of these after **every** operation.
